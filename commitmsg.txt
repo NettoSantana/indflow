@@ -1,8 +1,5 @@
-﻿feat: redesign premium do card de produção
-
-- novo layout premium para o módulo Produção
-- card com sombra, gradiente, profundidade profissional
-- header AUTOMÁTICO estilizado (verde industrial)
-- valor central grande, clean e com text-shadow
-- atualização completa do CSS global
-- estrutura preparada para múltiplas máquinas e realtime futuramente
+﻿Atualização do módulo Produção:
+- Novo layout profissional do card de máquina
+- Centralização correta dos elementos
+- CSS aprimorado (sombra, hover, responsividade)
+- Estrutura pronta para replicar múltiplos cards
