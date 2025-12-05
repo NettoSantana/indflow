@@ -1,0 +1,79 @@
+/* ===========================
+   ESTILO BASE NETTSAN
+=========================== */
+body {
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-family: system-ui, Arial, sans-serif;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* TOPO */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+}
+
+.logo {
+  font-weight: 800;
+  font-size: 20px;
+  color: #38bdf8;
+}
+
+.topbar-right {
+  display: flex;
+  gap: 16px;
+}
+
+.btn-ghost {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  text-decoration: none;
+  transition: 0.2s;
+}
+
+.btn-ghost:hover {
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+
+/* ÁREA PRINCIPAL */
+.main-area {
+  flex: 1;
+  padding: 20px;
+}
+
+/* FOOTER */
+.footer {
+  padding: 20px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 14px;
+  border-top: 1px solid #334155;
+}
+
+/* FLASH */
+.flash-area { padding: 16px; }
+.flash { padding: 12px; border-radius: 8px; margin-bottom: 10px; }
+.flash-error { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.5); }
+.flash-success { background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.5); }
+
+/* MOBILE MENU */
+@media (max-width: 640px) {
+  .topbar { flex-direction: column; gap: 12px; }
+  .topbar-right { flex-direction: column; width: 100%; }
+  .btn-ghost { width: 100%; text-align: center; }
+}

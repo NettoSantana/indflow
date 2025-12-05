@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>{% block title %}Nettsan Base{% endblock %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+  <div class="app-shell">
+
+    <!-- HEADER -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="logo">NETTSAN</span>
+      </div>
+
+      <div class="topbar-right">
+        <a href="#" class="btn-ghost">Home</a>
+        <a href="#" class="btn-ghost">Sobre</a>
+        <a href="#" class="btn-ghost">Contato</a>
+      </div>
+    </header>
+
+    <!-- FLASH MESSAGES -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-area">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <!-- CONTEÚDO -->
+    <main class="main-area">
+      {% block content %}{% endblock %}
+    </main>
+
+    <!-- FOOTER -->
+    <footer class="footer">
+      ©️ {{ 2025 }} Nettsan • Base Template
+    </footer>
+
+  </div>
+</body>
+</html>
