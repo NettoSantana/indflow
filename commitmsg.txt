@@ -1,1 +1,8 @@
-style: reset completo do CSS global + card industrial funcionando
+﻿feat: redesign premium do card de produção
+
+- novo layout premium para o módulo Produção
+- card com sombra, gradiente, profundidade profissional
+- header AUTOMÁTICO estilizado (verde industrial)
+- valor central grande, clean e com text-shadow
+- atualização completa do CSS global
+- estrutura preparada para múltiplas máquinas e realtime futuramente
