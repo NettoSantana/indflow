@@ -1,79 +1,64 @@
-/* ===========================
-   ESTILO BASE NETTSAN
-=========================== */
+/* ================================
+   PALETA NETTSAN TECHNOLOGY
+   Azul corporativo: #1E4B7A
+   Cinza técnico:    #4A4F54
+   Branco premium:   #F5F7FA
+================================ */
+
 body {
   margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: system-ui, Arial, sans-serif;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #F5F7FA;
+  color: #1E4B7A;
 }
 
-.app-shell {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-
-/* TOPO */
-.topbar {
+/* NAVBAR */
+.navbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 20px;
-  background: #1e293b;
-  border-bottom: 1px solid #334155;
+  background: #ffffff;
+  border-bottom: 1px solid #d1d5db;
+  padding: 8px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 1000;
 }
 
+/* LOGO */
 .logo {
-  font-weight: 800;
-  font-size: 20px;
-  color: #38bdf8;
+  height: 42px;
+  margin-right: 12px;
 }
 
-.topbar-right {
+.nav-left {
   display: flex;
-  gap: 16px;
+  align-items: center;
 }
 
-.btn-ghost {
-  padding: 6px 12px;
-  border-radius: 6px;
-  background: #1e293b;
-  border: 1px solid #334155;
-  color: #e2e8f0;
+.system-name {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1E4B7A;
+}
+
+/* LINKS DO MENU SUPERIOR */
+.nav-links a {
+  margin-left: 22px;
   text-decoration: none;
+  font-size: 16px;
+  color: #4A4F54;
+  font-weight: 500;
   transition: 0.2s;
 }
 
-.btn-ghost:hover {
-  border-color: #38bdf8;
-  color: #38bdf8;
+.nav-links a:hover {
+  color: #1E4B7A;
+  border-bottom: 2px solid #1E4B7A;
+  padding-bottom: 3px;
 }
 
 /* ÁREA PRINCIPAL */
-.main-area {
-  flex: 1;
-  padding: 20px;
-}
-
-/* FOOTER */
-.footer {
-  padding: 20px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 14px;
-  border-top: 1px solid #334155;
-}
-
-/* FLASH */
-.flash-area { padding: 16px; }
-.flash { padding: 12px; border-radius: 8px; margin-bottom: 10px; }
-.flash-error { background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.5); }
-.flash-success { background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.5); }
-
-/* MOBILE MENU */
-@media (max-width: 640px) {
-  .topbar { flex-direction: column; gap: 12px; }
-  .topbar-right { flex-direction: column; width: 100%; }
-  .btn-ghost { width: 100%; text-align: center; }
+.content-area {
+  padding: 30px;
 }
