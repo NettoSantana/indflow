@@ -1,0 +1,6 @@
+﻿feat(ui): aplicar logo da NettSan Technology e layout premium
+
+- Navbar corporativa com logo
+- Tema claro baseado na identidade da NettSan
+- CSS profissional modernizado
+- Ajustes visuais padrão SaaS
