@@ -1,6 +1,6 @@
-﻿fix: correção definitiva do header e logo no layout global
-
-- navbar com altura fixa
-- tamanho correto da logo
-- remoção de margens quebradas
-- alinhamento padronizado
+﻿style: redesign completo do layout global e card industrial
+- navbar premium
+- grid centralizado
+- card com sombra e gradiente
+- tipografia moderna
+- estrutura escalável para múltiplas máquinas

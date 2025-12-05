@@ -1,109 +1,45 @@
-Set-Content "static/style.css" @"
-/* =========================
-   RESET & GLOBAL
-========================= */
-
-body {
-  margin: 0;
-  padding: 0;
-  font-family: 'Segoe UI', Arial, sans-serif;
-  background: #f5f7fa;
-  color: #1a1a1a;
-}
-
-/* =========================
-   NAVBAR PROFISSIONAL
-========================= */
-
-.navbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 14px 28px;
-  background: #ffffff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-.navbar img.logo {
-  height: 44px;
-}
-
-.nav-links a {
-  margin-left: 22px;
-  font-weight: 600;
-  color: #1E4B7A;
-  text-decoration: none;
-  transition: color .2s;
-}
-
-.nav-links a:hover {
-  color: #16385a;
-}
-
-/* =========================
-   PAGE CONTAINER
-========================= */
-
-.page {
-  max-width: 1200px;
-  margin: 50px auto;
-  padding: 0 20px;
-}
-
-/* =========================
-   CARD DE PRODUÇÃO (premium)
-========================= */
-
+/* LAYOUT DO CARD DE PRODUÇÃO */
 .machine-grid {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-top: 40px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 40px;
 }
 
 .machine-card {
-  width: 260px;
-  height: 310px;
-  background: linear-gradient(180deg, #4A79C7 0%, #365A9E 100%);
-  border-radius: 22px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 8px 18px rgba(0,0,0,0.18);
-  transition: transform .2s ease;
-}
-
-.machine-card:hover {
-  transform: translateY(-6px);
+    width: 240px;
+    height: 300px;
+    background: linear-gradient(180deg, #3f6ec4, #274d99);
+    border-radius: 22px;
+    box-shadow: 0px 8px 20px rgba(0,0,0,0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    text-align: center;
 }
 
 .machine-status {
-  text-align: center;
-  padding: 12px 0;
-  font-size: 20px;
-  font-weight: bold;
-  color: #ffffff;
+    padding: 12px;
+    font-size: 20px;
+    font-weight: bold;
+    color: white;
 }
 
 .machine-status.automatic {
-  background-color: #3CB371;
+    background: #2e9e44;
 }
 
 .machine-status.manual {
-  background-color: #C84C4C;
+    background: #c62828;
 }
 
 .machine-value {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  font-size: 84px;
-  font-weight: 800;
-  color: #ffffff;
-  text-shadow: 0px 4px 8px rgba(0,0,0,0.3);
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 65px;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0px 3px 8px rgba(0,0,0,0.4);
 }
-"@
