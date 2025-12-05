@@ -1,6 +1,1 @@
-﻿feat: produção - criação do primeiro card industrial (AUTOMÁTICO 70%)
-
-- módulo produção atualizado com card base
-- CSS industrial adicionado (cores, layout, arredondamento)
-- estrutura inicial para replicação de máquinas
-- pronto para evolução dinâmica
+﻿fix: correção visual do card industrial no módulo Produção
