@@ -1,6 +1,1 @@
-﻿style: redesign completo do layout global e card industrial
-- navbar premium
-- grid centralizado
-- card com sombra e gradiente
-- tipografia moderna
-- estrutura escalável para múltiplas máquinas
+﻿ajuste: limpeza dos templates e conserto da tela de Produção
