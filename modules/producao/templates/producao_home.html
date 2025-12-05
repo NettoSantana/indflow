@@ -1,20 +1,24 @@
-Set-Content modules/producao/templates/producao_home.html @"
+Set-Content "modules/producao/templates/producao_home.html" @"
 {% extends "base.html" %}
 {% block title %}Produção — IndFlow{% endblock %}
 
 {% block content %}
-<div class="page">
+<div class='page'>
 
   <h1 style="margin-bottom: 15px;">Produção</h1>
 
-  <div class="machine-card">
+  <div class='machine-wrapper'>
 
-      <div class="machine-header automatic">
-          AUTOMÁTICO
-      </div>
+      <div class="machine-card">
 
-      <div class="machine-body">
-          <div class="machine-value">70%</div>
+          <div class="machine-header automatic">
+              AUTOMÁTICO
+          </div>
+
+          <div class="machine-body">
+              <div class="machine-value">70%</div>
+          </div>
+
       </div>
 
   </div>

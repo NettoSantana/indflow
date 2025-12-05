@@ -1,6 +1,6 @@
-﻿feat(ui): aplicar logo da NettSan Technology e layout premium
+﻿feat: produção - criação do primeiro card industrial (AUTOMÁTICO 70%)
 
-- Navbar corporativa com logo
-- Tema claro baseado na identidade da NettSan
-- CSS profissional modernizado
-- Ajustes visuais padrão SaaS
+- módulo produção atualizado com card base
+- CSS industrial adicionado (cores, layout, arredondamento)
+- estrutura inicial para replicação de máquinas
+- pronto para evolução dinâmica
