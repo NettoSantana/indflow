@@ -1,64 +1,46 @@
-/* ================================
-   PALETA NETTSAN TECHNOLOGY
-   Azul corporativo: #1E4B7A
-   Cinza técnico:    #4A4F54
-   Branco premium:   #F5F7FA
-================================ */
+Add-Content static/style.css @"
 
-body {
-  margin: 0;
-  font-family: "Segoe UI", Arial, sans-serif;
-  background: #F5F7FA;
-  color: #1E4B7A;
+.machine-card {
+  width: 220px;
+  height: 270px;
+  background: #3f6db2; /* azul industrial */
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
 }
 
-/* NAVBAR */
-.navbar {
+.machine-header {
+  text-align: center;
+  padding: 12px 0;
+  font-size: 22px;
+  font-weight: bold;
+  color: white;
+}
+
+.machine-header.automatic {
+  background: #4CAF50; /* verde */
+}
+
+.machine-header.manual {
+  background: #D9534F; /* vermelho */
+}
+
+.machine-body {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
-  background: #ffffff;
-  border-bottom: 1px solid #d1d5db;
-  padding: 8px 20px;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
+  height: calc(100% - 60px);
 }
 
-/* LOGO */
-.logo {
-  height: 42px;
-  margin-right: 12px;
+.machine-value {
+  font-size: 82px;
+  font-weight: bold;
+  color: black;
 }
 
-.nav-left {
+.page {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 20px;
 }
-
-.system-name {
-  font-size: 20px;
-  font-weight: 600;
-  color: #1E4B7A;
-}
-
-/* LINKS DO MENU SUPERIOR */
-.nav-links a {
-  margin-left: 22px;
-  text-decoration: none;
-  font-size: 16px;
-  color: #4A4F54;
-  font-weight: 500;
-  transition: 0.2s;
-}
-
-.nav-links a:hover {
-  color: #1E4B7A;
-  border-bottom: 2px solid #1E4B7A;
-  padding-bottom: 3px;
-}
-
-/* ÁREA PRINCIPAL */
-.content-area {
-  padding: 30px;
-}
+"@

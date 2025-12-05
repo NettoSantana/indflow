@@ -1,9 +1,24 @@
+Set-Content modules/producao/templates/producao_home.html @"
 {% extends "base.html" %}
-{% block title %}ProduÁ„o ó IndFlow{% endblock %}
+{% block title %}Produ√ß√£o ‚Äî IndFlow{% endblock %}
 
 {% block content %}
 <div class="page">
-  <h1>MÛdulo de ProduÁ„o</h1>
-  <p>Painel inicial do mÛdulo de produÁ„o.</p>
+
+  <h1 style="margin-bottom: 15px;">Produ√ß√£o</h1>
+
+  <div class="machine-card">
+
+      <div class="machine-header automatic">
+          AUTOM√ÅTICO
+      </div>
+
+      <div class="machine-body">
+          <div class="machine-value">70%</div>
+      </div>
+
+  </div>
+
 </div>
 {% endblock %}
+"@
