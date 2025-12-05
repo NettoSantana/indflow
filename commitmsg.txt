@@ -1,1 +1,1 @@
-﻿fix: correção visual do card industrial no módulo Produção
+style: reset completo do CSS global + card industrial funcionando

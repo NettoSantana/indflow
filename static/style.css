@@ -1,87 +1,52 @@
 Set-Content "static/style.css" @"
 /* ===========================
-   BASE GERAL DO SISTEMA
+   CARD PREMIUM — PRODUÇÃO
 =========================== */
 
-body {
-  margin: 0;
-  padding: 0;
-  background: #f3f5f7;
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-.navbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 24px;
-  background: white;
-  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
-}
-
-.nav-left img {
-  height: 48px;
-}
-
-.nav-right a {
-  margin-left: 20px;
-  text-decoration: none;
-  font-weight: bold;
-  color: #1E4B7A;
-}
-
-.page {
-  max-width: 1200px;
-  margin: 40px auto;
-  padding: 10px;
-}
-
-/* ===========================
-   CARD INDUSTRIAL — PRODUÇÃO
-=========================== */
-
-.machine-wrapper {
+.machine-area {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-top: 30px;
+  margin-top: 40px;
 }
 
-.machine-card {
-  width: 220px;
-  height: 270px;
-  background: #3f6db2;
-  border-radius: 28px;
+.machine-card.new {
+  width: 240px;
+  height: 300px;
+  background: linear-gradient(180deg, #4A79C7 0%, #3E69B0 100%);
+  border-radius: 26px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
 }
 
-.machine-header {
+.machine-status {
   text-align: center;
   padding: 12px 0;
-  font-size: 22px;
-  font-weight: bold;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   color: white;
+  border-bottom: 1px solid rgba(255,255,255,0.2);
 }
 
-.machine-header.automatic {
-  background: #4CAF50;
+.machine-status.automatic {
+  background: #46A84F;
 }
 
-.machine-header.manual {
-  background: #D9534F;
-}
-
-.machine-body {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: calc(100% - 60px);
+.machine-status.manual {
+  background: #C94B46;
 }
 
 .machine-value {
-  font-size: 82px;
-  font-weight: bold;
-  color: black;
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 90px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0px 3px 6px rgba(0,0,0,0.3);
 }
 "@
