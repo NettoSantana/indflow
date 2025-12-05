@@ -1,1 +1,1 @@
-﻿ajuste: limpeza dos templates e conserto da tela de Produção
+﻿layout premium verdadeiro — container global + ui alinhada + card profissional
