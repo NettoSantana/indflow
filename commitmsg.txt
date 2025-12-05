@@ -1,5 +1,6 @@
-﻿Atualização do módulo Produção:
-- Novo layout profissional do card de máquina
-- Centralização correta dos elementos
-- CSS aprimorado (sombra, hover, responsividade)
-- Estrutura pronta para replicar múltiplos cards
+﻿fix: correção definitiva do header e logo no layout global
+
+- navbar com altura fixa
+- tamanho correto da logo
+- remoção de margens quebradas
+- alinhamento padronizado
