@@ -141,3 +141,76 @@ h1 {
         0px 4px 8px rgba(0, 0, 0, 0.45),
         0px 14px 24px rgba(0, 0, 0, 0.28);
 }
+/* ============================
+   DASHBOARD INDUSTRIAL PREMIUM
+============================ */
+.page-dashboard {
+    width: 100%;
+    padding: 40px 80px;
+}
+
+.page-header {
+    margin-bottom: 40px;
+}
+
+.page-header h1 {
+    font-size: 38px;
+    font-weight: 800;
+    color: #1f2d55;
+}
+
+/* Linha de cards */
+.cards-row {
+    display: flex;
+    justify-content: flex-start; /* título à esquerda, card alinhado à direita */
+    gap: 40px;
+    padding-right: 120px; /* empurra o card p/ direita */
+}
+
+/* CARD PREMIUM */
+.machine-card {
+    width: 260px;
+    height: 310px;
+    background: linear-gradient(180deg, #6a93ff 0%, #3f63c9 100%);
+    border-radius: 26px;
+    box-shadow: 0px 12px 28px rgba(0,0,0,0.18);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    text-align: center;
+    transition: 0.25s ease-in-out;
+    cursor: pointer;
+}
+
+.machine-card:hover {
+    transform: translateY(-8px);
+    box-shadow: 0px 20px 36px rgba(0,0,0,0.22);
+}
+
+.machine-status {
+    padding: 16px;
+    font-size: 20px;
+    font-weight: 800;
+    color: white;
+}
+
+.machine-status.automatic {
+    background: #23a346;
+}
+
+.machine-status.manual {
+    background: #c62828;
+}
+
+.machine-value {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 85px;
+    font-weight: 900;
+    color: white;
+    text-shadow: 
+        0px 3px 6px rgba(0,0,0,0.25),
+        0px 10px 20px rgba(0,0,0,0.20);
+}
