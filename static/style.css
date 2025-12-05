@@ -1,216 +1,60 @@
-/* ============================
-   RESET E BASE
-============================ */
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    font-family: "Segoe UI", Arial, sans-serif;
-}
+/* ===================================================
+   CARD PREMIUM INDUSTRIAL (padrão da imagem enviada)
+=================================================== */
 
-body {
-    background: #f4f6fa;
-    color: #1a1a1a;
-}
-
-/* ============================
-   CONTAINER GLOBAL
-============================ */
-.container {
-    width: 100%;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 40px 20px;
-}
-
-/* ============================
-   NAVBAR SUPERIOR
-============================ */
-.navbar {
-    width: 100%;
-    height: 85px;
-    background: white;
-    border-bottom: 1px solid #d9dfeb;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 42px;
-    position: sticky;
-    top: 0;
-    z-index: 50;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-}
-
-.nav-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
-.logo {
-    height: 62px;
-}
-
-.system-name {
-    font-size: 28px;
-    font-weight: 700;
-    color: #1d2c55;
-    letter-spacing: -0.5px;
-}
-
-.nav-links a {
-    margin-left: 32px;
-    text-decoration: none;
-    font-size: 18px;
-    color: #1f2d55;
-    font-weight: 500;
-    transition: 0.2s ease;
-}
-
-.nav-links a:hover {
-    color: #3a63dd;
-    transform: translateY(-2px);
-}
-
-/* ============================
-   TÍTULOS
-============================ */
-h1 {
-    font-size: 40px;
-    font-weight: 800;
-    margin-bottom: 40px;
-    color: #1f2d55;
-    letter-spacing: -0.5px;
-}
-
-/* ============================
-   GRID DE MÁQUINAS
-============================ */
 .machine-grid {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
+    margin-top: 40px;
 }
 
-/* ============================
-   CARD DE PRODUÇÃO — PREMIUM
-============================ */
 .machine-card {
-    width: 330px;
-    height: 400px;
+    width: 240px;
+    height: 300px;
 
-    background: linear-gradient(180deg, #6da1ff 0%, #3d5bc7 100%);
-    border-radius: 32px;
+    background: linear-gradient(180deg, #5d8dfd 0%, #3255b4 100%);
+    border-radius: 22px;
 
-    box-shadow: 0px 12px 28px rgba(0,0,0,0.18);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    text-align: center;
 
-    cursor: pointer;
-    transition: transform 0.30s ease, box-shadow 0.30s ease;
-}
+    /* Sombra premium */
+    box-shadow: 0px 12px 28px rgba(0, 0, 0, 0.22);
 
-.machine-card:hover {
-    transform: translateY(-12px);
-    box-shadow: 0px 22px 42px rgba(0,0,0,0.25);
-}
-
-.machine-status {
-    padding: 20px;
-    font-size: 24px;
-    font-weight: 900;
-    color: white;
-    letter-spacing: 0.8px;
-}
-
-.machine-status.automatic { background: #28b84a; }
-.machine-status.manual    { background: #d23030; }
-
-.machine-value {
-    flex: 1;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-
-    font-size: 105px;
-    font-weight: 900;
-    color: white;
-
-    text-shadow:
-        0px 4px 8px rgba(0, 0, 0, 0.45),
-        0px 14px 24px rgba(0, 0, 0, 0.28);
-}
-/* ============================
-   DASHBOARD INDUSTRIAL PREMIUM
-============================ */
-.page-dashboard {
-    width: 100%;
-    padding: 40px 80px;
-}
-
-.page-header {
-    margin-bottom: 40px;
-}
-
-.page-header h1 {
-    font-size: 38px;
-    font-weight: 800;
-    color: #1f2d55;
-}
-
-/* Linha de cards */
-.cards-row {
-    display: flex;
-    justify-content: flex-start; /* título à esquerda, card alinhado à direita */
-    gap: 40px;
-    padding-right: 120px; /* empurra o card p/ direita */
-}
-
-/* CARD PREMIUM */
-.machine-card {
-    width: 260px;
-    height: 310px;
-    background: linear-gradient(180deg, #6a93ff 0%, #3f63c9 100%);
-    border-radius: 26px;
-    box-shadow: 0px 12px 28px rgba(0,0,0,0.18);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    text-align: center;
-    transition: 0.25s ease-in-out;
-    cursor: pointer;
+    transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 
 .machine-card:hover {
     transform: translateY(-8px);
-    box-shadow: 0px 20px 36px rgba(0,0,0,0.22);
+    box-shadow: 0px 20px 38px rgba(0, 0, 0, 0.28);
 }
 
 .machine-status {
-    padding: 16px;
-    font-size: 20px;
+    height: 55px;
+    background: #23a93d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    font-size: 18px;
     font-weight: 800;
     color: white;
-}
-
-.machine-status.automatic {
-    background: #23a346;
-}
-
-.machine-status.manual {
-    background: #c62828;
+    letter-spacing: 0.5px;
 }
 
 .machine-value {
     flex: 1;
+
     display: flex;
-    justify-content: center;
     align-items: center;
-    font-size: 85px;
+    justify-content: center;
+
+    font-size: 70px;
     font-weight: 900;
     color: white;
-    text-shadow: 
-        0px 3px 6px rgba(0,0,0,0.25),
-        0px 10px 20px rgba(0,0,0,0.20);
+
+    text-shadow:
+        0px 2px 4px rgba(0,0,0,0.3),
+        0px 8px 18px rgba(0,0,0,0.35);
 }

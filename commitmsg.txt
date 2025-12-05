@@ -1,1 +1,4 @@
-﻿layout premium verdadeiro — container global + ui alinhada + card profissional
+﻿layout: dashboard industrial premium para módulo Produção
+- novo producao_home.html
+- novo estilo dos cards
+- alinhamento profissional
