@@ -1,6 +1,6 @@
-﻿feat: reescrita completa do config_maquina.html
-- inputs de meta, turno e rampa
-- envio ao backend via POST /machine/config
-- tabela automática de metas por hora
-- suporte total a turnos que atravessam meia-noite
-- layout industrial padronizado
+﻿feat: tornar card de produção clicável e abrir /producao/config/maquina01
+
+- adiciona <a href="/producao/config/maquina01"> envolvendo o card
+- mantém layout 100% igual ao original, sem alterações visuais
+- adiciona hover suave para comportamento de botão
+- prepara frontend para integração com configuração de metas e rampas
