@@ -8,12 +8,30 @@
 
     <div class="machine-grid">
 
-        <div class="machine-card">
-            <div class="machine-status automatic">AUTOMÁTICO</div>
-            <div class="machine-value">70%</div>
-        </div>
+        <!-- CARD CLICÁVEL -->
+        <a href="/producao/config/maquina01" class="machine-card-link">
+            <div class="machine-card">
+                <div class="machine-status automatic">AUTOMÁTICO</div>
+                <div class="machine-value">70%</div>
+            </div>
+        </a>
 
     </div>
 
 </div>
+
+<style>
+    /* Garante que o card inteiro seja clicável */
+    .machine-card-link {
+        text-decoration: none;
+        color: inherit;
+    }
+
+    .machine-card-link:hover .machine-card {
+        transform: scale(1.02);
+        transition: 0.2s;
+        cursor: pointer;
+    }
+</style>
+
 {% endblock %}

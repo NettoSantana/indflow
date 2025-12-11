@@ -1,5 +1,6 @@
-﻿feat: reescrita completa do style.css
-- padronização industrial premium
-- melhorias de layout global
-- unificação de componentes
-- base sólida para dashboards e futuros módulos
+﻿feat: reescrita completa do config_maquina.html
+- inputs de meta, turno e rampa
+- envio ao backend via POST /machine/config
+- tabela automática de metas por hora
+- suporte total a turnos que atravessam meia-noite
+- layout industrial padronizado
