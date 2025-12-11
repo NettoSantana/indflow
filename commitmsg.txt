@@ -1,5 +1,4 @@
-﻿feat: adicionar integração com ESP32 via HTTP POST
-- rota /machine/update
-- rota /machine/status
-- cálculo automático de percentual
-- armazenamento em memória para maquina01
+﻿feat: dashboard dinâmico com atualização real-time (1s)
+- leitura de /machine/status
+- atualização automática do card
+- status, meta, produção e percentual em tempo real
