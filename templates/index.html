@@ -5,31 +5,32 @@
 <div class="dashboard-wrapper">
 
   <style>
-    /* ===== FUNDO INDUSTRIAL ===== */
-    body {
-      background: #f3f4f6; /* Cinza industrial suave */
-    }
-
     .dashboard-wrapper{
       width:100%;
       display:flex;
       justify-content:center;
-      padding:40px 0;
+      padding:32px 0;
     }
 
-    /* ===== CARD ===== */
+    /* CARD INDUSTRIAL */
     .machine-card{
       background:#ffffff;
-      width:420px;
-      border-radius:18px;
-      padding:32px;
-      box-shadow:
-        0 4px 10px rgba(0,0,0,0.08),
-        0 12px 28px rgba(0,0,0,0.10);
+      width:380px;
+      border-radius:16px;
+      padding:28px;
+      box-shadow:0 4px 14px rgba(0,0,0,0.10);
       display:flex;
       flex-direction:column;
-      gap:24px;
-      border:1px solid #e2e8f0;
+      gap:20px;
+      border:1px solid #e5e7eb;
+
+      cursor:pointer;
+      transition:0.15s ease-in-out;
+    }
+
+    .machine-card:hover{
+      transform:translateY(-3px);
+      box-shadow:0 6px 18px rgba(0,0,0,0.14);
     }
 
     .machine-header{
@@ -40,98 +41,99 @@
 
     .machine-name{
       font-size:22px;
-      font-weight:700;
-      color:#0f172a;
+      font-weight:600;
     }
 
     .machine-status{
       font-size:14px;
-      font-weight:700;
-      padding:6px 14px;
+      font-weight:600;
+      padding:6px 12px;
       border-radius:6px;
       color:white;
-      letter-spacing:0.3px;
-      box-shadow:0 2px 4px rgba(0,0,0,0.12);
     }
 
-    .status-auto{
-      background:#16a34a; /* verde */
-    }
-
-    .status-manual{
-      background:#dc2626; /* vermelho */
-    }
+    .status-auto{ background:#16a34a; }
+    .status-manual{ background:#dc2626; }
 
     .machine-percent{
-      font-size:82px;
-      font-weight:800;
+      font-size:72px;
+      font-weight:700;
       text-align:center;
       color:#0f172a;
       line-height:1;
-      letter-spacing:-2px;
     }
 
     .machine-stats{
       display:flex;
       justify-content:space-between;
-      font-size:17px;
+      font-size:16px;
       color:#334155;
       font-weight:500;
-      padding-top:4px;
     }
 
     .machine-stats span b{
-      font-weight:800;
+      font-weight:700;
       color:#0f172a;
     }
   </style>
 
-  <!-- CARD DINÂMICO -->
-  <div class="machine-card">
+  <!-- CARD CLICÁVEL -->
+  <div class="machine-card" onclick="abrirConfig('maquina01')">
+
     <div class="machine-header">
-      <div id="machineName" class="machine-name">Carregando...</div>
-      <div id="machineStatus" class="machine-status status-auto">...</div>
+      <div class="machine-name" id="nome">MAQUINA 01</div>
+
+      <div id="statusBadge" class="machine-status status-auto">
+        AUTOMÁTICO
+      </div>
     </div>
 
-    <div id="machinePercent" class="machine-percent">--%</div>
+    <div class="machine-percent" id="percentual">
+      0%
+    </div>
 
     <div class="machine-stats">
-      <span>Meta: <b id="machineMeta">--</b></span>
-      <span>Produzido: <b id="machineProd">--</b></span>
+      <span>Meta: <b id="meta_turno">0</b></span>
+      <span>Produzido: <b id="producao_turno">0</b></span>
     </div>
+
   </div>
 
 </div>
 
 <script>
-  async function atualizarCard() {
-    try {
-      const response = await fetch("/machine/status?id=maquina01");
-      const data = await response.json();
+function abrirConfig(id){
+  window.location.href = "/producao/config/" + id;
+}
 
-      document.getElementById("machineName").innerText = data.nome;
-      document.getElementById("machinePercent").innerText = data.percentual + "%";
+// Atualização periódica dos dados
+async function atualizarCard(){
+  try{
+    const res = await fetch("/machine/status?id=maquina01");
+    const data = await res.json();
 
-      document.getElementById("machineMeta").innerText = data.meta_turno;
-      document.getElementById("machineProd").innerText = data.producao_turno;
+    document.getElementById("nome").textContent = data.nome;
+    document.getElementById("percentual").textContent = data.percentual + "%";
+    document.getElementById("meta_turno").textContent = data.meta_turno;
+    document.getElementById("producao_turno").textContent = data.producao_turno;
 
-      const statusEl = document.getElementById("machineStatus");
+    let badge = document.getElementById("statusBadge");
+    badge.textContent = data.status;
 
-      if (data.status === "AUTO") {
-        statusEl.innerText = "AUTOMÁTICO";
-        statusEl.className = "machine-status status-auto";
-      } else {
-        statusEl.innerText = "MANUAL";
-        statusEl.className = "machine-status status-manual";
-      }
-
-    } catch (e) {
-      console.log("Erro ao atualizar card:", e);
+    if(data.status === "AUTO" || data.status === "AUTOMÁTICO"){
+      badge.className = "machine-status status-auto";
+    } else {
+      badge.className = "machine-status status-manual";
     }
-  }
 
-  setInterval(atualizarCard, 1000);
-  atualizarCard();
+  }catch(e){
+    console.log("Erro ao atualizar card:", e);
+  }
+}
+
+// Atualiza a cada 2s
+setInterval(atualizarCard, 2000);
+atualizarCard();
 </script>
 
 {% endblock %}
