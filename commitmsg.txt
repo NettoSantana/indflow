@@ -1,7 +1,7 @@
-﻿feat: reescrita completa do server.py com logica industrial real.
-- meta da hora com rampa
-- producao da hora que zera automaticamente
-- percentual da hora e do turno
-- suporte a turno passando da meia-noite
-- backend encontra hora atual do turno
-- armazenamento interno de producao por hora
+﻿feat: reescrita completa do index.html com novo card industrial.
+- dois percentuais (turno e hora)
+- divisória central
+- fontes maiores
+- layout premium e clicável
+- atualização automática via AJAX
+- integração total com server.py
