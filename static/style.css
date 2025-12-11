@@ -1,60 +1,221 @@
-/* ===================================================
-   CARD PREMIUM INDUSTRIAL (padrão da imagem enviada)
-=================================================== */
+/* =========================================================
+   RESET E BASE GERAL
+   ========================================================= */
 
-.machine-grid {
-    display: flex;
-    justify-content: flex-start;
-    margin-top: 40px;
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: system-ui, Arial, sans-serif;
 }
 
-.machine-card {
-    width: 240px;
-    height: 300px;
-
-    background: linear-gradient(180deg, #5d8dfd 0%, #3255b4 100%);
-    border-radius: 22px;
-
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-
-    /* Sombra premium */
-    box-shadow: 0px 12px 28px rgba(0, 0, 0, 0.22);
-
-    transition: transform 0.25s ease, box-shadow 0.25s ease;
+body {
+  background: #f1f5f9;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
 }
 
-.machine-card:hover {
-    transform: translateY(-8px);
-    box-shadow: 0px 20px 38px rgba(0, 0, 0, 0.28);
+h1, h2, h3, h4 {
+  font-weight: 700;
 }
 
-.machine-status {
-    height: 55px;
-    background: #23a93d;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    font-size: 18px;
-    font-weight: 800;
-    color: white;
-    letter-spacing: 0.5px;
+a {
+  text-decoration: none;
+  color: inherit;
 }
 
-.machine-value {
-    flex: 1;
+/* =========================================================
+   NAVBAR GERAL (BASE.HTML)
+   ========================================================= */
 
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    font-size: 70px;
-    font-weight: 900;
-    color: white;
-
-    text-shadow:
-        0px 2px 4px rgba(0,0,0,0.3),
-        0px 8px 18px rgba(0,0,0,0.35);
+.navbar {
+  width: 100%;
+  height: 60px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
+
+.nav-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  height: 36px;
+  width: auto;
+}
+
+.system-name {
+  font-size: 20px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.nav-links a {
+  font-size: 15px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.nav-links a:hover {
+  color: #0f172a;
+}
+
+/* =========================================================
+   CONTAINER PADRÃO
+   ========================================================= */
+
+.content-area {
+  width: 100%;
+  padding: 26px;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* =========================================================
+   CARDS PADRÃO (OUTROS MÓDULOS)
+   ========================================================= */
+
+.card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 22px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  border: 1px solid #e5e7eb;
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+/* =========================================================
+   BOTÕES PADRÃO
+   ========================================================= */
+
+.btn {
+  display: inline-block;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
+  border: none;
+}
+
+.btn-primary {
+  background: #2563eb;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #1e40af;
+}
+
+.btn-success {
+  background: #16a34a;
+  color: white;
+}
+
+.btn-danger {
+  background: #dc2626;
+  color: white;
+}
+
+/* =========================================================
+   INPUTS E FORMULÁRIOS
+   ========================================================= */
+
+input, select {
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 6px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  font-size: 16px;
+}
+
+label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #334155;
+  margin-top: 14px;
+  display: block;
+}
+
+/* =========================================================
+   TABELAS
+   ========================================================= */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 20px;
+}
+
+.table th {
+  background: #e2e8f0;
+  padding: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  border-bottom: 1px solid #cbd5e1;
+}
+
+.table td {
+  padding: 10px;
+  font-size: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+/* =========================================================
+   LAYOUT PARA MÓDULOS FUTUROS
+   ========================================================= */
+
+.section-title {
+  font-size: 26px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.col {
+  flex: 1;
+  min-width: 260px;
+}
+
+/* =========================================================
+   UTILITÁRIOS
+   ========================================================= */
+
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.text-left { text-align: left; }
+
+.mt-10 { margin-top: 10px; }
+.mt-20 { margin-top: 20px; }
+.mt-30 { margin-top: 30px; }

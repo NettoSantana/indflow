@@ -1,7 +1,5 @@
-﻿feat: reescrita completa do index.html com novo card industrial.
-- dois percentuais (turno e hora)
-- divisória central
-- fontes maiores
-- layout premium e clicável
-- atualização automática via AJAX
-- integração total com server.py
+﻿feat: reescrita completa do style.css
+- padronização industrial premium
+- melhorias de layout global
+- unificação de componentes
+- base sólida para dashboards e futuros módulos
