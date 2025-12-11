@@ -1,3 +1,4 @@
-﻿feat: adiciona tela completa de configuração da máquina (config_maquina.html)
-com suporte a 3 turnos, rampa inicial, geração dinâmica de tabelas de metas,
-layout industrial compatível com a dashboard e integração inicial com rotas futuras.
+﻿feat: adiciona rotas completas de configuração da máquina (3 turnos),
+persistência em JSON, carregamento automático, rota de visualização
+/producao/config/<id> e endpoint /salvar, mantendo estrutura original.
+Integração total com o dashboard e card clicável.
