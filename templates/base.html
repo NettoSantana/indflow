@@ -3,7 +3,73 @@
 <head>
   <meta charset="UTF-8">
   <title>{% block title %}IndFlow — NettSan Technology{% endblock %}</title>
-<link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=2">
+
+  <style>
+    /* ===== NAVBAR INDUSTRIAL ===== */
+    .navbar{
+      width:100%;
+      height:60px;
+      background:#ffffff;
+      border-bottom:1px solid #e5e7eb;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:0 24px;
+      box-sizing:border-box;
+      position:sticky;
+      top:0;
+      z-index:10;
+    }
+
+    .nav-left{
+      display:flex;
+      align-items:center;
+      gap:12px;
+    }
+
+    .logo{
+      height:36px;   /* REDUZ O TAMANHO ABSURDO DO LOGO */
+      width:auto;
+    }
+
+    .system-name{
+      font-size:20px;
+      font-weight:600;
+      color:#0f172a;
+    }
+
+    .nav-links{
+      display:flex;
+      align-items:center;
+      gap:18px;
+    }
+
+    .nav-links a{
+      text-decoration:none;
+      font-size:15px;
+      color:#334155;
+      font-weight:500;
+    }
+
+    .nav-links a:hover{
+      color:#0f172a;
+    }
+
+    /* ===== ÁREA DE CONTEÚDO ===== */
+    .content-area{
+      padding:24px;
+      width:100%;
+      box-sizing:border-box;
+    }
+
+    .container{
+      max-width:1200px;
+      margin:0 auto;
+    }
+
+  </style>
+
 </head>
 
 <body>
