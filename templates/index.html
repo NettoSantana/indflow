@@ -25,7 +25,7 @@
       padding:32px;
       box-shadow:
         0 4px 10px rgba(0,0,0,0.08),
-        0 12px 28px rgba(0,0,0,0.10); /* sombra mais profunda */
+        0 12px 28px rgba(0,0,0,0.10);
       display:flex;
       flex-direction:column;
       gap:24px;
@@ -55,14 +55,13 @@
     }
 
     .status-auto{
-      background:#16a34a; /* verde moderno */
+      background:#16a34a; /* verde */
     }
 
     .status-manual{
       background:#dc2626; /* vermelho */
     }
 
-    /* ===== PORCENTAGEM ===== */
     .machine-percent{
       font-size:82px;
       font-weight:800;
@@ -72,7 +71,6 @@
       letter-spacing:-2px;
     }
 
-    /* ===== META E PRODUÇÃO ===== */
     .machine-stats{
       display:flex;
       justify-content:space-between;
@@ -88,22 +86,52 @@
     }
   </style>
 
-  <!-- CARD ÚNICO -->
+  <!-- CARD DINÂMICO -->
   <div class="machine-card">
-
     <div class="machine-header">
-      <div class="machine-name">Extrusora 01</div>
-      <div class="machine-status status-auto">AUTOMÁTICO</div>
+      <div id="machineName" class="machine-name">Carregando...</div>
+      <div id="machineStatus" class="machine-status status-auto">...</div>
     </div>
 
-    <div class="machine-percent">78%</div>
+    <div id="machinePercent" class="machine-percent">--%</div>
 
     <div class="machine-stats">
-      <span>Meta: <b>1200</b></span>
-      <span>Produzido: <b>845</b></span>
+      <span>Meta: <b id="machineMeta">--</b></span>
+      <span>Produzido: <b id="machineProd">--</b></span>
     </div>
-
   </div>
 
 </div>
+
+<script>
+  async function atualizarCard() {
+    try {
+      const response = await fetch("/machine/status?id=maquina01");
+      const data = await response.json();
+
+      document.getElementById("machineName").innerText = data.nome;
+      document.getElementById("machinePercent").innerText = data.percentual + "%";
+
+      document.getElementById("machineMeta").innerText = data.meta_turno;
+      document.getElementById("machineProd").innerText = data.producao_turno;
+
+      const statusEl = document.getElementById("machineStatus");
+
+      if (data.status === "AUTO") {
+        statusEl.innerText = "AUTOMÁTICO";
+        statusEl.className = "machine-status status-auto";
+      } else {
+        statusEl.innerText = "MANUAL";
+        statusEl.className = "machine-status status-manual";
+      }
+
+    } catch (e) {
+      console.log("Erro ao atualizar card:", e);
+    }
+  }
+
+  setInterval(atualizarCard, 1000);
+  atualizarCard();
+</script>
+
 {% endblock %}

@@ -1,1 +1,5 @@
-﻿style: fundo industrial e contraste aprimorado no dashboard (card premium)
+﻿feat: adicionar integração com ESP32 via HTTP POST
+- rota /machine/update
+- rota /machine/status
+- cálculo automático de percentual
+- armazenamento em memória para maquina01
