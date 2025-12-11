@@ -1,4 +1,4 @@
-﻿fix: redirect /producao to main dashboard
-- Removed producao_home
-- Added redirect to /
-- Machine config screen kept intact
+﻿fix: ajustar navegação do card para página correta (/producao/config/maquina01)
+
+- Corrigido onclick incorreto (/producao/config)
+- Agora o card abre diretamente a página de configuração da máquina
