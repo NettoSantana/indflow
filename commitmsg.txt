@@ -1,6 +1,3 @@
-﻿feat: tornar card de produção clicável e abrir /producao/config/maquina01
+﻿fix: add machine config route to producao blueprint
 
-- adiciona <a href="/producao/config/maquina01"> envolvendo o card
-- mantém layout 100% igual ao original, sem alterações visuais
-- adiciona hover suave para comportamento de botão
-- prepara frontend para integração com configuração de metas e rampas
+Criação da rota /producao/config/<machine_id> para permitir abrir a tela de configuração da máquina.
