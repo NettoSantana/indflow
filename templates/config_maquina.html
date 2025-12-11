@@ -1,269 +1,268 @@
 {% extends "base.html" %}
-{% block title %}Configuração da Máquina{% endblock %}
+{% block title %}Configurar Máquina{% endblock %}
 
 {% block content %}
 
 <style>
-  .card {
-    background: #ffffff;
-    padding: 24px;
-    border-radius: 14px;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
-    margin-bottom: 24px;
-    border: 1px solid #e5e7eb;
+  .config-wrapper{
+    width:100%;
+    max-width:900px;
+    margin:0 auto;
+    background:#ffffff;
+    padding:28px;
+    border-radius:16px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.10);
+    border:1px solid #e5e7eb;
   }
 
-  .card h2 {
-    margin: 0 0 16px 0;
-    font-size: 20px;
-    font-weight: 600;
-    color: #0f172a;
+  h2{
+    margin-top:0;
+    font-size:24px;
+    font-weight:700;
+    color:#0f172a;
   }
 
-  .linha {
-    display: flex;
-    gap: 14px;
-    margin-bottom: 12px;
+  .input-row{
+    display:flex;
+    gap:16px;
+    margin-bottom:16px;
   }
 
-  .linha input, .linha select {
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid #cbd5e1;
-    flex: 1;
+  .input-group{
+    flex:1;
+    display:flex;
+    flex-direction:column;
   }
 
-  .tabela-meta {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 12px;
+  .input-group label{
+    font-size:14px;
+    margin-bottom:4px;
+    color:#334155;
   }
 
-  .tabela-meta th, .tabela-meta td {
-    padding: 10px;
-    border-bottom: 1px solid #e2e8f0;
-    text-align: left;
+  .input-group input{
+    padding:10px;
+    border:1px solid #cbd5e1;
+    border-radius:8px;
+    font-size:16px;
   }
 
-  .turno-header {
-    background: #f1f5f9;
-    font-weight: bold;
+  .btn{
+    margin-top:20px;
+    padding:12px 20px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    font-size:16px;
+    font-weight:600;
+    color:white;
+    background:#0f172a;
+    transition:0.2s;
   }
 
-  .botao {
-    background: #0f172a;
-    color: white;
-    padding: 10px 16px;
-    border-radius: 8px;
-    text-decoration: none;
-    border: none;
-    cursor: pointer;
-    font-weight: 600;
-    margin-top: 10px;
+  .btn:hover{
+    background:#1e293b;
   }
 
-  .botao:hover {
-    background: #1e293b;
+  .turno-block{
+    margin-top:32px;
+    padding:18px;
+    border-radius:12px;
+    border:1px solid #e2e8f0;
+    background:#f8fafc;
+  }
+
+  .turno-block h3{
+    margin:0 0 10px 0;
+    font-size:18px;
+    font-weight:700;
+  }
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:12px;
+  }
+
+  table th, table td{
+    border:1px solid #cbd5e1;
+    padding:10px;
+    text-align:center;
+  }
+
+  table th{
+    background:#e2e8f0;
+    font-weight:700;
   }
 </style>
 
+<div class="config-wrapper">
 
-<!-- ====================================================== -->
-<!-- CARD 1 — INFORMAÇÕES DA MÁQUINA -->
-<!-- ====================================================== -->
-<div class="card">
-  <h2>{{ dados_machine.nome }}</h2>
+  <h2>Configuração da Máquina – {{ machine.nome }}</h2>
 
-  <div class="linha">
-    <strong>Status:</strong> {{ dados_machine.status }}
-  </div>
-  <div class="linha">
-    <strong>Meta atual do turno:</strong> {{ dados_machine.meta_turno }}
-  </div>
-  <div class="linha">
-    <strong>Produção atual:</strong> {{ dados_machine.producao_turno }}
-  </div>
-  <div class="linha">
-    <strong>Percentual:</strong> {{ dados_machine.percentual }}%
-  </div>
-</div>
-
-
-<!-- ====================================================== -->
-<!-- CARD 2 — CONFIGURAÇÕES -->
-<!-- ====================================================== -->
-<div class="card">
-  <h2>Configurações do Planejamento</h2>
-
-  <!-- QTDE DE TURNOS -->
-  <div class="linha">
-    <label><strong>Quantidade de turnos:</strong></label>
-    <select id="qtd_turnos">
-      <option value="1">1 turno</option>
-      <option value="2">2 turnos</option>
-      <option value="3">3 turnos</option>
-    </select>
-  </div>
-
-  <!-- TURNOS -->
-  <div id="area_turnos">
-
-    <!-- TURNO 1 -->
-    <div class="turno bloco-turno" id="turno1">
-      <h3>Turno 1</h3>
-      <div class="linha">
-        <input id="t1_inicio" type="time" value="06:00">
-        <input id="t1_fim" type="time" value="14:00">
-        <input id="t1_meta" type="number" placeholder="Meta do turno">
-      </div>
-    </div>
-
-    <!-- TURNO 2 -->
-    <div class="turno bloco-turno" id="turno2">
-      <h3>Turno 2</h3>
-      <div class="linha">
-        <input id="t2_inicio" type="time" value="14:00">
-        <input id="t2_fim" type="time" value="22:00">
-        <input id="t2_meta" type="number" placeholder="Meta do turno">
-      </div>
-    </div>
-
-    <!-- TURNO 3 -->
-    <div class="turno bloco-turno" id="turno3">
-      <h3>Turno 3</h3>
-      <div class="linha">
-        <input id="t3_inicio" type="time" value="22:00">
-        <input id="t3_fim" type="time" value="06:00">
-        <input id="t3_meta" type="number" placeholder="Meta do turno">
-      </div>
+  <!-- CAMPOS DO FORM -->
+  <div class="input-row">
+    <div class="input-group">
+      <label>Rampa Inicial (%)</label>
+      <input id="rampa" type="number" min="0" max="90" value="50">
     </div>
   </div>
 
-  <!-- RAMPA -->
-  <div class="linha">
-    <label><strong>Rampa de início (% da meta/hora):</strong></label>
-    <input id="rampa" type="number" value="50">
+  <!-- TURNO 1 -->
+  <div class="turno-block">
+    <h3>Turno 1</h3>
+    <div class="input-row">
+      <div class="input-group">
+        <label>Início</label>
+        <input id="t1_ini" type="time" value="06:00">
+      </div>
+      <div class="input-group">
+        <label>Fim</label>
+        <input id="t1_fim" type="time" value="16:00">
+      </div>
+      <div class="input-group">
+        <label>Meta (peças)</label>
+        <input id="t1_meta" type="number" value="1000">
+      </div>
+    </div>
+
+    <div id="tabela_turno1"></div>
   </div>
 
-  <!-- BOTÃO -->
-  <button class="botao" onclick="calcularMeta()">CALCULAR META HORÁRIA</button>
+  <!-- TURNO 2 -->
+  <div class="turno-block">
+    <h3>Turno 2</h3>
+    <div class="input-row">
+      <div class="input-group">
+        <label>Início</label>
+        <input id="t2_ini" type="time">
+      </div>
+      <div class="input-group">
+        <label>Fim</label>
+        <input id="t2_fim" type="time">
+      </div>
+      <div class="input-group">
+        <label>Meta (peças)</label>
+        <input id="t2_meta" type="number" value="0">
+      </div>
+    </div>
+
+    <div id="tabela_turno2"></div>
+  </div>
+
+  <!-- TURNO 3 -->
+  <div class="turno-block">
+    <h3>Turno 3</h3>
+    <div class="input-row">
+      <div class="input-group">
+        <label>Início</label>
+        <input id="t3_ini" type="time">
+      </div>
+      <div class="input-group">
+        <label>Fim</label>
+        <input id="t3_fim" type="time">
+      </div>
+      <div class="input-group">
+        <label>Meta (peças)</label>
+        <input id="t3_meta" type="number" value="0">
+      </div>
+    </div>
+
+    <div id="tabela_turno3"></div>
+  </div>
+
+  <button class="btn" onclick="calcular()">CALCULAR METAS</button>
+  <button class="btn" style="background:#16a34a" onclick="salvar()">SALVAR CONFIGURAÇÃO</button>
 
 </div>
 
-
-<!-- ====================================================== -->
-<!-- CARD 3 — RESULTADO -->
-<!-- ====================================================== -->
-<div class="card">
-  <h2>Meta Horária Gerada</h2>
-
-  <table class="tabela-meta" id="tabela_resultado"></table>
-</div>
-
-
-<!-- ====================================================== -->
-<!-- CARD 4 — SALVAR -->
-<!-- ====================================================== -->
-<div class="card">
-  <button class="botao" onclick="salvarConfig()">SALVAR CONFIGURAÇÕES</button>
-</div>
-
-
-<!-- ====================================================== -->
-<!-- JAVASCRIPT DA PÁGINA -->
-<!-- ====================================================== -->
 <script>
 
-function coletarTurnos() {
-  const qtd = parseInt(document.getElementById("qtd_turnos").value);
+function rangeHoras(inicio, fim){
+  let horas = [];
+  let hi = parseInt(inicio.split(":")[0]);
+  let hf = parseInt(fim.split(":")[0]);
 
-  let turnos = [];
+  if(hf <= hi){ hf += 24; }
 
-  if (qtd >= 1) {
-    turnos.push({
-      inicio: document.getElementById("t1_inicio").value,
-      fim: document.getElementById("t1_fim").value,
-      meta: document.getElementById("t1_meta").value || 0
-    });
+  for(let h = hi; h < hf; h++){
+    horas.push({ ini:h, fim:h+1 });
   }
 
-  if (qtd >= 2) {
-    turnos.push({
-      inicio: document.getElementById("t2_inicio").value,
-      fim: document.getElementById("t2_fim").value,
-      meta: document.getElementById("t2_meta").value || 0
-    });
-  }
-
-  if (qtd == 3) {
-    turnos.push({
-      inicio: document.getElementById("t3_inicio").value,
-      fim: document.getElementById("t3_fim").value,
-      meta: document.getElementById("t3_meta").value || 0
-    });
-  }
-
-  return turnos;
+  return horas;
 }
 
+function calculaTabela(turno, meta, rampa, idTabela){
+  if(!turno.ini || !turno.fim || meta <= 0){
+    document.getElementById(idTabela).innerHTML = "";
+    return;
+  }
 
-function calcularMeta() {
+  const horas = rangeHoras(turno.ini, turno.fim);
 
-  const turnos = coletarTurnos();
-  const rampa = document.getElementById("rampa").value;
+  if(horas.length === 0){
+    document.getElementById(idTabela).innerHTML = "";
+    return;
+  }
 
-  fetch(window.location.pathname + "/calcular", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      turnos: turnos,
-      rampa: rampa
-    })
-  })
-  .then(r => r.json())
-  .then(data => {
-    const tabela = document.getElementById("tabela_resultado");
-    tabela.innerHTML = "";
+  const primeiraHora = Math.floor(meta * (rampa/100));
+  const restante = meta - primeiraHora;
+  const metaHoraBase = Math.floor(restante / (horas.length - 1));
+  
+  let tabela = `
+    <table>
+      <tr><th>Hora</th><th>Meta</th></tr>
+      <tr><td>${horas[0].ini}:00 - ${horas[0].fim}:00</td><td>${primeiraHora}</td></tr>
+  `;
 
-    data.tabela.forEach(linha => {
+  let acumulado = primeiraHora;
 
-      if (linha.is_header) {
-        tabela.innerHTML += `
-          <tr class="turno-header">
-            <td colspan="2">${linha.turno}</td>
-          </tr>
-        `;
-      } else {
-        tabela.innerHTML += `
-          <tr>
-            <td>${linha.faixa}</td>
-            <td>${linha.meta} peças</td>
-          </tr>
-        `;
-      }
-    });
+  for(let i = 1; i < horas.length; i++){
+    let val = metaHoraBase;
+    if(i === horas.length - 1){
+      val = meta - acumulado;
+    }
+    acumulado += val;
 
-  });
+    tabela += `
+      <tr>
+        <td>${horas[i].ini}:00 - ${horas[i].fim}:00</td>
+        <td>${val}</td>
+      </tr>
+    `;
+  }
+
+  tabela += "</table>";
+  document.getElementById(idTabela).innerHTML = tabela;
 }
 
+function calcular(){
+  const rampa = parseInt(document.getElementById("rampa").value);
 
-function salvarConfig() {
+  calculaTabela(
+    { ini: t1_ini.value, fim: t1_fim.value },
+    parseInt(t1_meta.value),
+    rampa,
+    "tabela_turno1"
+  );
 
-  const turnos = coletarTurnos();
-  const rampa = document.getElementById("rampa").value;
+  calculaTabela(
+    { ini: t2_ini.value, fim: t2_fim.value },
+    parseInt(t2_meta.value),
+    rampa,
+    "tabela_turno2"
+  );
 
-  fetch(window.location.pathname + "/salvar", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      turnos: turnos,
-      rampa: rampa
-    })
-  })
-  .then(r => r.json())
-  .then(data => {
-    alert("Configurações salvas com sucesso!");
-  });
+  calculaTabela(
+    { ini: t3_ini.value, fim: t3_fim.value },
+    parseInt(t3_meta.value),
+    rampa,
+    "tabela_turno3"
+  );
+}
+
+function salvar(){
+  alert("Depois conectamos isso ao server.py ❤️");
 }
 
 </script>
