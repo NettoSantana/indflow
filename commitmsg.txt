@@ -1,4 +1,3 @@
-﻿feat: adiciona tela de configuração da máquina (config_maquina.html), 
-rotas /producao/config/<id>, /calcular e /salvar,
-suporte a múltiplos turnos, rampa percentual,
-tabela dinâmica de meta horária e integração com dados atuais da máquina.
+﻿feat: adiciona card clicável no dashboard (index.html),
+inclui função JS abrirConfig(), integra com rota /producao/config/maquina01,
+aplica hover industrial no card e mantém atualização automática dos dados.
