@@ -1,7 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-import os, json
-
-# Blueprints existentes
+from datetime import datetime, timedelta
 from modules.producao.routes import producao_bp
 from modules.manutencao.routes import manutencao_bp
 from modules.ativos.routes import ativos_bp
@@ -12,138 +10,178 @@ from modules.devices.routes import devices_bp
 app = Flask(__name__)
 
 # ============================================================
-# ARMAZENAMENTO EM MEMÓRIA DOS DADOS DO ESP32
+# ESTRUTURA PRINCIPAL DA MÁQUINA
 # ============================================================
+
 machine_data = {
     "maquina01": {
         "nome": "MAQUINA 01",
         "status": "DESCONHECIDO",
         "meta_turno": 0,
         "producao_turno": 0,
-        "percentual": 0
+        "percentual_turno": 0,
+
+        # NOVOS CAMPOS
+        "turno_inicio": None,        # "06:00"
+        "turno_fim": None,           # "16:00"
+        "rampa_percentual": 0,       # Ex: 50 (%)
+        "horas_turno": [],           # Lista com faixas horárias
+        "meta_por_hora": [],         # Lista de metas hora a hora
+        "producao_hora": 0,          # Reinicia a cada hora
+        "percentual_hora": 0,
+        "ultima_hora": None          # Controle de troca de hora
     }
 }
 
-# ============================================================
-# ARQUIVO DE CONFIGURAÇÃO (PERSISTÊNCIA)
-# ============================================================
-DATA_DIR = "data"
-SETTINGS_FILE = os.path.join(DATA_DIR, "machine_settings.json")
-
-if not os.path.exists(DATA_DIR):
-    os.makedirs(DATA_DIR)
-
-if not os.path.exists(SETTINGS_FILE):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump({}, f)
-
-
-def load_settings():
-    with open(SETTINGS_FILE, "r") as f:
-        return json.load(f)
-
-
-def save_settings(data):
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
 
 # ============================================================
-# ROTA RECEBIDA PELO ESP32
+# FUNÇÃO GERAR ESTRUTURA HORA A HORA (USADO NA CONFIGURAÇÃO)
 # ============================================================
+
+def gerar_tabela_horas(machine_id):
+    m = machine_data[machine_id]
+
+    inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
+    fim = datetime.strptime(m["turno_fim"], "%H:%M")
+    meta_total = m["meta_turno"]
+    rampa = m["rampa_percentual"]
+
+    horas = []
+    metas = []
+
+    # Suporte a turno passando da meia-noite
+    if fim <= inicio:
+        fim = fim + timedelta(days=1)
+
+    duracao = int((fim - inicio).total_seconds() // 3600)
+
+    m["horas_turno"] = []
+    m["meta_por_hora"] = []
+
+    # META POR HORA BASE
+    meta_base = meta_total / duracao
+    meta_rampa = meta_base * (rampa / 100)
+    meta_restante = meta_total - meta_rampa
+    meta_restante_por_hora = meta_restante / (duracao - 1)
+
+    for i in range(duracao):
+        hora_i = inicio + timedelta(hours=i)
+        hora_f = hora_i + timedelta(hours=1)
+
+        faixa = f"{hora_i.strftime('%H:%M')} - {hora_f.strftime('%H:%M')}"
+        horas.append(faixa)
+
+        if i == 0:
+            metas.append(round(meta_rampa))
+        else:
+            metas.append(round(meta_restante_por_hora))
+
+    m["horas_turno"] = horas
+    m["meta_por_hora"] = metas
+
+
+# ============================================================
+# ROTA DE CONFIGURAÇÃO (SALVA TURNOS + RAMPA + META)
+# ============================================================
+
+@app.route("/machine/config", methods=["POST"])
+def config_machine():
+    data = request.json
+    m = machine_data["maquina01"]
+
+    m["meta_turno"] = int(data["meta_turno"])
+    m["turno_inicio"] = data["inicio"]
+    m["turno_fim"] = data["fim"]
+    m["rampa_percentual"] = int(data["rampa"])
+
+    gerar_tabela_horas("maquina01")
+
+    return jsonify({"message": "Configuração salva com sucesso"})
+
+
+# ============================================================
+# ROTA PARA O ESP32 ENVIAR PRODUÇÃO
+# ============================================================
+
 @app.route("/machine/update", methods=["POST"])
 def update_machine():
     try:
         data = request.get_json()
+        m = machine_data["maquina01"]
 
-        if not data:
-            return jsonify({"error": "JSON não enviado"}), 400
+        m["nome"] = data.get("nome")
+        m["status"] = data.get("status", "DESCONHECIDO")
+        m["producao_turno"] = int(data["producao_turno"])
 
-        machine_id = data.get("id")
-        nome = data.get("nome")
-        status = data.get("status")
-        meta_turno = data.get("meta_turno")
-        producao_turno = data.get("producao_turno")
+        # Percentual do turno (não zera)
+        if m["meta_turno"] > 0:
+            m["percentual_turno"] = round((m["producao_turno"] / m["meta_turno"]) * 100)
+        else:
+            m["percentual_turno"] = 0
 
-        if machine_id != "maquina01":
-            return jsonify({"error": "Máquina não cadastrada"}), 404
+        # ======================================================
+        # CÁLCULO DA META DA HORA ATUAL
+        # ======================================================
 
-        # Calcula percentual
-        percentual = 0
-        if meta_turno and meta_turno > 0:
-            percentual = round((producao_turno / meta_turno) * 100)
+        agora = datetime.now().strftime("%H:%M")
+        hora_atual = datetime.strptime(agora, "%H:%M")
 
-        machine_data[machine_id] = {
-            "nome": nome,
-            "status": status,
-            "meta_turno": meta_turno,
-            "producao_turno": producao_turno,
-            "percentual": percentual
-        }
+        horas = m["horas_turno"]
+        metas = m["meta_por_hora"]
 
-        return jsonify({"message": "Dados atualizados com sucesso"})
+        meta_hora = 0
+        faixa_atual = None
+
+        for idx, faixa in enumerate(horas):
+            inicio, fim = faixa.split(" - ")
+            h0 = datetime.strptime(inicio, "%H:%M")
+            h1 = datetime.strptime(fim, "%H:%M")
+
+            if h1 <= h0:
+                h1 += timedelta(days=1)
+
+            if h0 <= hora_atual < h1:
+                faixa_atual = idx
+                meta_hora = metas[idx]
+                break
+
+        # ======================================================
+        # PRODUÇÃO POR HORA (ZERA A CADA MUDANÇA DE HORA)
+        # ======================================================
+
+        if m["ultima_hora"] != faixa_atual:
+            m["producao_hora"] = 0
+            m["ultima_hora"] = faixa_atual
+
+        # Produção da hora = incremento do turno desde último update
+        # sem diferença acumulada de horas anteriores
+        m["producao_hora"] += 1  # 1 pulso por update (ajustável depois)
+
+        # Percentual da hora
+        if meta_hora > 0:
+            m["percentual_hora"] = round((m["producao_hora"] / meta_hora) * 100)
+        else:
+            m["percentual_hora"] = 0
+
+        return jsonify({"message": "OK"})
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 # ============================================================
-# CONSULTA DO DASHBOARD
+# DASHBOARD CONSULTA DADOS
 # ============================================================
+
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
-    machine_id = request.args.get("id", "maquina01")
-    data = machine_data.get(machine_id)
-
-    if not data:
-        return jsonify({"error": "Máquina não encontrada"}), 404
-
-    return jsonify(data)
-
+    return jsonify(machine_data["maquina01"])
 
 
 # ============================================================
-# 🔥 TELA DE CONFIGURAÇÃO DA MÁQUINA
+# BLUEPRINTS
 # ============================================================
-@app.route("/producao/config/<machine_id>")
-def config_page(machine_id):
 
-    settings = load_settings()
-    machine_settings = settings.get(machine_id, {})
-
-    # Se ainda não existir nada salvo → valores padrão
-    defaults = {
-        "rampa": 50,
-        "turno1": {"ini": "06:00", "fim": "16:00", "meta": 1000},
-        "turno2": {"ini": "", "fim": "", "meta": 0},
-        "turno3": {"ini": "", "fim": "", "meta": 0}
-    }
-
-    merged = {**defaults, **machine_settings}
-
-    return render_template("config_maquina.html",
-                           machine={"nome": machine_data[machine_id]["nome"]},
-                           config=merged)
-
-
-# ============================================================
-# SALVAR CONFIGURAÇÕES
-# ============================================================
-@app.route("/producao/config/<machine_id>/salvar", methods=["POST"])
-def salvar_config(machine_id):
-
-    data = request.get_json()
-
-    settings = load_settings()
-    settings[machine_id] = data
-    save_settings(settings)
-
-    return jsonify({"status": "ok", "msg": "Configurações salvas"})
-
-
-# ============================================================
-# BLUEPRINTS E INDEX
-# ============================================================
 app.register_blueprint(producao_bp, url_prefix="/producao")
 app.register_blueprint(manutencao_bp, url_prefix="/manutencao")
 app.register_blueprint(ativos_bp, url_prefix="/ativos")
@@ -157,8 +195,5 @@ def index():
     return render_template("index.html")
 
 
-# ============================================================
-# EXECUÇÃO LOCAL
-# ============================================================
 if __name__ == "__main__":
     app.run(debug=True)
