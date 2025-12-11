@@ -1,4 +1,7 @@
-﻿layout: dashboard industrial premium para módulo Produção
-- novo producao_home.html
-- novo estilo dos cards
-- alinhamento profissional
+﻿feat: aplicar card premium industrial no módulo de Produção
+
+- Novo layout inspirado no PNG aprovado
+- Card com sombra, gradiente premium e top bar AUTOMÁTICO
+- Estilo 100% alinhado ao padrão industrial moderno
+- Ajustes no producao_home.html
+- Novo bloco de CSS no style.css
