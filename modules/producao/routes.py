@@ -1,14 +1,14 @@
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, redirect
 
 producao_bp = Blueprint("producao", __name__, template_folder="templates")
 
 # ===============================
-# PÁGINA PRINCIPAL DA PRODUÇÃO
+# REDIRECIONAR /producao PARA /
 # ===============================
 @producao_bp.route("/")
 def home():
-    return render_template("producao_home.html")
-
+    # Sempre envia para o dashboard principal
+    return redirect("/")
 
 # ===============================
 # PÁGINA DE CONFIGURAÇÃO DA MÁQUINA
