@@ -1,1 +1,1 @@
-﻿refactor: navbar ajustada — altura reduzida, logo menor, layout industrial premium
+﻿style: fundo industrial e contraste aprimorado no dashboard (card premium)
