@@ -1,1 +1,1 @@
-﻿refactor: redesign completo do index.html com card industrial premium (modelo 1)
+﻿refactor: navbar ajustada — altura reduzida, logo menor, layout industrial premium

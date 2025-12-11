@@ -5,23 +5,31 @@
 <div class="dashboard-wrapper">
 
   <style>
+    /* ===== FUNDO INDUSTRIAL ===== */
+    body {
+      background: #f3f4f6; /* Cinza industrial suave */
+    }
+
     .dashboard-wrapper{
       width:100%;
       display:flex;
       justify-content:center;
-      padding:32px 0;
+      padding:40px 0;
     }
 
+    /* ===== CARD ===== */
     .machine-card{
       background:#ffffff;
-      width:380px;
-      border-radius:16px;
-      padding:28px;
-      box-shadow:0 4px 14px rgba(0,0,0,0.10);
+      width:420px;
+      border-radius:18px;
+      padding:32px;
+      box-shadow:
+        0 4px 10px rgba(0,0,0,0.08),
+        0 12px 28px rgba(0,0,0,0.10); /* sombra mais profunda */
       display:flex;
       flex-direction:column;
-      gap:20px;
-      border:1px solid #e5e7eb;
+      gap:24px;
+      border:1px solid #e2e8f0;
     }
 
     .machine-header{
@@ -32,54 +40,59 @@
 
     .machine-name{
       font-size:22px;
-      font-weight:600;
+      font-weight:700;
+      color:#0f172a;
     }
 
     .machine-status{
       font-size:14px;
-      font-weight:600;
-      padding:6px 12px;
+      font-weight:700;
+      padding:6px 14px;
       border-radius:6px;
       color:white;
+      letter-spacing:0.3px;
+      box-shadow:0 2px 4px rgba(0,0,0,0.12);
     }
 
     .status-auto{
-      background:#16a34a; /* verde */
+      background:#16a34a; /* verde moderno */
     }
 
     .status-manual{
       background:#dc2626; /* vermelho */
     }
 
+    /* ===== PORCENTAGEM ===== */
     .machine-percent{
-      font-size:72px;
-      font-weight:700;
+      font-size:82px;
+      font-weight:800;
       text-align:center;
       color:#0f172a;
       line-height:1;
+      letter-spacing:-2px;
     }
 
+    /* ===== META E PRODUÇÃO ===== */
     .machine-stats{
       display:flex;
       justify-content:space-between;
-      font-size:16px;
+      font-size:17px;
       color:#334155;
       font-weight:500;
+      padding-top:4px;
     }
 
     .machine-stats span b{
-      font-weight:700;
+      font-weight:800;
       color:#0f172a;
     }
   </style>
 
-  <!-- CARD ÚNICO (Exemplo com valores estáticos por ora) -->
+  <!-- CARD ÚNICO -->
   <div class="machine-card">
 
     <div class="machine-header">
       <div class="machine-name">Extrusora 01</div>
-
-      <!-- Status: altere para status-manual -->
       <div class="machine-status status-auto">AUTOMÁTICO</div>
     </div>
 
@@ -89,6 +102,7 @@
       <span>Meta: <b>1200</b></span>
       <span>Produzido: <b>845</b></span>
     </div>
+
   </div>
 
 </div>
