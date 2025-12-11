@@ -1,3 +1,4 @@
-﻿fix: add machine config route to producao blueprint
-
-Criação da rota /producao/config/<machine_id> para permitir abrir a tela de configuração da máquina.
+﻿fix: redirect /producao to main dashboard
+- Removed producao_home
+- Added redirect to /
+- Machine config screen kept intact
