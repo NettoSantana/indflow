@@ -1,3 +1,4 @@
-﻿update: adiciona rotas de configuração de máquina, cálculo industrial de meta horária,
-persistência JSON em /data, ajustes completos no server.py para integração com ESP32
-e navegação para tela de configuração (config_maquina.html).
+﻿feat: adiciona tela de configuração da máquina (config_maquina.html), 
+rotas /producao/config/<id>, /calcular e /salvar,
+suporte a múltiplos turnos, rampa percentual,
+tabela dinâmica de meta horária e integração com dados atuais da máquina.

@@ -1,0 +1,271 @@
+{% extends "base.html" %}
+{% block title %}Configuração da Máquina{% endblock %}
+
+{% block content %}
+
+<style>
+  .card {
+    background: #ffffff;
+    padding: 24px;
+    border-radius: 14px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    margin-bottom: 24px;
+    border: 1px solid #e5e7eb;
+  }
+
+  .card h2 {
+    margin: 0 0 16px 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .linha {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+
+  .linha input, .linha select {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    flex: 1;
+  }
+
+  .tabela-meta {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 12px;
+  }
+
+  .tabela-meta th, .tabela-meta td {
+    padding: 10px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+  }
+
+  .turno-header {
+    background: #f1f5f9;
+    font-weight: bold;
+  }
+
+  .botao {
+    background: #0f172a;
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    margin-top: 10px;
+  }
+
+  .botao:hover {
+    background: #1e293b;
+  }
+</style>
+
+
+<!-- ====================================================== -->
+<!-- CARD 1 — INFORMAÇÕES DA MÁQUINA -->
+<!-- ====================================================== -->
+<div class="card">
+  <h2>{{ dados_machine.nome }}</h2>
+
+  <div class="linha">
+    <strong>Status:</strong> {{ dados_machine.status }}
+  </div>
+  <div class="linha">
+    <strong>Meta atual do turno:</strong> {{ dados_machine.meta_turno }}
+  </div>
+  <div class="linha">
+    <strong>Produção atual:</strong> {{ dados_machine.producao_turno }}
+  </div>
+  <div class="linha">
+    <strong>Percentual:</strong> {{ dados_machine.percentual }}%
+  </div>
+</div>
+
+
+<!-- ====================================================== -->
+<!-- CARD 2 — CONFIGURAÇÕES -->
+<!-- ====================================================== -->
+<div class="card">
+  <h2>Configurações do Planejamento</h2>
+
+  <!-- QTDE DE TURNOS -->
+  <div class="linha">
+    <label><strong>Quantidade de turnos:</strong></label>
+    <select id="qtd_turnos">
+      <option value="1">1 turno</option>
+      <option value="2">2 turnos</option>
+      <option value="3">3 turnos</option>
+    </select>
+  </div>
+
+  <!-- TURNOS -->
+  <div id="area_turnos">
+
+    <!-- TURNO 1 -->
+    <div class="turno bloco-turno" id="turno1">
+      <h3>Turno 1</h3>
+      <div class="linha">
+        <input id="t1_inicio" type="time" value="06:00">
+        <input id="t1_fim" type="time" value="14:00">
+        <input id="t1_meta" type="number" placeholder="Meta do turno">
+      </div>
+    </div>
+
+    <!-- TURNO 2 -->
+    <div class="turno bloco-turno" id="turno2">
+      <h3>Turno 2</h3>
+      <div class="linha">
+        <input id="t2_inicio" type="time" value="14:00">
+        <input id="t2_fim" type="time" value="22:00">
+        <input id="t2_meta" type="number" placeholder="Meta do turno">
+      </div>
+    </div>
+
+    <!-- TURNO 3 -->
+    <div class="turno bloco-turno" id="turno3">
+      <h3>Turno 3</h3>
+      <div class="linha">
+        <input id="t3_inicio" type="time" value="22:00">
+        <input id="t3_fim" type="time" value="06:00">
+        <input id="t3_meta" type="number" placeholder="Meta do turno">
+      </div>
+    </div>
+  </div>
+
+  <!-- RAMPA -->
+  <div class="linha">
+    <label><strong>Rampa de início (% da meta/hora):</strong></label>
+    <input id="rampa" type="number" value="50">
+  </div>
+
+  <!-- BOTÃO -->
+  <button class="botao" onclick="calcularMeta()">CALCULAR META HORÁRIA</button>
+
+</div>
+
+
+<!-- ====================================================== -->
+<!-- CARD 3 — RESULTADO -->
+<!-- ====================================================== -->
+<div class="card">
+  <h2>Meta Horária Gerada</h2>
+
+  <table class="tabela-meta" id="tabela_resultado"></table>
+</div>
+
+
+<!-- ====================================================== -->
+<!-- CARD 4 — SALVAR -->
+<!-- ====================================================== -->
+<div class="card">
+  <button class="botao" onclick="salvarConfig()">SALVAR CONFIGURAÇÕES</button>
+</div>
+
+
+<!-- ====================================================== -->
+<!-- JAVASCRIPT DA PÁGINA -->
+<!-- ====================================================== -->
+<script>
+
+function coletarTurnos() {
+  const qtd = parseInt(document.getElementById("qtd_turnos").value);
+
+  let turnos = [];
+
+  if (qtd >= 1) {
+    turnos.push({
+      inicio: document.getElementById("t1_inicio").value,
+      fim: document.getElementById("t1_fim").value,
+      meta: document.getElementById("t1_meta").value || 0
+    });
+  }
+
+  if (qtd >= 2) {
+    turnos.push({
+      inicio: document.getElementById("t2_inicio").value,
+      fim: document.getElementById("t2_fim").value,
+      meta: document.getElementById("t2_meta").value || 0
+    });
+  }
+
+  if (qtd == 3) {
+    turnos.push({
+      inicio: document.getElementById("t3_inicio").value,
+      fim: document.getElementById("t3_fim").value,
+      meta: document.getElementById("t3_meta").value || 0
+    });
+  }
+
+  return turnos;
+}
+
+
+function calcularMeta() {
+
+  const turnos = coletarTurnos();
+  const rampa = document.getElementById("rampa").value;
+
+  fetch(window.location.pathname + "/calcular", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      turnos: turnos,
+      rampa: rampa
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    const tabela = document.getElementById("tabela_resultado");
+    tabela.innerHTML = "";
+
+    data.tabela.forEach(linha => {
+
+      if (linha.is_header) {
+        tabela.innerHTML += `
+          <tr class="turno-header">
+            <td colspan="2">${linha.turno}</td>
+          </tr>
+        `;
+      } else {
+        tabela.innerHTML += `
+          <tr>
+            <td>${linha.faixa}</td>
+            <td>${linha.meta} peças</td>
+          </tr>
+        `;
+      }
+    });
+
+  });
+}
+
+
+function salvarConfig() {
+
+  const turnos = coletarTurnos();
+  const rampa = document.getElementById("rampa").value;
+
+  fetch(window.location.pathname + "/salvar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      turnos: turnos,
+      rampa: rampa
+    })
+  })
+  .then(r => r.json())
+  .then(data => {
+    alert("Configurações salvas com sucesso!");
+  });
+}
+
+</script>
+
+{% endblock %}
