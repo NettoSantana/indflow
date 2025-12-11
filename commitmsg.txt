@@ -1,4 +1,7 @@
-﻿fix: corrige completamente a lógica da rampa industrial no config_maquina.html.
-Agora a rampa aplica percentual sobre a meta-hora e não mais sobre a meta total,
-com redistribuição proporcional das peças restantes entre as demais horas e ajuste
-final na última hora. Layout preservado. Tabela recalculada com precisão industrial.
+﻿feat: reescrita completa do server.py com logica industrial real.
+- meta da hora com rampa
+- producao da hora que zera automaticamente
+- percentual da hora e do turno
+- suporte a turno passando da meia-noite
+- backend encontra hora atual do turno
+- armazenamento interno de producao por hora
