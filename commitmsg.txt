@@ -1,4 +1,3 @@
-﻿feat: dashboard dinâmico com atualização real-time (1s)
-- leitura de /machine/status
-- atualização automática do card
-- status, meta, produção e percentual em tempo real
+﻿update: adiciona rotas de configuração de máquina, cálculo industrial de meta horária,
+persistência JSON em /data, ajustes completos no server.py para integração com ESP32
+e navegação para tela de configuração (config_maquina.html).
