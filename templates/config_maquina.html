@@ -5,7 +5,7 @@
 
 <div class="container">
 
-  <h1 class="section-title">Configuração da Máquina — MAQUINA 01</h1>
+  <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
 
   <div class="card">
 
@@ -56,6 +56,20 @@
 
 
 <script>
+// ===========================================
+// CAPTURA machine_id DA URL
+// ===========================================
+const machine_id = window.location.pathname.split("/").pop();
+console.log("Configuração da:", machine_id);
+
+// Atualiza título
+document.getElementById("titulo-maquina").textContent =
+  "Configuração da Máquina — " + machine_id.toUpperCase();
+
+
+// ===========================================
+// SUBMIT DO FORMULÁRIO
+// ===========================================
 document.getElementById("config-form").addEventListener("submit", function(e){
   e.preventDefault();
 
@@ -68,6 +82,7 @@ document.getElementById("config-form").addEventListener("submit", function(e){
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
+      machine_id: machine_id,
       meta_turno: meta,
       inicio: inicio,
       fim: fim,
@@ -82,10 +97,12 @@ document.getElementById("config-form").addEventListener("submit", function(e){
 });
 
 
-// BUSCA TABELA DO BACKEND APÓS SALVAR
+// ===========================================
+// BUSCAR TABELA DO BACKEND
+// ===========================================
 function carregarTabela(){
 
-  fetch("/machine/status")
+  fetch(`/machine/status?machine_id=${machine_id}`)
     .then(r => r.json())
     .then(data => {
 
