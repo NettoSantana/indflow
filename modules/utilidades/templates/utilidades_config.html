@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Configuração — Utilidade{% endblock %}
+
+{% block content %}
+
+<div class="container">
+
+  <h1 class="section-title">Configuração — {{ machine_id }}</h1>
+
+  <div class="card">
+
+    <form id="config-form">
+
+      <label>Nome do Equipamento:</label>
+      <input type="text" id="nome" placeholder="Ex: Compressor 01" required>
+
+      <label>Tipo:</label>
+      <select id="tipo">
+        <option>compressor</option>
+        <option>gerador</option>
+        <option>bomba</option>
+        <option>caldeira</option>
+        <option>outro</option>
+      </select>
+
+      <button class="btn btn-primary mt-20" type="submit">
+        Salvar Configurações
+      </button>
+
+    </form>
+
+  </div>
+
+</div>
+
+<script>
+const machine_id = "{{ machine_id }}";
+
+document.getElementById("config-form").addEventListener("submit", function(e){
+    e.preventDefault();
+
+    const nome = document.getElementById("nome").value;
+    const tipo = document.getElementById("tipo").value;
+
+    fetch("/utilidades/config/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            machine_id: machine_id,
+            nome: nome,
+            tipo: tipo
+        })
+    })
+    .then(r => r.json())
+    .then(resp => {
+        alert("Configurações salvas com sucesso!");
+    });
+});
+</script>
+
+{% endblock %}
