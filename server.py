@@ -1,5 +1,9 @@
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
+
+# ===============================================
+# BLUEPRINTS
+# ===============================================
 from modules.producao.routes import producao_bp
 from modules.manutencao.routes import manutencao_bp
 from modules.ativos.routes import ativos_bp
@@ -9,153 +13,172 @@ from modules.devices.routes import devices_bp
 
 app = Flask(__name__)
 
+# ===============================================
+# ESTRUTURA PRINCIPAL (SUPORTE A MULTI-MÁQUINA)
+# ===============================================
+machine_data = {}
+
+def get_machine(machine_id):
+    """Garante que cada máquina tenha sua estrutura."""
+    if machine_id not in machine_data:
+        machine_data[machine_id] = {
+            "nome": machine_id.upper(),
+            "status": "DESCONHECIDO",
+
+            # Turno
+            "meta_turno": 0,
+            "turno_inicio": None,
+            "turno_fim": None,
+            "rampa_percentual": 0,
+
+            # Produção acumulada
+            "producao_turno": 0,
+            "producao_turno_anterior": 0,
+
+            # Hora
+            "horas_turno": [],
+            "meta_por_hora": [],
+            "producao_hora": 0,
+            "percentual_hora": 0,
+            "ultima_hora": None,
+
+            # Turno (dashboard)
+            "percentual_turno": 0,
+
+            # Controle de meia-noite
+            "ultimo_dia": datetime.now().date()
+        }
+    return machine_data[machine_id]
+
+
 # ============================================================
-# ESTRUTURA PRINCIPAL DA MÁQUINA
+# GERAR TABELA DE HORAS (APÓS CONFIGURAÇÃO)
 # ============================================================
-
-machine_data = {
-    "maquina01": {
-        "nome": "MAQUINA 01",
-        "status": "DESCONHECIDO",
-        "meta_turno": 0,
-        "producao_turno": 0,
-        "percentual_turno": 0,
-
-        # NOVOS CAMPOS
-        "turno_inicio": None,        # "06:00"
-        "turno_fim": None,           # "16:00"
-        "rampa_percentual": 0,       # Ex: 50 (%)
-        "horas_turno": [],           # Lista com faixas horárias
-        "meta_por_hora": [],         # Lista de metas hora a hora
-        "producao_hora": 0,          # Reinicia a cada hora
-        "percentual_hora": 0,
-        "ultima_hora": None          # Controle de troca de hora
-    }
-}
-
-
-# ============================================================
-# FUNÇÃO GERAR ESTRUTURA HORA A HORA (USADO NA CONFIGURAÇÃO)
-# ============================================================
-
 def gerar_tabela_horas(machine_id):
-    m = machine_data[machine_id]
+    m = get_machine(machine_id)
 
     inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
     fim = datetime.strptime(m["turno_fim"], "%H:%M")
     meta_total = m["meta_turno"]
     rampa = m["rampa_percentual"]
 
-    horas = []
-    metas = []
-
-    # Suporte a turno passando da meia-noite
     if fim <= inicio:
         fim = fim + timedelta(days=1)
 
     duracao = int((fim - inicio).total_seconds() // 3600)
 
-    m["horas_turno"] = []
-    m["meta_por_hora"] = []
+    horas = []
+    metas = []
 
-    # META POR HORA BASE
     meta_base = meta_total / duracao
     meta_rampa = meta_base * (rampa / 100)
     meta_restante = meta_total - meta_rampa
     meta_restante_por_hora = meta_restante / (duracao - 1)
 
     for i in range(duracao):
-        hora_i = inicio + timedelta(hours=i)
-        hora_f = hora_i + timedelta(hours=1)
+        h0 = inicio + timedelta(hours=i)
+        h1 = h0 + timedelta(hours=1)
 
-        faixa = f"{hora_i.strftime('%H:%M')} - {hora_f.strftime('%H:%M')}"
-        horas.append(faixa)
-
-        if i == 0:
-            metas.append(round(meta_rampa))
-        else:
-            metas.append(round(meta_restante_por_hora))
+        horas.append(f"{h0.strftime('%H:%M')} - {h1.strftime('%H:%M')}")
+        metas.append(round(meta_rampa) if i == 0 else round(meta_restante_por_hora))
 
     m["horas_turno"] = horas
     m["meta_por_hora"] = metas
 
 
 # ============================================================
-# ROTA DE CONFIGURAÇÃO (SALVA TURNOS + RAMPA + META)
+# ROTA SALVAR CONFIGURAÇÃO
 # ============================================================
-
 @app.route("/machine/config", methods=["POST"])
 def config_machine():
     data = request.json
-    m = machine_data["maquina01"]
+
+    machine_id = data.get("machine_id", "maquina01")
+    m = get_machine(machine_id)
 
     m["meta_turno"] = int(data["meta_turno"])
     m["turno_inicio"] = data["inicio"]
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = int(data["rampa"])
 
-    gerar_tabela_horas("maquina01")
+    gerar_tabela_horas(machine_id)
 
-    return jsonify({"message": "Configuração salva com sucesso"})
+    return jsonify({"message": "Configuração salva."})
 
 
 # ============================================================
-# ROTA PARA O ESP32 ENVIAR PRODUÇÃO
+# ROTA ESP32 → PRODUÇÃO (MODELO B1)
 # ============================================================
-
 @app.route("/machine/update", methods=["POST"])
 def update_machine():
     try:
         data = request.get_json()
-        m = machine_data["maquina01"]
 
-        m["nome"] = data.get("nome")
-        m["status"] = data.get("status", "DESCONHECIDO")
-        m["producao_turno"] = int(data["producao_turno"])
+        machine_id = data.get("machine_id", "maquina01")
+        m = get_machine(machine_id)
 
-        # Percentual do turno (não zera)
-        if m["meta_turno"] > 0:
-            m["percentual_turno"] = round((m["producao_turno"] / m["meta_turno"]) * 100)
-        else:
+        # ------------------------
+        # ZERAR À MEIA-NOITE
+        # ------------------------
+        hoje = datetime.now().date()
+        if m["ultimo_dia"] != hoje:
+            m["producao_turno"] = 0
+            m["producao_turno_anterior"] = 0
+            m["producao_hora"] = 0
+            m["percentual_hora"] = 0
             m["percentual_turno"] = 0
+            m["ultimo_dia"] = hoje
 
-        # ======================================================
-        # CÁLCULO DA META DA HORA ATUAL
-        # ======================================================
+        # ------------------------
+        # ATUALIZA DADOS BÁSICOS
+        # ------------------------
+        m["nome"] = data.get("nome", m["nome"])
+        m["status"] = data.get("status", "DESCONHECIDO")
 
-        agora = datetime.now().strftime("%H:%M")
-        hora_atual = datetime.strptime(agora, "%H:%M")
+        producao_atual = int(data["producao_turno"])
 
-        horas = m["horas_turno"]
-        metas = m["meta_por_hora"]
+        # ------------------------
+        # PRODUÇÃO DO TURNO
+        # ------------------------
+        m["producao_turno"] = producao_atual
 
+        if m["meta_turno"] > 0:
+            m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
+
+        # ------------------------
+        # PRODUÇÃO DA HORA (B1)
+        # ------------------------
+        agora = datetime.now()
+        hora_atual = agora.strftime("%H:%M")
+        hora_dt = datetime.strptime(hora_atual, "%H:%M")
+
+        faixa_idx = None
         meta_hora = 0
-        faixa_atual = None
 
-        for idx, faixa in enumerate(horas):
+        for idx, faixa in enumerate(m["horas_turno"]):
             inicio, fim = faixa.split(" - ")
             h0 = datetime.strptime(inicio, "%H:%M")
             h1 = datetime.strptime(fim, "%H:%M")
-
             if h1 <= h0:
                 h1 += timedelta(days=1)
 
-            if h0 <= hora_atual < h1:
-                faixa_atual = idx
-                meta_hora = metas[idx]
+            if h0 <= hora_dt < h1:
+                faixa_idx = idx
+                meta_hora = m["meta_por_hora"][idx]
                 break
 
-        # ======================================================
-        # PRODUÇÃO POR HORA (ZERA A CADA MUDANÇA DE HORA)
-        # ======================================================
-
-        if m["ultima_hora"] != faixa_atual:
+        # Troca de hora
+        if m["ultima_hora"] != faixa_idx:
+            m["producao_turno_anterior"] = producao_atual
             m["producao_hora"] = 0
-            m["ultima_hora"] = faixa_atual
+            m["ultima_hora"] = faixa_idx
 
-        # Produção da hora = incremento do turno desde último update
-        # sem diferença acumulada de horas anteriores
-        m["producao_hora"] += 1  # 1 pulso por update (ajustável depois)
+        # Diferença acumulada (produção da hora)
+        diff = producao_atual - m["producao_turno_anterior"]
+        if diff < 0:
+            diff = 0  # segurança
+
+        m["producao_hora"] = diff
 
         # Percentual da hora
         if meta_hora > 0:
@@ -170,18 +193,17 @@ def update_machine():
 
 
 # ============================================================
-# DASHBOARD CONSULTA DADOS
+# DASHBOARD
 # ============================================================
-
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
-    return jsonify(machine_data["maquina01"])
+    machine_id = "maquina01"
+    return jsonify(get_machine(machine_id))
 
 
 # ============================================================
 # BLUEPRINTS
 # ============================================================
-
 app.register_blueprint(producao_bp, url_prefix="/producao")
 app.register_blueprint(manutencao_bp, url_prefix="/manutencao")
 app.register_blueprint(ativos_bp, url_prefix="/ativos")
