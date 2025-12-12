@@ -1,5 +1,5 @@
-﻿feat: refatoração completa do producao_home.html
-- cards dinâmicos com leitura do backend
-- suporte imediato a multi-máquina
-- layout premium industrial
-- remoção de valores fixos
+﻿style: atualização completa do style.css
+- visual industrial premium
+- sombras e espaçamentos refinados
+- tipografia e paleta ajustadas
+- melhorias sem quebrar layout atual
