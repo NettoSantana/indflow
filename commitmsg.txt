@@ -1,7 +1,6 @@
-﻿feat: criação do módulo UTILIDADES
-- rotas completas
-- templates premium
-- status com indicador visual
-- horas de uso no card
-- integração com ESP32
-- suporte a multimáquina (util_comp01, util_ger01)
+﻿feat: server unificado para Produção (B1) + Utilidades
+- adicionada estrutura utilidades_data
+- blueprint utilidades registrado
+- máquinas util_comp01 e util_ger01 criadas
+- produção profissional (modelo B1)
+- melhoria geral da arquitetura industrial
