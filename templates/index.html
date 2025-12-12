@@ -94,7 +94,6 @@
       border-radius:2px;
     }
 
-    /* META / PRODUZIDO */
     .machine-stats{
       display:flex;
       justify-content:space-between;
@@ -112,18 +111,16 @@
 
   </style>
 
-  <!-- CARD CLICÁVEL -->
+  <!-- CARD ÚNICO CLICÁVEL -->
   <div class="machine-card" onclick="window.location.href='/producao/config/maquina01'">
 
     <div class="machine-header">
-      <div class="machine-name" id="nome-maquina">Carregando...</div>
+      <div class="machine-name">MAQUINA 01</div>
       <div id="status-badge" class="machine-status status-auto">AUTO</div>
     </div>
 
-    <!-- PERCENTUAIS LADO A LADO -->
     <div class="percent-container">
 
-      <!-- ESQUERDA: META DIÁRIA -->
       <div class="percent-block">
         <div class="percent-value" id="percent-turno">0%</div>
         <div class="percent-label">Meta do Turno</div>
@@ -131,7 +128,6 @@
 
       <div class="divider"></div>
 
-      <!-- DIREITA: META DA HORA -->
       <div class="percent-block">
         <div class="percent-value" id="percent-hora">0%</div>
         <div class="percent-label">Meta da Hora</div>
@@ -139,7 +135,6 @@
 
     </div>
 
-    <!-- META E PRODUZIDO -->
     <div class="machine-stats">
       <span>Meta: <b id="meta-turno">0</b></span>
       <span>Produzido: <b id="prod-turno">0</b></span>
@@ -149,8 +144,6 @@
 
 </div>
 
-
-<!-- SCRIPT PARA ATUALIZAR AUTOMATICAMENTE -->
 <script>
 function atualizarDashboard(){
 
@@ -158,10 +151,9 @@ function atualizarDashboard(){
     .then(r => r.json())
     .then(data => {
 
-      document.getElementById("nome-maquina").textContent = data.nome;
-
       // STATUS
       let statusBadge = document.getElementById("status-badge");
+
       statusBadge.textContent = data.status;
 
       if(data.status === "AUTO"){
@@ -177,10 +169,11 @@ function atualizarDashboard(){
 
       // META DA HORA
       document.getElementById("percent-hora").textContent = data.percentual_hora + "%";
+
     });
 }
 
-// Atualizar a cada 1 segundo
+// Atualiza a cada 1s
 setInterval(atualizarDashboard, 1000);
 atualizarDashboard();
 </script>
