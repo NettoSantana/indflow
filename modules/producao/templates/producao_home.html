@@ -2,36 +2,146 @@
 {% block title %}Produção - IndFlow{% endblock %}
 
 {% block content %}
-<div class="page">
-
-    <h1>Produção</h1>
-
-    <div class="machine-grid">
-
-        <!-- CARD CLICÁVEL -->
-        <a href="/producao/config/maquina01" class="machine-card-link">
-            <div class="machine-card">
-                <div class="machine-status automatic">AUTOMÁTICO</div>
-                <div class="machine-value">70%</div>
-            </div>
-        </a>
-
-    </div>
-
-</div>
 
 <style>
-    /* Garante que o card inteiro seja clicável */
+    .page {
+        padding: 24px;
+    }
+
+    .machine-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        margin-top: 20px;
+    }
+
     .machine-card-link {
         text-decoration: none;
         color: inherit;
     }
 
-    .machine-card-link:hover .machine-card {
-        transform: scale(1.02);
+    .machine-card {
+        background: #ffffff;
+        width: 320px;
+        border-radius: 16px;
+        padding: 22px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+        border: 1px solid #e5e7eb;
         transition: 0.2s;
+    }
+
+    .machine-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 6px 18px rgba(0,0,0,0.18);
         cursor: pointer;
     }
+
+    .machine-name {
+        font-size: 20px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-bottom: 8px;
+    }
+
+    .machine-status {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        color: white;
+        margin-bottom: 12px;
+    }
+
+    .status-auto {
+        background: #16a34a;
+    }
+
+    .status-manual {
+        background: #dc2626;
+    }
+
+    .machine-value {
+        font-size: 48px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-top: 10px;
+        text-align: right;
+    }
+
+    .machine-subtext {
+        font-size: 15px;
+        color: #475569;
+        text-align: right;
+        font-weight: 500;
+        margin-top: 4px;
+    }
 </style>
+
+<div class="page">
+
+    <h1 class="section-title">Produção</h1>
+
+    <div class="machine-grid" id="machines-area">
+        <!-- Os cards serão carregados dinamicamente -->
+    </div>
+
+</div>
+
+<script>
+/*
+   ==========================================
+   CARREGAR MÁQUINAS DINAMICAMENTE
+   (Hoje só temos maquina01, mas agora já
+    deixamos preparado para várias)
+   ==========================================
+*/
+
+const maquinas = ["maquina01"];  
+// No futuro basta adicionar: ["maquina01", "maquina02", "maquina03"]...
+
+function carregarMaquinas() {
+    let area = document.getElementById("machines-area");
+    area.innerHTML = "";
+
+    maquinas.forEach(id => {
+
+        fetch(`/machine/status?machine_id=${id}`)
+        .then(r => r.json())
+        .then(data => {
+
+            let statusClass = data.status === "AUTO"
+                ? "status-auto"
+                : "status-manual";
+
+            // Percentual turno = destaque principal do card
+            let percent = data.percentual_turno ?? 0;
+
+            let card = `
+                <a href="/producao/config/${id}" class="machine-card-link">
+                    <div class="machine-card">
+
+                        <div class="machine-name">${id.toUpperCase()}</div>
+
+                        <div class="machine-status ${statusClass}">
+                            ${data.status}
+                        </div>
+
+                        <div class="machine-value">${percent}%</div>
+                        <div class="machine-subtext">Meta do Turno</div>
+
+                    </div>
+                </a>
+            `;
+
+            area.innerHTML += card;
+        });
+    });
+}
+
+carregarMaquinas();
+// Atualiza a cada 2s
+setInterval(carregarMaquinas, 2000);
+</script>
 
 {% endblock %}
