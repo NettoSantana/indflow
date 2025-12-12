@@ -1,5 +1,3 @@
-﻿fix(utilidades): remover circular import e estruturar módulo corretamente
-- utilidades_data movido para data.py
-- routes reescrito para importação segura
-- server.py atualizado sem riscos de loop
-- sistema pronto para Railway
+﻿feat(ui): adicionar módulo Utilidades ao menu principal
+- Atualizado base.html
+- Mantido layout industrial e padronização
