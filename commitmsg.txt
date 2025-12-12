@@ -1,5 +1,6 @@
-﻿feat: atualização completa do index.html
-- layout premium industrial
-- cálculo correto de percentuais
-- estrutura preparada para multi-máquina
-- card único MAQUINA 01
+﻿feat: refatoração completa do server.py para Modelo B1
+- ESP32 envia produção acumulada
+- cálculo profissional da produção da hora
+- zeramento automático ao trocar hora e à meia-noite
+- arquitetura multi-máquina
+- dashboard mais sólido e confiável
