@@ -1,4 +1,5 @@
-﻿fix: ajustar navegação do card para página correta (/producao/config/maquina01)
-
-- Corrigido onclick incorreto (/producao/config)
-- Agora o card abre diretamente a página de configuração da máquina
+﻿feat: atualização completa do index.html
+- layout premium industrial
+- cálculo correto de percentuais
+- estrutura preparada para multi-máquina
+- card único MAQUINA 01
