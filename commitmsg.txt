@@ -1,6 +1,5 @@
-﻿feat: server unificado para Produção (B1) + Utilidades
-- adicionada estrutura utilidades_data
-- blueprint utilidades registrado
-- máquinas util_comp01 e util_ger01 criadas
-- produção profissional (modelo B1)
-- melhoria geral da arquitetura industrial
+﻿fix(utilidades): remover circular import e estruturar módulo corretamente
+- utilidades_data movido para data.py
+- routes reescrito para importação segura
+- server.py atualizado sem riscos de loop
+- sistema pronto para Railway
