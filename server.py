@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
 
 # ===============================================
-# BLUEPRINTS
+# BLUEPRINTS PRINCIPAIS
 # ===============================================
 from modules.producao.routes import producao_bp
 from modules.manutencao.routes import manutencao_bp
@@ -11,15 +11,19 @@ from modules.admin.routes import admin_bp
 from modules.api.routes import api_bp
 from modules.devices.routes import devices_bp
 
+# NOVO: Blueprint de UTILIDADES
+from modules.utilidades.routes import utilidades_bp
+
 app = Flask(__name__)
 
-# ===============================================
-# ESTRUTURA PRINCIPAL (SUPORTE A MULTI-MÁQUINA)
-# ===============================================
+# ============================================================
+# ====================== PRODUÇÃO =============================
+# ============================================================
+
 machine_data = {}
 
 def get_machine(machine_id):
-    """Garante que cada máquina tenha sua estrutura."""
+    """Garante que cada máquina de produção tenha sua estrutura."""
     if machine_id not in machine_data:
         machine_data[machine_id] = {
             "nome": machine_id.upper(),
@@ -42,17 +46,16 @@ def get_machine(machine_id):
             "percentual_hora": 0,
             "ultima_hora": None,
 
-            # Turno (dashboard)
+            # Dashboard
             "percentual_turno": 0,
 
-            # Controle de meia-noite
+            # Controle diário
             "ultimo_dia": datetime.now().date()
         }
     return machine_data[machine_id]
 
-
 # ============================================================
-# GERAR TABELA DE HORAS (APÓS CONFIGURAÇÃO)
+# GERAR TABELA DE HORAS
 # ============================================================
 def gerar_tabela_horas(machine_id):
     m = get_machine(machine_id)
@@ -63,7 +66,7 @@ def gerar_tabela_horas(machine_id):
     rampa = m["rampa_percentual"]
 
     if fim <= inicio:
-        fim = fim + timedelta(days=1)
+        fim += timedelta(days=1)
 
     duracao = int((fim - inicio).total_seconds() // 3600)
 
@@ -87,12 +90,11 @@ def gerar_tabela_horas(machine_id):
 
 
 # ============================================================
-# ROTA SALVAR CONFIGURAÇÃO
+# CONFIGURAÇÃO DA MÁQUINA DE PRODUÇÃO
 # ============================================================
 @app.route("/machine/config", methods=["POST"])
 def config_machine():
     data = request.json
-
     machine_id = data.get("machine_id", "maquina01")
     m = get_machine(machine_id)
 
@@ -105,21 +107,16 @@ def config_machine():
 
     return jsonify({"message": "Configuração salva."})
 
-
 # ============================================================
-# ROTA ESP32 → PRODUÇÃO (MODELO B1)
+# PRODUÇÃO → RECEBIMENTO DO ESP32 (MODELO B1)
 # ============================================================
 @app.route("/machine/update", methods=["POST"])
 def update_machine():
     try:
         data = request.get_json()
-
         machine_id = data.get("machine_id", "maquina01")
         m = get_machine(machine_id)
 
-        # ------------------------
-        # ZERAR À MEIA-NOITE
-        # ------------------------
         hoje = datetime.now().date()
         if m["ultimo_dia"] != hoje:
             m["producao_turno"] = 0
@@ -129,25 +126,17 @@ def update_machine():
             m["percentual_turno"] = 0
             m["ultimo_dia"] = hoje
 
-        # ------------------------
-        # ATUALIZA DADOS BÁSICOS
-        # ------------------------
         m["nome"] = data.get("nome", m["nome"])
         m["status"] = data.get("status", "DESCONHECIDO")
 
         producao_atual = int(data["producao_turno"])
-
-        # ------------------------
-        # PRODUÇÃO DO TURNO
-        # ------------------------
         m["producao_turno"] = producao_atual
 
+        # Percentual do turno
         if m["meta_turno"] > 0:
             m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
 
-        # ------------------------
-        # PRODUÇÃO DA HORA (B1)
-        # ------------------------
+        # Hora atual
         agora = datetime.now()
         hora_atual = agora.strftime("%H:%M")
         hora_dt = datetime.strptime(hora_atual, "%H:%M")
@@ -173,14 +162,12 @@ def update_machine():
             m["producao_hora"] = 0
             m["ultima_hora"] = faixa_idx
 
-        # Diferença acumulada (produção da hora)
         diff = producao_atual - m["producao_turno_anterior"]
         if diff < 0:
-            diff = 0  # segurança
+            diff = 0
 
         m["producao_hora"] = diff
 
-        # Percentual da hora
         if meta_hora > 0:
             m["percentual_hora"] = round((m["producao_hora"] / meta_hora) * 100)
         else:
@@ -193,16 +180,38 @@ def update_machine():
 
 
 # ============================================================
-# DASHBOARD
+# STATUS PARA O DASHBOARD
 # ============================================================
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
-    machine_id = "maquina01"
+    machine_id = request.args.get("machine_id", "maquina01")
     return jsonify(get_machine(machine_id))
 
+# ============================================================
+# =====================  UTILIDADES  ==========================
+# ============================================================
+
+utilidades_data = {
+    "util_comp01": {
+        "nome": "Compressor 01",
+        "tipo": "compressor",
+        "ligado": 0,
+        "falha": 0,
+        "horas_vida": 0,
+        "ultima_atualizacao": None
+    },
+    "util_ger01": {
+        "nome": "Gerador 01",
+        "tipo": "gerador",
+        "ligado": 0,
+        "falha": 0,
+        "horas_vida": 0,
+        "ultima_atualizacao": None
+    }
+}
 
 # ============================================================
-# BLUEPRINTS
+# BLUEPRINTS DO SISTEMA
 # ============================================================
 app.register_blueprint(producao_bp, url_prefix="/producao")
 app.register_blueprint(manutencao_bp, url_prefix="/manutencao")
@@ -211,11 +220,15 @@ app.register_blueprint(admin_bp, url_prefix="/admin")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(devices_bp, url_prefix="/devices")
 
+# NOVO: UTILIDADES
+app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
 
+# ============================================================
+# HOME
+# ============================================================
 @app.route("/")
 def index():
     return render_template("index.html")
-
 
 if __name__ == "__main__":
     app.run(debug=True)
