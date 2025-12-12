@@ -11,7 +11,7 @@ from modules.admin.routes import admin_bp
 from modules.api.routes import api_bp
 from modules.devices.routes import devices_bp
 
-# NOVO: Blueprint de UTILIDADES
+# UTILIDADES — sem circular import
 from modules.utilidades.routes import utilidades_bp
 
 app = Flask(__name__)
@@ -88,9 +88,8 @@ def gerar_tabela_horas(machine_id):
     m["horas_turno"] = horas
     m["meta_por_hora"] = metas
 
-
 # ============================================================
-# CONFIGURAÇÃO DA MÁQUINA DE PRODUÇÃO
+# CONFIGURAÇÃO DA MÁQUINA
 # ============================================================
 @app.route("/machine/config", methods=["POST"])
 def config_machine():
@@ -108,7 +107,7 @@ def config_machine():
     return jsonify({"message": "Configuração salva."})
 
 # ============================================================
-# PRODUÇÃO → RECEBIMENTO DO ESP32 (MODELO B1)
+# RECEBIMENTO DO ESP32 — MODELO B1
 # ============================================================
 @app.route("/machine/update", methods=["POST"])
 def update_machine():
@@ -132,11 +131,9 @@ def update_machine():
         producao_atual = int(data["producao_turno"])
         m["producao_turno"] = producao_atual
 
-        # Percentual do turno
         if m["meta_turno"] > 0:
             m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
 
-        # Hora atual
         agora = datetime.now()
         hora_atual = agora.strftime("%H:%M")
         hora_dt = datetime.strptime(hora_atual, "%H:%M")
@@ -156,7 +153,6 @@ def update_machine():
                 meta_hora = m["meta_por_hora"][idx]
                 break
 
-        # Troca de hora
         if m["ultima_hora"] != faixa_idx:
             m["producao_turno_anterior"] = producao_atual
             m["producao_hora"] = 0
@@ -180,7 +176,7 @@ def update_machine():
 
 
 # ============================================================
-# STATUS PARA O DASHBOARD
+# STATUS DO DASHBOARD
 # ============================================================
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
@@ -188,30 +184,7 @@ def machine_status():
     return jsonify(get_machine(machine_id))
 
 # ============================================================
-# =====================  UTILIDADES  ==========================
-# ============================================================
-
-utilidades_data = {
-    "util_comp01": {
-        "nome": "Compressor 01",
-        "tipo": "compressor",
-        "ligado": 0,
-        "falha": 0,
-        "horas_vida": 0,
-        "ultima_atualizacao": None
-    },
-    "util_ger01": {
-        "nome": "Gerador 01",
-        "tipo": "gerador",
-        "ligado": 0,
-        "falha": 0,
-        "horas_vida": 0,
-        "ultima_atualizacao": None
-    }
-}
-
-# ============================================================
-# BLUEPRINTS DO SISTEMA
+# BLUEPRINTS
 # ============================================================
 app.register_blueprint(producao_bp, url_prefix="/producao")
 app.register_blueprint(manutencao_bp, url_prefix="/manutencao")
@@ -219,9 +192,7 @@ app.register_blueprint(ativos_bp, url_prefix="/ativos")
 app.register_blueprint(admin_bp, url_prefix="/admin")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(devices_bp, url_prefix="/devices")
-
-# NOVO: UTILIDADES
-app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
+app.register_blueprint(utilidades_bp, url_prefix="/utilidades")  # agora correto
 
 # ============================================================
 # HOME
@@ -229,6 +200,7 @@ app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
 @app.route("/")
 def index():
     return render_template("index.html")
+
 
 if __name__ == "__main__":
     app.run(debug=True)
