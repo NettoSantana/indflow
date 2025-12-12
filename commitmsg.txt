@@ -1,5 +1,7 @@
-﻿style: atualização completa do style.css
-- visual industrial premium
-- sombras e espaçamentos refinados
-- tipografia e paleta ajustadas
-- melhorias sem quebrar layout atual
+﻿feat: criação do módulo UTILIDADES
+- rotas completas
+- templates premium
+- status com indicador visual
+- horas de uso no card
+- integração com ESP32
+- suporte a multimáquina (util_comp01, util_ger01)
