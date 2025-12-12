@@ -1,6 +1,5 @@
-﻿feat: refatoração completa do server.py para Modelo B1
-- ESP32 envia produção acumulada
-- cálculo profissional da produção da hora
-- zeramento automático ao trocar hora e à meia-noite
-- arquitetura multi-máquina
-- dashboard mais sólido e confiável
+﻿feat: config_maquina dinâmico com suporte a multi-máquina
+- captura machine_id da URL
+- envia machine_id no POST
+- carrega tabela da máquina selecionada
+- título dinâmico
