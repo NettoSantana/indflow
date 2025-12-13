@@ -55,6 +55,20 @@ def get_machine(machine_id):
     return machine_data[machine_id]
 
 # ============================================================
+# RESET DIÁRIO (USADO EM UPDATE E STATUS)
+# ============================================================
+def check_daily_reset(m):
+    hoje = datetime.now().date()
+    if m["ultimo_dia"] != hoje:
+        m["producao_turno"] = 0
+        m["producao_turno_anterior"] = 0
+        m["producao_hora"] = 0
+        m["percentual_hora"] = 0
+        m["percentual_turno"] = 0
+        m["ultima_hora"] = None
+        m["ultimo_dia"] = hoje
+
+# ============================================================
 # GERAR TABELA DE HORAS
 # ============================================================
 def gerar_tabela_horas(machine_id):
@@ -116,14 +130,8 @@ def update_machine():
         machine_id = data.get("machine_id", "maquina01")
         m = get_machine(machine_id)
 
-        hoje = datetime.now().date()
-        if m["ultimo_dia"] != hoje:
-            m["producao_turno"] = 0
-            m["producao_turno_anterior"] = 0
-            m["producao_hora"] = 0
-            m["percentual_hora"] = 0
-            m["percentual_turno"] = 0
-            m["ultimo_dia"] = hoje
+        # RESET DIÁRIO GARANTIDO
+        check_daily_reset(m)
 
         m["nome"] = data.get("nome", m["nome"])
         m["status"] = data.get("status", "DESCONHECIDO")
@@ -135,8 +143,7 @@ def update_machine():
             m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
 
         agora = datetime.now()
-        hora_atual = agora.strftime("%H:%M")
-        hora_dt = datetime.strptime(hora_atual, "%H:%M")
+        hora_dt = datetime.strptime(agora.strftime("%H:%M"), "%H:%M")
 
         faixa_idx = None
         meta_hora = 0
@@ -174,14 +181,18 @@ def update_machine():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 # ============================================================
 # STATUS DO DASHBOARD
 # ============================================================
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
     machine_id = request.args.get("machine_id", "maquina01")
-    return jsonify(get_machine(machine_id))
+    m = get_machine(machine_id)
+
+    # RESET DIÁRIO TAMBÉM AQUI
+    check_daily_reset(m)
+
+    return jsonify(m)
 
 # ============================================================
 # BLUEPRINTS
@@ -192,7 +203,7 @@ app.register_blueprint(ativos_bp, url_prefix="/ativos")
 app.register_blueprint(admin_bp, url_prefix="/admin")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(devices_bp, url_prefix="/devices")
-app.register_blueprint(utilidades_bp, url_prefix="/utilidades")  # agora correto
+app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
 
 # ============================================================
 # HOME
@@ -200,7 +211,6 @@ app.register_blueprint(utilidades_bp, url_prefix="/utilidades")  # agora correto
 @app.route("/")
 def index():
     return render_template("index.html")
-
 
 if __name__ == "__main__":
     app.run(debug=True)
