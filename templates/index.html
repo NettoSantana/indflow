@@ -53,18 +53,14 @@
       text-transform:uppercase;
     }
 
-    .status-auto{
-      background:#16a34a;
-    }
-    .status-manual{
-      background:#dc2626;
-    }
+    .status-auto{ background:#16a34a; }
+    .status-manual{ background:#dc2626; }
 
     /* BLOCO DOS PERCENTUAIS */
     .percent-container{
       display:flex;
       justify-content:space-between;
-      align-items:center;
+      align-items:flex-start;
       margin-top:10px;
     }
 
@@ -89,29 +85,27 @@
 
     .divider{
       width:2px;
-      height:80px;
+      height:140px;
       background:#cbd5e1;
       border-radius:2px;
     }
 
-    .machine-stats{
+    .stats-sub{
+      margin-top:14px;
+      font-size:18px;
+      font-weight:600;
+      color:#334155;
       display:flex;
       justify-content:space-between;
-      font-size:20px;
-      color:#334155;
-      margin-top:10px;
-      font-weight:600;
     }
 
-    .machine-stats span b{
+    .stats-sub b{
       font-weight:700;
       color:#0f172a;
-      font-size:22px;
     }
-
   </style>
 
-  <!-- CARD ÚNICO CLICÁVEL -->
+  <!-- CARD ÚNICO -->
   <div class="machine-card" onclick="window.location.href='/producao/config/maquina01'">
 
     <div class="machine-header">
@@ -121,23 +115,40 @@
 
     <div class="percent-container">
 
+      <!-- TURNO -->
       <div class="percent-block">
         <div class="percent-value" id="percent-turno">0%</div>
         <div class="percent-label">Meta do Turno</div>
+
+        <div class="stats-sub">
+          <span>Meta</span>
+          <b id="meta-turno">0</b>
+        </div>
+
+        <div class="stats-sub">
+          <span>Produzido</span>
+          <b id="prod-turno">0</b>
+        </div>
       </div>
 
       <div class="divider"></div>
 
+      <!-- HORA -->
       <div class="percent-block">
         <div class="percent-value" id="percent-hora">0%</div>
         <div class="percent-label">Meta da Hora</div>
+
+        <div class="stats-sub">
+          <span>Meta</span>
+          <b id="meta-hora">0</b>
+        </div>
+
+        <div class="stats-sub">
+          <span>Produzido</span>
+          <b id="prod-hora">0</b>
+        </div>
       </div>
 
-    </div>
-
-    <div class="machine-stats">
-      <span>Meta: <b id="meta-turno">0</b></span>
-      <span>Produzido: <b id="prod-turno">0</b></span>
     </div>
 
   </div>
@@ -153,27 +164,25 @@ function atualizarDashboard(){
 
       // STATUS
       let statusBadge = document.getElementById("status-badge");
-
       statusBadge.textContent = data.status;
+      statusBadge.className =
+        "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
 
-      if(data.status === "AUTO"){
-        statusBadge.className = "machine-status status-auto";
-      } else {
-        statusBadge.className = "machine-status status-manual";
-      }
-
-      // META DO TURNO
+      // TURNO
+      document.getElementById("percent-turno").textContent = data.percentual_turno + "%";
       document.getElementById("meta-turno").textContent = data.meta_turno;
       document.getElementById("prod-turno").textContent = data.producao_turno;
-      document.getElementById("percent-turno").textContent = data.percentual_turno + "%";
 
-      // META DA HORA
+      // HORA
       document.getElementById("percent-hora").textContent = data.percentual_hora + "%";
+      document.getElementById("meta-hora").textContent =
+        data.meta_por_hora?.[data.ultima_hora] ?? 0;
+      document.getElementById("prod-hora").textContent = data.producao_hora;
 
     });
 }
 
-// Atualiza a cada 1s
+// Atualização temporizada
 setInterval(atualizarDashboard, 1000);
 atualizarDashboard();
 </script>
