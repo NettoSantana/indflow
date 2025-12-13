@@ -4,140 +4,142 @@
 {% block content %}
 
 <style>
-    .page {
-        padding: 24px;
-    }
+  .page {
+    padding: 24px;
+  }
 
-    .machine-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 24px;
-        margin-top: 20px;
-    }
+  .machine-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 20px;
+  }
 
-    .machine-card-link {
-        text-decoration: none;
-        color: inherit;
-    }
+  .machine-card-link {
+    text-decoration: none;
+    color: inherit;
+  }
 
-    .machine-card {
-        background: #ffffff;
-        width: 420px;
-        border-radius: 20px;
-        padding: 28px;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.12);
-        border: 1px solid #e5e7eb;
-        transition: 0.2s;
-    }
+  .machine-card {
+    background: #ffffff;
+    width: 420px;
+    border-radius: 20px;
+    padding: 28px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+    border: 1px solid #e5e7eb;
+    transition: 0.2s;
+  }
 
-    .machine-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.20);
-    }
+  .machine-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.20);
+  }
 
-    .machine-name {
-        font-size: 24px;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 8px;
-    }
+  .machine-name {
+    font-size: 24px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 8px;
+  }
 
-    .status-line {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 18px;
-        font-weight: 600;
-        margin-top: 10px;
-    }
+  .status-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 18px;
+    font-weight: 600;
+    margin-top: 10px;
+  }
 
-    .dot-on {
-        height: 14px;
-        width: 14px;
-        border-radius: 50%;
-        background: #16a34a;
-    }
+  .dot {
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+  }
 
-    .dot-off {
-        height: 14px;
-        width: 14px;
-        border-radius: 50%;
-        background: #6b7280;
-    }
+  .dot-on { background: #16a34a; }
+  .dot-off { background: #6b7280; }
+  .dot-fail { background: #dc2626; }
 
-    .dot-fail {
-        height: 14px;
-        width: 14px;
-        border-radius: 50%;
-        background: #dc2626;
-    }
-
-    .horas {
-        margin-top: 18px;
-        font-size: 18px;
-        font-weight: 600;
-        color: #334155;
-        text-align: right;
-    }
+  .horas {
+    margin-top: 18px;
+    font-size: 18px;
+    font-weight: 600;
+    color: #334155;
+    text-align: right;
+  }
 </style>
 
 <div class="page">
-
-    <h1 class="section-title">Utilidades</h1>
-
-    <div id="utilidades-grid" class="machine-grid"></div>
-
+  <h1 class="section-title">Utilidades</h1>
+  <div id="utilidades-grid" class="machine-grid"></div>
 </div>
 
 <script>
 const utilidades = [
-    { id: "util_comp01", nome: "Compressor 01" },
-    { id: "util_ger01", nome: "Gerador 01" }
+  { id: "util_comp01", nome: "Compressor 01" },
+  { id: "util_ger01",  nome: "Gerador 01" }
 ];
 
-function carregarUtilidades() {
+// ===============================
+// CRIA OS CARDS UMA ÚNICA VEZ
+// ===============================
+function criarCards() {
+  const area = document.getElementById("utilidades-grid");
 
-    let area = document.getElementById("utilidades-grid");
-    area.innerHTML = "";
+  utilidades.forEach(u => {
+    const card = document.createElement("a");
+    card.href = `/utilidades/config/${u.id}`;
+    card.className = "machine-card-link";
+    card.innerHTML = `
+      <div class="machine-card">
+        <div class="machine-name">${u.nome}</div>
 
-    utilidades.forEach(u => {
+        <div class="status-line">
+          <div id="dot-${u.id}" class="dot dot-off"></div>
+          <span id="status-${u.id}">DESLIGADO</span>
+        </div>
 
-        fetch(`/utilidades/status?machine_id=${u.id}`)
-        .then(r => r.json())
-        .then(data => {
-
-            let dot = data.falha == 1 ? "dot-fail" :
-                      data.ligado == 1 ? "dot-on" : "dot-off";
-
-            let textoStatus = data.falha == 1 ? "FALHA" :
-                              data.ligado == 1 ? "LIGADO" : "DESLIGADO";
-
-            let card = `
-                <a href="/utilidades/config/${u.id}" class="machine-card-link">
-                    <div class="machine-card">
-
-                        <div class="machine-name">${u.nome}</div>
-
-                        <div class="status-line">
-                            <div class="${dot}"></div>
-                            <span>${textoStatus}</span>
-                        </div>
-
-                        <div class="horas">
-                            Horas de Uso: ${data.horas_vida} h
-                        </div>
-
-                    </div>
-                </a>
-            `;
-
-            area.innerHTML += card;
-        });
-    });
+        <div class="horas">
+          Horas de Uso: <span id="horas-${u.id}">0</span> h
+        </div>
+      </div>
+    `;
+    area.appendChild(card);
+  });
 }
 
-carregarUtilidades();
-setInterval(carregarUtilidades, 2000);
+// ===============================
+// ATUALIZA SOMENTE OS VALORES
+// ===============================
+function atualizarUtilidades() {
+  utilidades.forEach(u => {
+    fetch(`/utilidades/status?machine_id=${u.id}`)
+      .then(r => r.json())
+      .then(data => {
+
+        const dot   = document.getElementById(`dot-${u.id}`);
+        const label = document.getElementById(`status-${u.id}`);
+        const horas = document.getElementById(`horas-${u.id}`);
+
+        dot.className = "dot " + (
+          data.falha == 1 ? "dot-fail" :
+          data.ligado == 1 ? "dot-on" : "dot-off"
+        );
+
+        label.textContent =
+          data.falha == 1 ? "FALHA" :
+          data.ligado == 1 ? "LIGADO" : "DESLIGADO";
+
+        horas.textContent = data.horas_vida;
+      });
+  });
+}
+
+// INIT
+criarCards();
+atualizarUtilidades();
+setInterval(atualizarUtilidades, 11000);
 </script>
 
 {% endblock %}
