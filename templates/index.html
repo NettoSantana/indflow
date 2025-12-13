@@ -15,7 +15,7 @@
 
     .machine-card{
       background:#ffffff;
-      width:420px;
+      width:440px;
       border-radius:20px;
       padding:28px;
       box-shadow:0 4px 14px rgba(0,0,0,0.12);
@@ -53,65 +53,60 @@
       text-transform:uppercase;
     }
 
-    .status-auto{
-      background:#16a34a;
-    }
-    .status-manual{
-      background:#dc2626;
-    }
+    .status-auto{ background:#16a34a; }
+    .status-manual{ background:#dc2626; }
 
-    /* BLOCO DOS PERCENTUAIS */
-    .percent-container{
+    /* BLOCO TURNO / HORA */
+    .stats-container{
       display:flex;
       justify-content:space-between;
-      align-items:center;
+      align-items:flex-start;
       margin-top:10px;
     }
 
-    .percent-block{
+    .stats-block{
       width:45%;
+    }
+
+    .stats-title{
+      font-size:16px;
+      font-weight:700;
+      color:#475569;
+      margin-bottom:10px;
       text-align:center;
     }
 
-    .percent-value{
-      font-size:62px;
-      font-weight:700;
-      color:#0f172a;
-      line-height:1;
-    }
-
-    .percent-label{
-      margin-top:6px;
+    .stats-line{
+      display:flex;
+      justify-content:space-between;
       font-size:18px;
       font-weight:600;
-      color:#475569;
+      color:#334155;
+      margin-bottom:6px;
+    }
+
+    .stats-line b{
+      font-weight:700;
+      color:#0f172a;
+    }
+
+    .percent-small{
+      text-align:center;
+      margin-top:8px;
+      font-size:20px;
+      font-weight:700;
+      color:#0f172a;
     }
 
     .divider{
       width:2px;
-      height:80px;
+      height:120px;
       background:#cbd5e1;
       border-radius:2px;
     }
-
-    .machine-stats{
-      display:flex;
-      justify-content:space-between;
-      font-size:20px;
-      color:#334155;
-      margin-top:10px;
-      font-weight:600;
-    }
-
-    .machine-stats span b{
-      font-weight:700;
-      color:#0f172a;
-      font-size:22px;
-    }
-
   </style>
 
-  <!-- CARD ÚNICO CLICÁVEL -->
+  <!-- CARD -->
   <div class="machine-card" onclick="window.location.href='/producao/config/maquina01'">
 
     <div class="machine-header">
@@ -119,25 +114,44 @@
       <div id="status-badge" class="machine-status status-auto">AUTO</div>
     </div>
 
-    <div class="percent-container">
+    <div class="stats-container">
 
-      <div class="percent-block">
-        <div class="percent-value" id="percent-turno">0%</div>
-        <div class="percent-label">Meta do Turno</div>
+      <!-- TURNO -->
+      <div class="stats-block">
+        <div class="stats-title">TURNO</div>
+
+        <div class="stats-line">
+          <span>Meta</span>
+          <b id="meta-turno">0</b>
+        </div>
+
+        <div class="stats-line">
+          <span>Produzido</span>
+          <b id="prod-turno">0</b>
+        </div>
+
+        <div class="percent-small" id="percent-turno">0%</div>
       </div>
 
       <div class="divider"></div>
 
-      <div class="percent-block">
-        <div class="percent-value" id="percent-hora">0%</div>
-        <div class="percent-label">Meta da Hora</div>
+      <!-- HORA -->
+      <div class="stats-block">
+        <div class="stats-title">HORA</div>
+
+        <div class="stats-line">
+          <span>Meta</span>
+          <b id="meta-hora">0</b>
+        </div>
+
+        <div class="stats-line">
+          <span>Produzido</span>
+          <b id="prod-hora">0</b>
+        </div>
+
+        <div class="percent-small" id="percent-hora">0%</div>
       </div>
 
-    </div>
-
-    <div class="machine-stats">
-      <span>Meta: <b id="meta-turno">0</b></span>
-      <span>Produzido: <b id="prod-turno">0</b></span>
     </div>
 
   </div>
@@ -153,27 +167,24 @@ function atualizarDashboard(){
 
       // STATUS
       let statusBadge = document.getElementById("status-badge");
-
       statusBadge.textContent = data.status;
+      statusBadge.className =
+        "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
 
-      if(data.status === "AUTO"){
-        statusBadge.className = "machine-status status-auto";
-      } else {
-        statusBadge.className = "machine-status status-manual";
-      }
-
-      // META DO TURNO
+      // TURNO
       document.getElementById("meta-turno").textContent = data.meta_turno;
       document.getElementById("prod-turno").textContent = data.producao_turno;
       document.getElementById("percent-turno").textContent = data.percentual_turno + "%";
 
-      // META DA HORA
+      // HORA
+      document.getElementById("meta-hora").textContent = data.meta_por_hora?.[data.ultima_hora] ?? 0;
+      document.getElementById("prod-hora").textContent = data.producao_hora;
       document.getElementById("percent-hora").textContent = data.percentual_hora + "%";
 
     });
 }
 
-// Atualiza a cada 1s
+// Atualização temporizada (estável)
 setInterval(atualizarDashboard, 1000);
 atualizarDashboard();
 </script>
