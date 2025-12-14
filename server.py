@@ -23,50 +23,41 @@ app = Flask(__name__)
 machine_data = {}
 
 def get_machine(machine_id):
-    """Garante que cada máquina de produção tenha sua estrutura."""
     if machine_id not in machine_data:
         machine_data[machine_id] = {
             "nome": machine_id.upper(),
             "status": "DESCONHECIDO",
 
-            # Turno
             "meta_turno": 0,
             "turno_inicio": None,
             "turno_fim": None,
             "rampa_percentual": 0,
 
-            # Produção acumulada
             "producao_turno": 0,
             "producao_turno_anterior": 0,
 
-            # Hora
             "horas_turno": [],
             "meta_por_hora": [],
             "producao_hora": 0,
             "percentual_hora": 0,
             "ultima_hora": None,
 
-            # Dashboard
             "percentual_turno": 0,
-
-            # Controle diário
             "ultimo_dia": datetime.now().date()
         }
     return machine_data[machine_id]
 
 # ============================================================
-# RESET DIÁRIO (USADO EM UPDATE E STATUS)
+# RESET DIÁRIO (CONTEXTO)
 # ============================================================
-def check_daily_reset(m):
-    hoje = datetime.now().date()
-    if m["ultimo_dia"] != hoje:
-        m["producao_turno"] = 0
-        m["producao_turno_anterior"] = 0
-        m["producao_hora"] = 0
-        m["percentual_hora"] = 0
-        m["percentual_turno"] = 0
-        m["ultima_hora"] = None
-        m["ultimo_dia"] = hoje
+def reset_contexto(m):
+    m["producao_turno"] = 0
+    m["producao_turno_anterior"] = 0
+    m["producao_hora"] = 0
+    m["percentual_hora"] = 0
+    m["percentual_turno"] = 0
+    m["ultima_hora"] = None
+    m["ultimo_dia"] = datetime.now().date()
 
 # ============================================================
 # GERAR TABELA DE HORAS
@@ -76,13 +67,14 @@ def gerar_tabela_horas(machine_id):
 
     inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
     fim = datetime.strptime(m["turno_fim"], "%H:%M")
-    meta_total = m["meta_turno"]
-    rampa = m["rampa_percentual"]
 
     if fim <= inicio:
         fim += timedelta(days=1)
 
     duracao = int((fim - inicio).total_seconds() // 3600)
+
+    meta_total = m["meta_turno"]
+    rampa = m["rampa_percentual"]
 
     horas = []
     metas = []
@@ -129,9 +121,6 @@ def update_machine():
         data = request.get_json()
         machine_id = data.get("machine_id", "maquina01")
         m = get_machine(machine_id)
-
-        # RESET DIÁRIO GARANTIDO
-        check_daily_reset(m)
 
         m["nome"] = data.get("nome", m["nome"])
         m["status"] = data.get("status", "DESCONHECIDO")
@@ -187,12 +176,16 @@ def update_machine():
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
     machine_id = request.args.get("machine_id", "maquina01")
-    m = get_machine(machine_id)
+    return jsonify(get_machine(machine_id))
 
-    # RESET DIÁRIO TAMBÉM AQUI
-    check_daily_reset(m)
-
-    return jsonify(m)
+# ============================================================
+# 🔥 RESET MANUAL DO DIA (OPÇÃO A)
+# ============================================================
+@app.route("/admin/reset-dia", methods=["POST"])
+def reset_dia():
+    for m in machine_data.values():
+        reset_contexto(m)
+    return jsonify({"message": "Reset diário executado com sucesso."})
 
 # ============================================================
 # BLUEPRINTS
