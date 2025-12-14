@@ -1,17 +1,12 @@
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
 
-# ===============================================
-# BLUEPRINTS PRINCIPAIS
-# ===============================================
 from modules.producao.routes import producao_bp
 from modules.manutencao.routes import manutencao_bp
 from modules.ativos.routes import ativos_bp
 from modules.admin.routes import admin_bp
 from modules.api.routes import api_bp
 from modules.devices.routes import devices_bp
-
-# UTILIDADES — sem circular import
 from modules.utilidades.routes import utilidades_bp
 
 app = Flask(__name__)
@@ -33,6 +28,13 @@ def get_machine(machine_id):
             "turno_fim": None,
             "rampa_percentual": 0,
 
+            # ESP manda ABSOLUTO
+            "esp_absoluto": 0,
+
+            # BASELINE DIÁRIO
+            "baseline_diario": 0,
+
+            # Calculados
             "producao_turno": 0,
             "producao_turno_anterior": 0,
 
@@ -48,9 +50,10 @@ def get_machine(machine_id):
     return machine_data[machine_id]
 
 # ============================================================
-# RESET DIÁRIO (CONTEXTO)
+# RESET DIÁRIO (LÓGICO)
 # ============================================================
 def reset_contexto(m):
+    m["baseline_diario"] = m["esp_absoluto"]
     m["producao_turno"] = 0
     m["producao_turno_anterior"] = 0
     m["producao_hora"] = 0
@@ -95,42 +98,52 @@ def gerar_tabela_horas(machine_id):
     m["meta_por_hora"] = metas
 
 # ============================================================
-# CONFIGURAÇÃO DA MÁQUINA
+# CONFIGURAÇÃO
 # ============================================================
 @app.route("/machine/config", methods=["POST"])
 def config_machine():
     data = request.json
-    machine_id = data.get("machine_id", "maquina01")
-    m = get_machine(machine_id)
+    m = get_machine(data.get("machine_id", "maquina01"))
 
     m["meta_turno"] = int(data["meta_turno"])
     m["turno_inicio"] = data["inicio"]
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = int(data["rampa"])
 
-    gerar_tabela_horas(machine_id)
+    gerar_tabela_horas(data.get("machine_id", "maquina01"))
 
     return jsonify({"message": "Configuração salva."})
 
 # ============================================================
-# RECEBIMENTO DO ESP32 — MODELO B1
+# UPDATE ESP
 # ============================================================
 @app.route("/machine/update", methods=["POST"])
 def update_machine():
     try:
         data = request.get_json()
-        machine_id = data.get("machine_id", "maquina01")
-        m = get_machine(machine_id)
+        m = get_machine(data.get("machine_id", "maquina01"))
+
+        # Reset automático por dia
+        if m["ultimo_dia"] != datetime.now().date():
+            reset_contexto(m)
 
         m["nome"] = data.get("nome", m["nome"])
         m["status"] = data.get("status", "DESCONHECIDO")
 
-        producao_atual = int(data["producao_turno"])
+        # ESP ABSOLUTO
+        m["esp_absoluto"] = int(data["producao_turno"])
+
+        # PRODUÇÃO DO DIA = ABSOLUTO - BASELINE
+        producao_atual = m["esp_absoluto"] - m["baseline_diario"]
+        if producao_atual < 0:
+            producao_atual = 0
+
         m["producao_turno"] = producao_atual
 
         if m["meta_turno"] > 0:
             m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
 
+        # HORA
         agora = datetime.now()
         hora_dt = datetime.strptime(agora.strftime("%H:%M"), "%H:%M")
 
@@ -155,10 +168,7 @@ def update_machine():
             m["ultima_hora"] = faixa_idx
 
         diff = producao_atual - m["producao_turno_anterior"]
-        if diff < 0:
-            diff = 0
-
-        m["producao_hora"] = diff
+        m["producao_hora"] = max(diff, 0)
 
         if meta_hora > 0:
             m["percentual_hora"] = round((m["producao_hora"] / meta_hora) * 100)
@@ -171,15 +181,14 @@ def update_machine():
         return jsonify({"error": str(e)}), 500
 
 # ============================================================
-# STATUS DO DASHBOARD
+# STATUS
 # ============================================================
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
-    machine_id = request.args.get("machine_id", "maquina01")
-    return jsonify(get_machine(machine_id))
+    return jsonify(get_machine(request.args.get("machine_id", "maquina01")))
 
 # ============================================================
-# 🔥 RESET MANUAL DO DIA (OPÇÃO A)
+# RESET MANUAL
 # ============================================================
 @app.route("/admin/reset-dia", methods=["POST"])
 def reset_dia():
@@ -198,9 +207,6 @@ app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(devices_bp, url_prefix="/devices")
 app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
 
-# ============================================================
-# HOME
-# ============================================================
 @app.route("/")
 def index():
     return render_template("index.html")
