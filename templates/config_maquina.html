@@ -5,7 +5,16 @@
 
 <div class="container">
 
-  <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
+
+    <!-- BOTÃO HISTÓRICO -->
+    <a id="btn-historico"
+       href="#"
+       class="btn btn-secondary">
+       Histórico
+    </a>
+  </div>
 
   <div class="card">
 
@@ -32,7 +41,9 @@
       <label class="mt-20">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
 
-      <button class="btn btn-primary mt-20" type="submit">Salvar Configuração</button>
+      <button class="btn btn-primary mt-20" type="submit">
+        Salvar Configuração
+      </button>
     </form>
 
   </div>
@@ -54,18 +65,19 @@
 
 </div>
 
-
 <script>
 // ===========================================
 // CAPTURA machine_id DA URL
 // ===========================================
 const machine_id = window.location.pathname.split("/").pop();
-console.log("Configuração da:", machine_id);
 
 // Atualiza título
 document.getElementById("titulo-maquina").textContent =
   "Configuração da Máquina — " + machine_id.toUpperCase();
 
+// Ajusta link do histórico
+document.getElementById("btn-historico").href =
+  `/producao/historico?machine_id=${machine_id}`;
 
 // ===========================================
 // SUBMIT DO FORMULÁRIO
@@ -90,18 +102,16 @@ document.getElementById("config-form").addEventListener("submit", function(e){
     })
   })
   .then(r => r.json())
-  .then(resp => {
+  .then(() => {
     alert("Configuração salva com sucesso!");
     carregarTabela();
   });
 });
 
-
 // ===========================================
 // BUSCAR TABELA DO BACKEND
 // ===========================================
 function carregarTabela(){
-
   fetch(`/machine/status?machine_id=${machine_id}`)
     .then(r => r.json())
     .then(data => {
@@ -123,13 +133,12 @@ function carregarTabela(){
 
         tr.appendChild(tdHora);
         tr.appendChild(tdMeta);
-
         tbody.appendChild(tr);
       }
     });
 }
 
-// Carrega ao abrir a página
+// Carrega ao abrir
 carregarTabela();
 </script>
 
