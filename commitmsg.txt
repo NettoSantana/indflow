@@ -1,6 +1,5 @@
-﻿refactor(dashboard): reposicionar meta e produzido por turno e hora
+﻿feat: adiciona histórico diário de produção com SQLite
 
-- Percentuais mantidos como destaque principal
-- Meta e produzido do turno abaixo do percentual do turno
-- Meta e produzido da hora abaixo do percentual da hora
-- Nenhuma alteração de tamanho, fonte ou cor
+- grava produção no reset do dia
+- cria banco indflow.db
+- adiciona endpoint /producao/historico
