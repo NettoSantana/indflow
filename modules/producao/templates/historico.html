@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Histórico de Produção — IndFlow{% endblock %}
+
+{% block content %}
+
+<h1 style="margin-bottom:16px;">Histórico de Produção</h1>
+
+<div style="
+  background:#ffffff;
+  border-radius:12px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.08);
+  padding:20px;
+">
+
+  <table style="
+    width:100%;
+    border-collapse:collapse;
+    font-size:15px;
+  ">
+    <thead>
+      <tr style="background:#f1f5f9;">
+        <th style="padding:12px;text-align:left;">Data</th>
+        <th style="padding:12px;text-align:left;">Máquina</th>
+        <th style="padding:12px;text-align:right;">Produzido</th>
+        <th style="padding:12px;text-align:right;">Meta</th>
+        <th style="padding:12px;text-align:right;">%</th>
+      </tr>
+    </thead>
+
+    <tbody id="historico-body">
+      <tr>
+        <td colspan="5" style="padding:14px;text-align:center;color:#64748b;">
+          Carregando histórico...
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+</div>
+
+<script>
+fetch("/producao/historico")
+  .then(r => r.json())
+  .then(dados => {
+    const tbody = document.getElementById("historico-body");
+    tbody.innerHTML = "";
+
+    if(dados.length === 0){
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="5" style="padding:14px;text-align:center;color:#64748b;">
+            Nenhum registro encontrado
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    dados.forEach(linha => {
+      tbody.innerHTML += `
+        <tr style="border-bottom:1px solid #e5e7eb;">
+          <td style="padding:10px;">${linha.data}</td>
+          <td style="padding:10px;">${linha.machine_id}</td>
+          <td style="padding:10px;text-align:right;">${linha.produzido}</td>
+          <td style="padding:10px;text-align:right;">${linha.meta}</td>
+          <td style="padding:10px;text-align:right;">${linha.percentual}%</td>
+        </tr>
+      `;
+    });
+  });
+</script>
+
+{% endblock %}
+##
