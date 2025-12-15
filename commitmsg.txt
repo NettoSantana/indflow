@@ -1,3 +1,6 @@
-﻿feat(ui): adicionar módulo Utilidades ao menu principal
-- Atualizado base.html
-- Mantido layout industrial e padronização
+﻿refactor(dashboard): reposicionar meta e produzido por turno e hora
+
+- Percentuais mantidos como destaque principal
+- Meta e produzido do turno abaixo do percentual do turno
+- Meta e produzido da hora abaixo do percentual da hora
+- Nenhuma alteração de tamanho, fonte ou cor
