@@ -1,7 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime, timedelta
 import sqlite3
-import os
 
 # ============================================================
 # BLUEPRINTS
@@ -22,7 +21,9 @@ app = Flask(__name__)
 DB_PATH = "indflow.db"
 
 def get_db():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
     conn = get_db()
@@ -80,7 +81,6 @@ def get_machine(machine_id: str):
 # RESET + GRAVA HISTÓRICO
 # ============================================================
 def reset_contexto(m, machine_id):
-    # GRAVA HISTÓRICO DO DIA ANTERIOR
     conn = get_db()
     cur = conn.cursor()
 
@@ -98,7 +98,6 @@ def reset_contexto(m, machine_id):
     conn.commit()
     conn.close()
 
-    # RESET LÓGICO
     m["baseline_diario"] = m["esp_absoluto"]
     m["producao_turno"] = 0
     m["producao_turno_anterior"] = 0
@@ -107,39 +106,6 @@ def reset_contexto(m, machine_id):
     m["percentual_turno"] = 0
     m["ultima_hora"] = None
     m["ultimo_dia"] = datetime.now().date()
-
-# ============================================================
-# GERAR TABELA DE HORAS
-# ============================================================
-def gerar_tabela_horas(machine_id: str):
-    m = get_machine(machine_id)
-
-    inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
-    fim = datetime.strptime(m["turno_fim"], "%H:%M")
-
-    if fim <= inicio:
-        fim += timedelta(days=1)
-
-    duracao = int((fim - inicio).total_seconds() // 3600)
-
-    meta_total = m["meta_turno"]
-    rampa = m["rampa_percentual"]
-
-    horas, metas = [], []
-
-    meta_base = meta_total / duracao
-    meta_rampa = meta_base * (rampa / 100)
-    meta_restante = meta_total - meta_rampa
-    meta_restante_por_hora = meta_restante / (duracao - 1)
-
-    for i in range(duracao):
-        h0 = inicio + timedelta(hours=i)
-        h1 = h0 + timedelta(hours=1)
-        horas.append(f"{h0.strftime('%H:%M')} - {h1.strftime('%H:%M')}")
-        metas.append(round(meta_rampa) if i == 0 else round(meta_restante_por_hora))
-
-    m["horas_turno"] = horas
-    m["meta_por_hora"] = metas
 
 # ============================================================
 # UPDATE ESP
@@ -162,7 +128,9 @@ def update_machine():
     m["producao_turno"] = producao_atual
 
     if m["meta_turno"] > 0:
-        m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
+        m["percentual_turno"] = round(
+            (producao_atual / m["meta_turno"]) * 100
+        )
 
     return jsonify({"message": "OK"})
 
@@ -174,27 +142,48 @@ def machine_status():
     return jsonify(get_machine(request.args.get("machine_id", "maquina01")))
 
 # ============================================================
-# HISTÓRICO
+# HISTÓRICO (COM FILTROS)
 # ============================================================
 @app.route("/producao/historico", methods=["GET"])
 def historico_producao():
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("""
+    machine_id = request.args.get("machine_id")
+    inicio = request.args.get("inicio")
+    fim = request.args.get("fim")
+
+    query = """
         SELECT machine_id, data, produzido, meta, percentual
         FROM producao_diaria
-        ORDER BY data DESC
-    """)
+        WHERE 1=1
+    """
+    params = []
+
+    if machine_id:
+        query += " AND machine_id = ?"
+        params.append(machine_id)
+
+    if inicio:
+        query += " AND data >= ?"
+        params.append(inicio)
+
+    if fim:
+        query += " AND data <= ?"
+        params.append(fim)
+
+    query += " ORDER BY data DESC"
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(query, params)
     rows = cur.fetchall()
     conn.close()
 
     return jsonify([
         {
-            "machine_id": r[0],
-            "data": r[1],
-            "produzido": r[2],
-            "meta": r[3],
-            "percentual": r[4]
+            "machine_id": r["machine_id"],
+            "data": r["data"],
+            "produzido": r["produzido"],
+            "meta": r["meta"],
+            "percentual": r["percentual"]
         } for r in rows
     ])
 
