@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import sqlite3
 
 # ============================================================
@@ -123,6 +123,41 @@ def verificar_reset_diario(m, machine_id):
         m["reset_executado_hoje"] = False
 
 # ============================================================
+# CONFIGURAÇÃO DA MÁQUINA (FIX DO BOTÃO)
+# ============================================================
+@app.route("/machine/config", methods=["POST"])
+def configurar_maquina():
+    data = request.get_json()
+    machine_id = data.get("machine_id", "maquina01")
+    m = get_machine(machine_id)
+
+    m["meta_turno"] = int(data["meta_turno"])
+    m["turno_inicio"] = data["inicio"]
+    m["turno_fim"] = data["fim"]
+    m["rampa_percentual"] = int(data["rampa"])
+
+    inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
+    fim = datetime.strptime(m["turno_fim"], "%H:%M")
+
+    if fim <= inicio:
+        fim += timedelta(days=1)
+
+    horas = []
+    atual = inicio
+    while atual < fim:
+        proxima = atual + timedelta(hours=1)
+        horas.append(f"{atual.strftime('%H:%M')} - {proxima.strftime('%H:%M')}")
+        atual = proxima
+
+    m["horas_turno"] = horas
+
+    if horas:
+        meta_hora = round(m["meta_turno"] / len(horas))
+        m["meta_por_hora"] = [meta_hora] * len(horas)
+
+    return jsonify({"status": "configurado"})
+
+# ============================================================
 # UPDATE ESP
 # ============================================================
 @app.route("/machine/update", methods=["POST"])
@@ -149,16 +184,14 @@ def update_machine():
     return jsonify({"message": "OK"})
 
 # ============================================================
-# RESET MANUAL (BOTÃO)
+# RESET MANUAL
 # ============================================================
 @app.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
     data = request.get_json()
     machine_id = data.get("machine_id", "maquina01")
     m = get_machine(machine_id)
-
     reset_contexto(m, machine_id)
-
     return jsonify({"status": "resetado"})
 
 # ============================================================
