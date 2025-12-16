@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, time
 import sqlite3
 
 # ============================================================
@@ -73,12 +73,13 @@ def get_machine(machine_id: str):
             "ultima_hora": None,
 
             "percentual_turno": 0,
-            "ultimo_dia": datetime.now().date()
+            "ultimo_dia": datetime.now().date(),
+            "reset_executado_hoje": False
         }
     return machine_data[machine_id]
 
 # ============================================================
-# RESET + GRAVA HISTÓRICO
+# RESET + HISTÓRICO
 # ============================================================
 def reset_contexto(m, machine_id):
     conn = get_db()
@@ -106,6 +107,20 @@ def reset_contexto(m, machine_id):
     m["percentual_turno"] = 0
     m["ultima_hora"] = None
     m["ultimo_dia"] = datetime.now().date()
+    m["reset_executado_hoje"] = True
+
+# ============================================================
+# RESET AUTOMÁTICO 23:59
+# ============================================================
+def verificar_reset_diario(m, machine_id):
+    agora = datetime.now()
+    horario_reset = time(23, 59)
+
+    if agora.time() >= horario_reset and not m["reset_executado_hoje"]:
+        reset_contexto(m, machine_id)
+
+    if agora.date() != m["ultimo_dia"]:
+        m["reset_executado_hoje"] = False
 
 # ============================================================
 # UPDATE ESP
@@ -116,8 +131,7 @@ def update_machine():
     machine_id = data.get("machine_id", "maquina01")
     m = get_machine(machine_id)
 
-    if m["ultimo_dia"] != datetime.now().date():
-        reset_contexto(m, machine_id)
+    verificar_reset_diario(m, machine_id)
 
     m["status"] = data.get("status", "DESCONHECIDO")
     m["esp_absoluto"] = int(data["producao_turno"])
@@ -135,6 +149,19 @@ def update_machine():
     return jsonify({"message": "OK"})
 
 # ============================================================
+# RESET MANUAL (BOTÃO)
+# ============================================================
+@app.route("/admin/reset-manual", methods=["POST"])
+def reset_manual():
+    data = request.get_json()
+    machine_id = data.get("machine_id", "maquina01")
+    m = get_machine(machine_id)
+
+    reset_contexto(m, machine_id)
+
+    return jsonify({"status": "resetado"})
+
+# ============================================================
 # STATUS
 # ============================================================
 @app.route("/machine/status", methods=["GET"])
@@ -142,7 +169,7 @@ def machine_status():
     return jsonify(get_machine(request.args.get("machine_id", "maquina01")))
 
 # ============================================================
-# HISTÓRICO (COM FILTROS)
+# HISTÓRICO
 # ============================================================
 @app.route("/producao/historico", methods=["GET"])
 def historico_producao():
@@ -177,15 +204,7 @@ def historico_producao():
     rows = cur.fetchall()
     conn.close()
 
-    return jsonify([
-        {
-            "machine_id": r["machine_id"],
-            "data": r["data"],
-            "produzido": r["produzido"],
-            "meta": r["meta"],
-            "percentual": r["percentual"]
-        } for r in rows
-    ])
+    return jsonify([dict(r) for r in rows])
 
 # ============================================================
 # BLUEPRINTS
