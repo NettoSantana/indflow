@@ -5,15 +5,24 @@
 
 <div class="container">
 
-  <div style="display:flex; justify-content:space-between; align-items:center;">
+  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
     <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
 
-    <!-- BOTÃO HISTÓRICO -->
-    <a id="btn-historico"
-       href="#"
-       class="btn btn-secondary">
-       Histórico
-    </a>
+    <div style="display:flex; gap:10px;">
+      <!-- BOTÃO HISTÓRICO -->
+      <a id="btn-historico"
+         href="#"
+         class="btn btn-secondary">
+         Histórico
+      </a>
+
+      <!-- BOTÃO RESET -->
+      <button id="btn-reset"
+              class="btn"
+              style="background:#dc2626;color:#fff;">
+        Zerar Produção
+      </button>
+    </div>
   </div>
 
   <div class="card">
@@ -80,25 +89,40 @@ document.getElementById("btn-historico").href =
   `/producao/historico?machine_id=${machine_id}`;
 
 // ===========================================
+// RESET MANUAL
+// ===========================================
+document.getElementById("btn-reset").addEventListener("click", function(){
+  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")){
+    return;
+  }
+
+  fetch("/admin/reset-manual", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ machine_id })
+  })
+  .then(r => r.json())
+  .then(() => {
+    alert("Produção zerada com sucesso.");
+    carregarTabela();
+  });
+});
+
+// ===========================================
 // SUBMIT DO FORMULÁRIO
 // ===========================================
 document.getElementById("config-form").addEventListener("submit", function(e){
   e.preventDefault();
-
-  const meta = document.getElementById("meta").value;
-  const inicio = document.getElementById("inicio").value;
-  const fim = document.getElementById("fim").value;
-  const rampa = document.getElementById("rampa").value;
 
   fetch("/machine/config", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       machine_id: machine_id,
-      meta_turno: meta,
-      inicio: inicio,
-      fim: fim,
-      rampa: rampa
+      meta_turno: document.getElementById("meta").value,
+      inicio: document.getElementById("inicio").value,
+      fim: document.getElementById("fim").value,
+      rampa: document.getElementById("rampa").value
     })
   })
   .then(r => r.json())
@@ -109,7 +133,7 @@ document.getElementById("config-form").addEventListener("submit", function(e){
 });
 
 // ===========================================
-// BUSCAR TABELA DO BACKEND
+// BUSCAR TABELA
 // ===========================================
 function carregarTabela(){
   fetch(`/machine/status?machine_id=${machine_id}`)
@@ -138,7 +162,7 @@ function carregarTabela(){
     });
 }
 
-// Carrega ao abrir
+// Inicial
 carregarTabela();
 </script>
 
