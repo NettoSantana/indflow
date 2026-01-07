@@ -1,5 +1,3 @@
-﻿feat: adiciona histórico diário de produção com SQLite
+﻿test(main): ping para disparar deploy
 
-- grava produção no reset do dia
-- cria banco indflow.db
-- adiciona endpoint /producao/historico
+- arquivo _deploy_ping_main.txt para validar deploy do MAIN no Railway
