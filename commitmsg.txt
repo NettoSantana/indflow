@@ -1,1 +1,1 @@
-﻿chore(dev): ping para disparar deploy
+﻿test(dev): commit exclusivo para validar deploy apenas no DEV
