@@ -1,3 +1,3 @@
-﻿test(dev): ping para validar deploy apenas no DEV
+﻿docs(dev): registra regras de deploy (DEV vs MAIN)
 
-- cria dev_ping.txt apenas para teste de pipeline
+- cria DEPLOY_RULES.txt para evitar push direto no main
