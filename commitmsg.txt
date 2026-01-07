@@ -1,3 +1,3 @@
-﻿test(main): ping para disparar deploy
+﻿chore(dev): remove arquivos de teste/ping
 
-- arquivo _deploy_ping_main.txt para validar deploy do MAIN no Railway
+- remove dev_ping.txt e DEPLOY_RULES.txt
