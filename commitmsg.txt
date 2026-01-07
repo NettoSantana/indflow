@@ -1,3 +1,5 @@
-﻿test(main): ping para disparar deploy
+﻿feat(dev): rampa na primeira hora e redistribuição no restante
 
-- arquivo _deploy_ping_main.txt para validar deploy do MAIN no Railway
+- primeira hora aplica percentual de rampa
+- restante redistribuído para fechar meta_turno
+- soma final sempre igual a meta do turno
