@@ -1,3 +1,5 @@
-﻿chore(main): remove arquivo de ping de deploy
+﻿feat: cálculo correto de rampa por hora (primeira hora + redistribuição)
 
-- remove _deploy_ping_main.txt
+- rampa aplicada apenas na primeira hora
+- diferença redistribuída nas demais horas
+- soma final sempre igual à meta do turno
