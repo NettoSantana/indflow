@@ -1,1 +1,4 @@
-﻿docs(dev): registra regra da rampa no changelog
+﻿feat(dev): tempo medio acumulado por peça desde o inicio do turno
+
+- calcula minutos desde turno_inicio / producao_turno
+- expõe em /machine/status como tempo_medio_min_por_peca
