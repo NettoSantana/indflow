@@ -21,7 +21,7 @@
       box-shadow:0 4px 14px rgba(0,0,0,0.12);
       display:flex;
       flex-direction:column;
-      gap:22px;
+      gap:18px;
       border:1px solid #e5e7eb;
       cursor:pointer;
       transition:0.15s;
@@ -56,7 +56,6 @@
     .status-auto{ background:#16a34a; }
     .status-manual{ background:#dc2626; }
 
-    /* BLOCO DOS PERCENTUAIS */
     .percent-container{
       display:flex;
       justify-content:space-between;
@@ -103,9 +102,17 @@
       font-weight:700;
       color:#0f172a;
     }
+
+    /* NOVO */
+    .ritmo-medio{
+      margin-top:10px;
+      text-align:right;
+      font-size:15px;
+      font-weight:600;
+      color:#334155;
+    }
   </style>
 
-  <!-- CARD ÚNICO -->
   <div class="machine-card" onclick="window.location.href='/producao/config/maquina01'">
 
     <div class="machine-header">
@@ -115,7 +122,6 @@
 
     <div class="percent-container">
 
-      <!-- TURNO -->
       <div class="percent-block">
         <div class="percent-value" id="percent-turno">0%</div>
         <div class="percent-label">Meta do Turno</div>
@@ -133,7 +139,6 @@
 
       <div class="divider"></div>
 
-      <!-- HORA -->
       <div class="percent-block">
         <div class="percent-value" id="percent-hora">0%</div>
         <div class="percent-label">Meta da Hora</div>
@@ -151,38 +156,47 @@
 
     </div>
 
+    <!-- NOVA LINHA -->
+    <div class="ritmo-medio" id="ritmo-medio">
+      Ritmo médio: —
+    </div>
+
   </div>
 
 </div>
 
 <script>
+function formatTempoMedio(v){
+  const n = Number(v);
+  if(!Number.isFinite(n) || n <= 0) return "—";
+  return n.toFixed(2).replace(".", ",");
+}
+
 function atualizarDashboard(){
 
   fetch("/machine/status")
     .then(r => r.json())
     .then(data => {
 
-      // STATUS
       let statusBadge = document.getElementById("status-badge");
       statusBadge.textContent = data.status;
       statusBadge.className =
         "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
 
-      // TURNO
       document.getElementById("percent-turno").textContent = data.percentual_turno + "%";
       document.getElementById("meta-turno").textContent = data.meta_turno;
       document.getElementById("prod-turno").textContent = data.producao_turno;
 
-      // HORA
       document.getElementById("percent-hora").textContent = data.percentual_hora + "%";
       document.getElementById("meta-hora").textContent =
         data.meta_por_hora?.[data.ultima_hora] ?? 0;
       document.getElementById("prod-hora").textContent = data.producao_hora;
 
+      document.getElementById("ritmo-medio").textContent =
+        "Ritmo médio: " + formatTempoMedio(data.tempo_medio_min_por_peca) + " min/peça";
     });
 }
 
-// Atualização temporizada
 setInterval(atualizarDashboard, 1000);
 atualizarDashboard();
 </script>
