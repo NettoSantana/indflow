@@ -1,1 +1,3 @@
-﻿test(dev): commit exclusivo para validar deploy apenas no DEV
+﻿test(dev): ping para validar deploy apenas no DEV
+
+- cria dev_ping.txt apenas para teste de pipeline

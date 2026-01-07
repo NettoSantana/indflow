@@ -1,0 +1,5 @@
+﻿REGRAS DE DEPLOY (INDFLOW)
+
+- DEV: recebe commits diretos (deploy automático no Railway DEV)
+- MAIN: NUNCA recebe commit direto
+- MAIN só recebe merge vindo do DEV quando estiver estável
