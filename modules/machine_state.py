@@ -24,6 +24,9 @@ def get_machine(machine_id: str):
             "esp_absoluto": 0,
             "baseline_diario": 0,
 
+            # NOVO: baseline para calcular produção da HORA
+            "baseline_hora": 0,
+
             "producao_turno": 0,
             "producao_turno_anterior": 0,
 
