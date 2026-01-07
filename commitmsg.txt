@@ -1,1 +1,1 @@
-﻿feat(hora): calcula ultima_hora, baseline_hora, producao_hora e percentual_hora
+﻿refactor(machine): separa calculos em machine_calc e mantém rotas enxutas
