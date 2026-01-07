@@ -17,6 +17,10 @@ def get_machine(machine_id: str):
             "unidade_1": None,  # ex: "pcs" | "m" | "m2"
             "unidade_2": None,  # ex: "pcs" | "m" | "m2"
 
+            # NOVO: conversão (base atual = pcs)
+            # 1 pcs = X metros (m)
+            "conv_m_por_pcs": 1.0,
+
             "esp_absoluto": 0,
             "baseline_diario": 0,
 
