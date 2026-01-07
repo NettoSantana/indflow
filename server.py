@@ -72,6 +72,8 @@ def get_machine(machine_id: str):
             "ultima_hora": None,
 
             "percentual_turno": 0,
+            "tempo_medio_min_por_peca": None,
+
             "ultimo_dia": datetime.now().date(),
             "reset_executado_hoje": False
         }
@@ -104,6 +106,7 @@ def reset_contexto(m, machine_id):
     m["producao_hora"] = 0
     m["percentual_hora"] = 0
     m["percentual_turno"] = 0
+    m["tempo_medio_min_por_peca"] = None
     m["ultima_hora"] = None
     m["ultimo_dia"] = datetime.now().date()
     m["reset_executado_hoje"] = True
@@ -153,7 +156,7 @@ def configurar_maquina():
 
     m["horas_turno"] = horas
 
-    # ===== CÁLCULO CORRETO DA RAMPA =====
+    # ===== CÁLCULO CORRETO DA RAMPA (1ª hora + redistribuição) =====
     qtd_horas = len(horas)
 
     if qtd_horas > 0:
@@ -216,11 +219,37 @@ def reset_manual():
     return jsonify({"status": "resetado"})
 
 # ============================================================
-# STATUS
+# STATUS (calcula tempo médio acumulado desde início do turno)
 # ============================================================
 @app.route("/machine/status", methods=["GET"])
 def machine_status():
-    return jsonify(get_machine(request.args.get("machine_id", "maquina01")))
+    machine_id = request.args.get("machine_id", "maquina01")
+    m = get_machine(machine_id)
+
+    try:
+        produzido = int(m.get("producao_turno", 0) or 0)
+        inicio_str = m.get("turno_inicio")
+
+        if produzido > 0 and inicio_str:
+            agora = datetime.now()
+
+            inicio_dt = datetime.strptime(inicio_str, "%H:%M")
+            inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
+
+            # se o turno começou ontem (ex: turno noturno passando de 00:00)
+            if agora < inicio_dt:
+                inicio_dt -= timedelta(days=1)
+
+            minutos = (agora - inicio_dt).total_seconds() / 60
+            minutos = max(minutos, 1)
+
+            m["tempo_medio_min_por_peca"] = round(minutos / produzido, 2)
+        else:
+            m["tempo_medio_min_por_peca"] = None
+    except Exception:
+        m["tempo_medio_min_por_peca"] = None
+
+    return jsonify(m)
 
 # ============================================================
 # HISTÓRICO
