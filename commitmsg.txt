@@ -1,1 +1,7 @@
-﻿refactor(machine): separa calculos em machine_calc e mantém rotas enxutas
+﻿feat(configuracao): adiciona colunas Produzido Hora e Refugo Hora na tabela de distribuição
+
+- Tabela de meta por hora agora possui 4 colunas:
+  Faixa Horária, Meta da Hora, Produzido Hora, Refugo Hora
+- Produzido Hora exibido apenas para a hora atual
+- Refugo Hora iniciado em 0 (estrutura pronta para módulo de qualidade)
+- Nenhuma remoção de código existente
