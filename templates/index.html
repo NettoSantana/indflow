@@ -15,7 +15,7 @@
 
     .machine-card{
       background:#ffffff;
-      width:420px;
+      width:460px;
       border-radius:20px;
       padding:28px;
       box-shadow:0 4px 14px rgba(0,0,0,0.12);
@@ -84,18 +84,19 @@
 
     .divider{
       width:2px;
-      height:140px;
+      height:200px;
       background:#cbd5e1;
       border-radius:2px;
     }
 
     .stats-sub{
-      margin-top:14px;
-      font-size:18px;
+      margin-top:10px;
+      font-size:15px;
       font-weight:600;
       color:#334155;
       display:flex;
       justify-content:space-between;
+      gap:10px;
     }
 
     .stats-sub b{
@@ -103,9 +104,8 @@
       color:#0f172a;
     }
 
-    /* NOVO */
     .ritmo-medio{
-      margin-top:10px;
+      margin-top:12px;
       text-align:right;
       font-size:15px;
       font-weight:600;
@@ -122,41 +122,62 @@
 
     <div class="percent-container">
 
+      <!-- TURNO -->
       <div class="percent-block">
         <div class="percent-value" id="percent-turno">0%</div>
         <div class="percent-label">Meta do Turno</div>
 
         <div class="stats-sub">
-          <span>Meta</span>
-          <b id="meta-turno">0</b>
+          <span>Meta (UNI)</span>
+          <b id="meta-turno-uni">0</b>
         </div>
 
         <div class="stats-sub">
-          <span>Produzido</span>
-          <b id="prod-turno">0</b>
+          <span>Meta (ML)</span>
+          <b id="meta-turno-ml">0</b>
+        </div>
+
+        <div class="stats-sub">
+          <span>Produzido (UNI)</span>
+          <b id="prod-turno-uni">0</b>
+        </div>
+
+        <div class="stats-sub">
+          <span>Produzido (ML)</span>
+          <b id="prod-turno-ml">0</b>
         </div>
       </div>
 
       <div class="divider"></div>
 
+      <!-- HORA -->
       <div class="percent-block">
         <div class="percent-value" id="percent-hora">0%</div>
         <div class="percent-label">Meta da Hora</div>
 
         <div class="stats-sub">
-          <span>Meta</span>
-          <b id="meta-hora">0</b>
+          <span>Meta (UNI)</span>
+          <b id="meta-hora-uni">0</b>
         </div>
 
         <div class="stats-sub">
-          <span>Produzido</span>
-          <b id="prod-hora">0</b>
+          <span>Meta (ML)</span>
+          <b id="meta-hora-ml">0</b>
+        </div>
+
+        <div class="stats-sub">
+          <span>Produzido (UNI)</span>
+          <b id="prod-hora-uni">0</b>
+        </div>
+
+        <div class="stats-sub">
+          <span>Produzido (ML)</span>
+          <b id="prod-hora-ml">0</b>
         </div>
       </div>
 
     </div>
 
-    <!-- NOVA LINHA -->
     <div class="ritmo-medio" id="ritmo-medio">
       Ritmo médio: —
     </div>
@@ -166,34 +187,43 @@
 </div>
 
 <script>
-function formatTempoMedio(v){
-  const n = Number(v);
-  if(!Number.isFinite(n) || n <= 0) return "—";
-  return n.toFixed(2).replace(".", ",");
+function fmt(n){
+  const x = Number(n);
+  if(!Number.isFinite(x)) return "0";
+  return x.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
 }
 
 function atualizarDashboard(){
-
   fetch("/machine/status")
     .then(r => r.json())
     .then(data => {
 
-      let statusBadge = document.getElementById("status-badge");
+      // STATUS
+      const statusBadge = document.getElementById("status-badge");
       statusBadge.textContent = data.status;
       statusBadge.className =
         "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
 
+      // TURN0
       document.getElementById("percent-turno").textContent = data.percentual_turno + "%";
-      document.getElementById("meta-turno").textContent = data.meta_turno;
-      document.getElementById("prod-turno").textContent = data.producao_turno;
+      document.getElementById("meta-turno-uni").textContent = fmt(data.meta_turno);
+      document.getElementById("meta-turno-ml").textContent = fmt(data.meta_turno_ml);
+      document.getElementById("prod-turno-uni").textContent = fmt(data.producao_turno);
+      document.getElementById("prod-turno-ml").textContent = fmt(data.producao_turno_ml);
 
+      // HORA
       document.getElementById("percent-hora").textContent = data.percentual_hora + "%";
-      document.getElementById("meta-hora").textContent =
-        data.meta_por_hora?.[data.ultima_hora] ?? 0;
-      document.getElementById("prod-hora").textContent = data.producao_hora;
+      document.getElementById("meta-hora-uni").textContent = fmt(data.meta_hora_pcs);
+      document.getElementById("meta-hora-ml").textContent = fmt(data.meta_hora_ml);
+      document.getElementById("prod-hora-uni").textContent = fmt(data.producao_hora);
+      document.getElementById("prod-hora-ml").textContent = fmt(data.producao_hora_ml);
 
+      // RITMO
+      const tm = Number(data.tempo_medio_min_por_peca);
       document.getElementById("ritmo-medio").textContent =
-        "Ritmo médio: " + formatTempoMedio(data.tempo_medio_min_por_peca) + " min/peça";
+        Number.isFinite(tm) && tm > 0
+          ? "Ritmo médio: " + tm.toFixed(2).replace(".", ",") + " min/peça"
+          : "Ritmo médio: —";
     });
 }
 
