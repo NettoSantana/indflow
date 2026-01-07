@@ -23,7 +23,6 @@ def _aplicar_unidades(m, u1, u2):
     u1 = _norm_u(u1)
     u2 = _norm_u(u2)
 
-    # não permitir duplicado
     if u1 and u2 and u1 == u2:
         u2 = None
 
@@ -81,16 +80,19 @@ def configurar_maquina():
     machine_id = data.get("machine_id", "maquina01")
     m = get_machine(machine_id)
 
-    meta_turno = int(data["meta_turno"])
-    rampa = int(data["rampa"])
-
-    m["meta_turno"] = meta_turno
+    m["meta_turno"] = int(data["meta_turno"])
     m["turno_inicio"] = data["inicio"]
     m["turno_fim"] = data["fim"]
-    m["rampa_percentual"] = rampa
+    m["rampa_percentual"] = int(data["rampa"])
 
-    # NOVO: unidade (até 2)
     _aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
+
+    # NOVO: conversão pcs -> metro
+    if "conv_m_por_pcs" in data:
+        try:
+            m["conv_m_por_pcs"] = float(data["conv_m_por_pcs"])
+        except Exception:
+            pass
 
     inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
     fim = datetime.strptime(m["turno_fim"], "%H:%M")
@@ -109,30 +111,22 @@ def configurar_maquina():
 
     qtd_horas = len(horas)
     if qtd_horas > 0:
-        meta_base = meta_turno / qtd_horas
-
-        meta_primeira = round(meta_base * (rampa / 100))
-        restante = meta_turno - meta_primeira
+        meta_base = m["meta_turno"] / qtd_horas
+        meta_primeira = round(meta_base * (m["rampa_percentual"] / 100))
+        restante = m["meta_turno"] - meta_primeira
         horas_restantes = qtd_horas - 1
 
         metas = [meta_primeira]
 
         if horas_restantes > 0:
-            meta_restante_base = restante // horas_restantes
+            base = restante // horas_restantes
             sobra = restante % horas_restantes
-
             for i in range(horas_restantes):
-                valor = meta_restante_base + (1 if i < sobra else 0)
-                metas.append(valor)
+                metas.append(base + (1 if i < sobra else 0))
 
         m["meta_por_hora"] = metas
 
-    return jsonify({
-        "status": "configurado",
-        "meta_por_hora": m["meta_por_hora"],
-        "unidade_1": m.get("unidade_1"),
-        "unidade_2": m.get("unidade_2"),
-    })
+    return jsonify({"status": "configurado"})
 
 # ============================================================
 # UPDATE ESP
@@ -157,48 +151,44 @@ def update_machine():
     return jsonify({"message": "OK"})
 
 # ============================================================
-# RESET MANUAL
-# ============================================================
-@machine_bp.route("/admin/reset-manual", methods=["POST"])
-def reset_manual():
-    data = request.get_json()
-    machine_id = data.get("machine_id", "maquina01")
-    m = get_machine(machine_id)
-    reset_contexto(m, machine_id)
-    return jsonify({"status": "resetado"})
-
-# ============================================================
-# STATUS (tempo médio acumulado desde início do turno)
+# STATUS (AGORA COM ML)
 # ============================================================
 @machine_bp.route("/machine/status", methods=["GET"])
 def machine_status():
     machine_id = request.args.get("machine_id", "maquina01")
     m = get_machine(machine_id)
 
+    produzido_uni = int(m.get("producao_turno", 0))
+    meta_uni = int(m.get("meta_turno", 0))
+
+    conv = float(m.get("conv_m_por_pcs", 1))
+
+    produzido_ml = round(produzido_uni * conv, 2)
+    meta_ml = round(meta_uni * conv, 2)
+
     try:
-        produzido = int(m.get("producao_turno", 0) or 0)
         inicio_str = m.get("turno_inicio")
-
-        if produzido > 0 and inicio_str:
+        if produzido_uni > 0 and inicio_str:
             agora = datetime.now()
-
             inicio_dt = datetime.strptime(inicio_str, "%H:%M")
             inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
-
-            # turno atravessou meia-noite
             if agora < inicio_dt:
                 inicio_dt -= timedelta(days=1)
 
-            minutos = (agora - inicio_dt).total_seconds() / 60
-            minutos = max(minutos, 1)
-
-            m["tempo_medio_min_por_peca"] = round(minutos / produzido, 2)
+            minutos = max((agora - inicio_dt).total_seconds() / 60, 1)
+            m["tempo_medio_min_por_peca"] = round(minutos / produzido_uni, 2)
         else:
             m["tempo_medio_min_por_peca"] = None
     except Exception:
         m["tempo_medio_min_por_peca"] = None
 
-    return jsonify(m)
+    return jsonify({
+        **m,
+        "meta_uni": meta_uni,
+        "meta_ml": meta_ml,
+        "produzido_uni": produzido_uni,
+        "produzido_ml": produzido_ml
+    })
 
 # ============================================================
 # HISTÓRICO
@@ -219,11 +209,9 @@ def historico_producao():
     if machine_id:
         query += " AND machine_id = ?"
         params.append(machine_id)
-
     if inicio:
         query += " AND data >= ?"
         params.append(inicio)
-
     if fim:
         query += " AND data <= ?"
         params.append(fim)
