@@ -1,1 +1,1 @@
-﻿refactor(server): separa rotas de maquina e db em modulos (sem mudar endpoints)
+﻿feat(config): adiciona unidade de producao (ate 2) e envia/salva via /machine/config
