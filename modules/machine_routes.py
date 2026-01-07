@@ -7,6 +7,30 @@ from modules.machine_state import get_machine
 machine_bp = Blueprint("machine_bp", __name__)
 
 # ============================================================
+# UNIDADES (simples e travado)
+# ============================================================
+UNIDADES_VALIDAS = {"pcs", "m", "m2"}
+
+def _norm_u(v):
+    if v is None:
+        return None
+    v = str(v).strip().lower()
+    if v == "" or v == "none":
+        return None
+    return v if v in UNIDADES_VALIDAS else None
+
+def _aplicar_unidades(m, u1, u2):
+    u1 = _norm_u(u1)
+    u2 = _norm_u(u2)
+
+    # não permitir duplicado
+    if u1 and u2 and u1 == u2:
+        u2 = None
+
+    m["unidade_1"] = u1
+    m["unidade_2"] = u2
+
+# ============================================================
 # RESET + HISTÓRICO
 # ============================================================
 def reset_contexto(m, machine_id):
@@ -65,6 +89,9 @@ def configurar_maquina():
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = rampa
 
+    # NOVO: unidade (até 2)
+    _aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
+
     inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
     fim = datetime.strptime(m["turno_fim"], "%H:%M")
 
@@ -102,7 +129,9 @@ def configurar_maquina():
 
     return jsonify({
         "status": "configurado",
-        "meta_por_hora": m["meta_por_hora"]
+        "meta_por_hora": m["meta_por_hora"],
+        "unidade_1": m.get("unidade_1"),
+        "unidade_2": m.get("unidade_2"),
     })
 
 # ============================================================
@@ -156,6 +185,7 @@ def machine_status():
             inicio_dt = datetime.strptime(inicio_str, "%H:%M")
             inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
 
+            # turno atravessou meia-noite
             if agora < inicio_dt:
                 inicio_dt -= timedelta(days=1)
 

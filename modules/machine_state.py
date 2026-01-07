@@ -13,6 +13,10 @@ def get_machine(machine_id: str):
             "turno_fim": None,
             "rampa_percentual": 0,
 
+            # NOVO: unidade (até 2)
+            "unidade_1": None,  # ex: "pcs" | "m" | "m2"
+            "unidade_2": None,  # ex: "pcs" | "m" | "m2"
+
             "esp_absoluto": 0,
             "baseline_diario": 0,
 
