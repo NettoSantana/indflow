@@ -101,6 +101,10 @@
         <tr>
           <th>Faixa Horária</th>
           <th>Meta da Hora</th>
+
+          <!-- NOVO -->
+          <th>Produzido Hora</th>
+          <th>Refugo Hora</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -209,6 +213,10 @@ function carregarTabela(){
       const horas = data.horas_turno || [];
       const metas = data.meta_por_hora || [];
 
+      // NOVO: dados da hora atual
+      const idxHoraAtual = data.ultima_hora;
+      const produzidoHora = data.producao_hora ?? 0;
+
       let tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
 
@@ -221,8 +229,19 @@ function carregarTabela(){
         let tdMeta = document.createElement("td");
         tdMeta.textContent = metas[i];
 
+        // NOVO: Produzido Hora
+        let tdProduzidoHora = document.createElement("td");
+        tdProduzidoHora.textContent = (i === idxHoraAtual) ? produzidoHora : "—";
+
+        // NOVO: Refugo Hora (por enquanto 0)
+        let tdRefugoHora = document.createElement("td");
+        tdRefugoHora.textContent = 0;
+
         tr.appendChild(tdHora);
         tr.appendChild(tdMeta);
+        tr.appendChild(tdProduzidoHora);
+        tr.appendChild(tdRefugoHora);
+
         tbody.appendChild(tr);
       }
     });
