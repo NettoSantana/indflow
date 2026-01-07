@@ -31,6 +31,98 @@ def _aplicar_unidades(m, u1, u2):
     m["unidade_2"] = u2
 
 # ============================================================
+# NOVO: FUNÇÕES DA HORA (para rodar Meta/Produção/Percentual da hora)
+# ============================================================
+def _get_turno_inicio_dt(m, agora):
+    """
+    Retorna datetime do início do turno (hoje ou ontem se atravessou meia-noite).
+    """
+    inicio_str = m.get("turno_inicio")
+    if not inicio_str:
+        return None
+
+    inicio_dt = datetime.strptime(inicio_str, "%H:%M")
+    inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
+
+    # turno atravessou meia-noite (agora < inicio)
+    if agora < inicio_dt:
+        inicio_dt -= timedelta(days=1)
+
+    return inicio_dt
+
+def _calcular_ultima_hora_idx(m):
+    """
+    Calcula índice da hora atual do turno (0..n-1) baseado no turno_inicio e horas_turno.
+    """
+    horas = m.get("horas_turno") or []
+    if not horas:
+        return None
+
+    agora = datetime.now()
+    inicio_dt = _get_turno_inicio_dt(m, agora)
+    if not inicio_dt:
+        return None
+
+    diff_h = int((agora - inicio_dt).total_seconds() // 3600)
+    if diff_h < 0:
+        diff_h = 0
+
+    # limita ao tamanho do turno
+    if diff_h >= len(horas):
+        diff_h = len(horas) - 1
+
+    return diff_h
+
+def _atualizar_producao_hora(m):
+    """
+    Atualiza:
+    - ultima_hora (idx)
+    - baseline_hora (abs)
+    - producao_hora
+    - percentual_hora
+    """
+    idx = _calcular_ultima_hora_idx(m)
+
+    # se não tem turno configurado
+    if idx is None:
+        m["ultima_hora"] = None
+        m["producao_hora"] = 0
+        m["percentual_hora"] = 0
+        return
+
+    # se mudou a hora, zera a hora e reseta baseline
+    if m.get("ultima_hora") is None or m.get("ultima_hora") != idx:
+        m["ultima_hora"] = idx
+        # baseline da hora deve ser ABSOLUTO (esp_absoluto) no início da hora
+        m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
+        m["producao_hora"] = 0
+        m["percentual_hora"] = 0
+        return
+
+    # mesma hora: calcula produção da hora por diferença do absoluto
+    esp_abs = int(m.get("esp_absoluto", 0) or 0)
+    base_h = int(m.get("baseline_hora", esp_abs) or esp_abs)
+
+    prod_h = esp_abs - base_h
+    if prod_h < 0:
+        prod_h = 0
+
+    m["producao_hora"] = int(prod_h)
+
+    # percentual da hora baseado na meta da hora (pcs)
+    meta_h = 0
+    try:
+        meta_h = (m.get("meta_por_hora") or [])[idx]
+    except Exception:
+        meta_h = 0
+
+    if meta_h and meta_h > 0:
+        m["percentual_hora"] = round((m["producao_hora"] / meta_h) * 100)
+    else:
+        m["percentual_hira"] = 0  # (mantém sua estrutura, mas não usamos)
+        m["percentual_hora"] = 0
+
+# ============================================================
 # RESET + HISTÓRICO
 # ============================================================
 def reset_contexto(m, machine_id):
@@ -59,6 +151,10 @@ def reset_contexto(m, machine_id):
     m["percentual_turno"] = 0
     m["tempo_medio_min_por_peca"] = None
     m["ultima_hora"] = None
+
+    # NOVO: reset baseline da hora junto
+    m["baseline_hora"] = m["esp_absoluto"]
+
     m["ultimo_dia"] = datetime.now().date()
     m["reset_executado_hoje"] = True
 
@@ -136,6 +232,12 @@ def configurar_maquina():
 
         m["meta_por_hora"] = metas
 
+    # NOVO: ao configurar, define baseline da hora e hora atual
+    m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
+    m["ultima_hora"] = _calcular_ultima_hora_idx(m)
+    m["producao_hora"] = 0
+    m["percentual_hora"] = 0
+
     return jsonify({
         "status": "configurado",
         "meta_por_hora": m["meta_por_hora"],
@@ -164,6 +266,9 @@ def update_machine():
     if m["meta_turno"] > 0:
         m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
 
+    # NOVO: atualiza produção/percentual da hora a cada update do ESP
+    _atualizar_producao_hora(m)
+
     return jsonify({"message": "OK"})
 
 # ============================================================
@@ -185,6 +290,9 @@ def reset_manual():
 def machine_status():
     machine_id = request.args.get("machine_id", "maquina01")
     m = get_machine(machine_id)
+
+    # NOVO: garante que hora esteja atualizada mesmo sem update do ESP
+    _atualizar_producao_hora(m)
 
     # ===== tempo médio =====
     try:
