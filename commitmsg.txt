@@ -1,1 +1,1 @@
-﻿feat(config): adiciona conversao fisica (1 pcs = X m) na configuracao da maquina
+﻿feat(config): adiciona conversao 1pcs=Xm na configuracao e envia para /machine/config

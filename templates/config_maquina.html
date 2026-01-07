@@ -9,8 +9,17 @@
     <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
 
     <div style="display:flex; gap:10px;">
-      <a id="btn-historico" href="#" class="btn btn-secondary">Histórico</a>
-      <button id="btn-reset" class="btn" style="background:#dc2626;color:#fff;">
+      <!-- BOTÃO HISTÓRICO -->
+      <a id="btn-historico"
+         href="#"
+         class="btn btn-secondary">
+         Histórico
+      </a>
+
+      <!-- BOTÃO RESET -->
+      <button id="btn-reset"
+              class="btn"
+              style="background:#dc2626;color:#fff;">
         Zerar Produção
       </button>
     </div>
@@ -24,8 +33,9 @@
       <label>Meta do Turno (pcs):</label>
       <input type="number" id="meta" required>
 
-      <!-- UNIDADE DE PRODUÇÃO -->
+      <!-- NOVO: UNIDADE DE PRODUÇÃO (ATÉ 2) -->
       <label class="mt-20">Unidade de Produção (até 2):</label>
+
       <div class="row">
         <div class="col">
           <select id="unidade_1" class="input">
@@ -35,6 +45,7 @@
             <option value="m2">Metro quadrado (m²)</option>
           </select>
         </div>
+
         <div class="col">
           <select id="unidade_2" class="input">
             <option value="">—</option>
@@ -45,17 +56,15 @@
         </div>
       </div>
 
-      <!-- CONVERSÃO -->
-      <label class="mt-20">Conversão física da máquina:</label>
-      <small style="color:#64748b;">
-        1 peça equivale a quantos metros lineares?
-      </small>
+      <!-- NOVO: CONVERSOR (1 pcs = X m) -->
+      <label class="mt-20">Conversão (1 pcs = X metros):</label>
       <input
         type="number"
+        id="conv_m_por_pcs"
+        class="input"
         step="0.001"
         min="0.001"
-        id="conv_m_por_pcs"
-        placeholder="Ex: 0,85"
+        placeholder="Ex: 0.85"
         required
       >
 
@@ -65,6 +74,7 @@
           <label>Início do Turno:</label>
           <input type="time" id="inicio" required>
         </div>
+
         <div class="col">
           <label>Fim do Turno:</label>
           <input type="time" id="fim" required>
@@ -82,6 +92,7 @@
 
   </div>
 
+  <!-- TABELA GERADA AUTOMATICAMENTE -->
   <h2 class="section-title mt-30">Distribuição da Meta por Hora</h2>
 
   <div class="card">
@@ -107,65 +118,113 @@ document.getElementById("titulo-maquina").textContent =
 document.getElementById("btn-historico").href =
   `/producao/historico?machine_id=${machine_id}`;
 
-// RESET
-document.getElementById("btn-reset").addEventListener("click", () => {
-  if (!confirm("CONFIRMAR RESET DA PRODUÇÃO?")) return;
+// ===========================================
+// RESET MANUAL
+// ===========================================
+document.getElementById("btn-reset").addEventListener("click", function(){
+  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")){
+    return;
+  }
+
   fetch("/admin/reset-manual", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({ machine_id })
-  }).then(() => {
-    alert("Produção zerada.");
+  })
+  .then(r => r.json())
+  .then(() => {
+    alert("Produção zerada com sucesso.");
     carregarTabela();
   });
 });
 
-// NÃO DUPLICAR UNIDADES
+// ===========================================
+// UNIDADES: não permitir duplicado
+// ===========================================
 function garantirSemDuplicar(){
-  const u1 = unidade_1.value;
-  if (u1 && u1 === unidade_2.value) unidade_2.value = "";
+  const u1 = document.getElementById("unidade_1");
+  const u2 = document.getElementById("unidade_2");
+  if(u1.value && u2.value && u1.value === u2.value){
+    u2.value = "";
+  }
 }
-unidade_1.onchange = garantirSemDuplicar;
-unidade_2.onchange = garantirSemDuplicar;
+document.getElementById("unidade_1").addEventListener("change", garantirSemDuplicar);
+document.getElementById("unidade_2").addEventListener("change", garantirSemDuplicar);
 
-// SUBMIT
-document.getElementById("config-form").addEventListener("submit", e => {
+// ===========================================
+// SUBMIT DO FORMULÁRIO
+// ===========================================
+document.getElementById("config-form").addEventListener("submit", function(e){
   e.preventDefault();
+
   garantirSemDuplicar();
+
+  // valida conversão > 0
+  const conv = Number(document.getElementById("conv_m_por_pcs").value);
+  if(!Number.isFinite(conv) || conv <= 0){
+    alert("Conversão inválida. Use um número maior que zero. Ex: 0.85");
+    return;
+  }
 
   fetch("/machine/config", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
-      machine_id,
-      meta_turno: meta.value,
-      inicio: inicio.value,
-      fim: fim.value,
-      rampa: rampa.value,
-      unidade_1: unidade_1.value,
-      unidade_2: unidade_2.value,
-      conv_m_por_pcs: conv_m_por_pcs.value
+      machine_id: machine_id,
+      meta_turno: document.getElementById("meta").value,
+      inicio: document.getElementById("inicio").value,
+      fim: document.getElementById("fim").value,
+      rampa: document.getElementById("rampa").value,
+
+      unidade_1: document.getElementById("unidade_1").value,
+      unidade_2: document.getElementById("unidade_2").value,
+
+      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value
     })
-  }).then(() => {
-    alert("Configuração salva com sucesso.");
+  })
+  .then(r => r.json())
+  .then(() => {
+    alert("Configuração salva com sucesso!");
     carregarTabela();
   });
 });
 
-// STATUS
+// ===========================================
+// BUSCAR STATUS + TABELA
+// ===========================================
 function carregarTabela(){
   fetch(`/machine/status?machine_id=${machine_id}`)
     .then(r => r.json())
     .then(data => {
-      unidade_1.value = data.unidade_1 ?? "";
-      unidade_2.value = data.unidade_2 ?? "";
-      conv_m_por_pcs.value = data.conv_m_por_pcs ?? 1;
 
-      const tbody = document.querySelector("#tabela-horas tbody");
+      // carrega unidades salvas
+      document.getElementById("unidade_1").value = data.unidade_1 ?? "";
+      document.getElementById("unidade_2").value = data.unidade_2 ?? "";
+      garantirSemDuplicar();
+
+      // carrega conversão salva
+      // default: 1 (pra não ficar vazio)
+      document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
+
+      const horas = data.horas_turno || [];
+      const metas = data.meta_por_hora || [];
+
+      let tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
-      (data.horas_turno || []).forEach((h, i) => {
-        tbody.innerHTML += `<tr><td>${h}</td><td>${data.meta_por_hora[i]}</td></tr>`;
-      });
+
+      for(let i = 0; i < horas.length; i++){
+        let tr = document.createElement("tr");
+
+        let tdHora = document.createElement("td");
+        tdHora.textContent = horas[i];
+
+        let tdMeta = document.createElement("td");
+        tdMeta.textContent = metas[i];
+
+        tr.appendChild(tdHora);
+        tr.appendChild(tdMeta);
+        tbody.appendChild(tr);
+      }
     });
 }
 
