@@ -44,9 +44,8 @@ def init_db():
 init_db()
 
 # ============================================================
-# ====================== PRODUÇÃO =============================
+# PRODUÇÃO
 # ============================================================
-
 machine_data = {}
 
 def get_machine(machine_id: str):
@@ -123,7 +122,7 @@ def verificar_reset_diario(m, machine_id):
         m["reset_executado_hoje"] = False
 
 # ============================================================
-# CONFIGURAÇÃO DA MÁQUINA (FIX DO BOTÃO)
+# CONFIGURAÇÃO DA MÁQUINA
 # ============================================================
 @app.route("/machine/config", methods=["POST"])
 def configurar_maquina():
@@ -171,9 +170,7 @@ def update_machine():
     m["status"] = data.get("status", "DESCONHECIDO")
     m["esp_absoluto"] = int(data["producao_turno"])
 
-    producao_atual = m["esp_absoluto"] - m["baseline_diario"]
-    producao_atual = max(producao_atual, 0)
-
+    producao_atual = max(m["esp_absoluto"] - m["baseline_diario"], 0)
     m["producao_turno"] = producao_atual
 
     if m["meta_turno"] > 0:
@@ -253,6 +250,3 @@ app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
 @app.route("/")
 def index():
     return render_template("index.html")
-
-if __name__ == "__main__":
-    app.run(debug=True)
