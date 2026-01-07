@@ -1,1 +1,1 @@
-﻿feat(producao): exibe ritmo medio (min/peca) no card via /machine/status
+﻿feat(dashboard): exibe ritmo medio (min/peca) no card principal
