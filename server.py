@@ -122,7 +122,7 @@ def verificar_reset_diario(m, machine_id):
         m["reset_executado_hoje"] = False
 
 # ============================================================
-# CONFIGURAÇÃO DA MÁQUINA
+# CONFIGURAÇÃO DA MÁQUINA (COM RAMPA CORRETA)
 # ============================================================
 @app.route("/machine/config", methods=["POST"])
 def configurar_maquina():
@@ -130,10 +130,13 @@ def configurar_maquina():
     machine_id = data.get("machine_id", "maquina01")
     m = get_machine(machine_id)
 
-    m["meta_turno"] = int(data["meta_turno"])
+    meta_turno = int(data["meta_turno"])
+    rampa = int(data["rampa"])
+
+    m["meta_turno"] = meta_turno
     m["turno_inicio"] = data["inicio"]
     m["turno_fim"] = data["fim"]
-    m["rampa_percentual"] = int(data["rampa"])
+    m["rampa_percentual"] = rampa
 
     inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
     fim = datetime.strptime(m["turno_fim"], "%H:%M")
@@ -150,11 +153,32 @@ def configurar_maquina():
 
     m["horas_turno"] = horas
 
-    if horas:
-        meta_hora = round(m["meta_turno"] / len(horas))
-        m["meta_por_hora"] = [meta_hora] * len(horas)
+    # ===== CÁLCULO CORRETO DA RAMPA =====
+    qtd_horas = len(horas)
 
-    return jsonify({"status": "configurado"})
+    if qtd_horas > 0:
+        meta_base = meta_turno / qtd_horas
+
+        meta_primeira = round(meta_base * (rampa / 100))
+        restante = meta_turno - meta_primeira
+        horas_restantes = qtd_horas - 1
+
+        metas = [meta_primeira]
+
+        if horas_restantes > 0:
+            meta_restante_base = restante // horas_restantes
+            sobra = restante % horas_restantes
+
+            for i in range(horas_restantes):
+                valor = meta_restante_base + (1 if i < sobra else 0)
+                metas.append(valor)
+
+        m["meta_por_hora"] = metas
+
+    return jsonify({
+        "status": "configurado",
+        "meta_por_hora": m["meta_por_hora"]
+    })
 
 # ============================================================
 # UPDATE ESP

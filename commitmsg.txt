@@ -1,3 +1,3 @@
-﻿chore(dev): remove arquivos de teste/ping
+﻿chore(main): remove arquivo de ping de deploy
 
-- remove dev_ping.txt e DEPLOY_RULES.txt
+- remove _deploy_ping_main.txt
