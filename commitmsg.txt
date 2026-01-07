@@ -1,1 +1,1 @@
-﻿feat(dashboard): exibe ritmo medio (min/peca) no card principal
+﻿refactor(server): separa rotas de maquina e db em modulos (sem mudar endpoints)
