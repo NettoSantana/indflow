@@ -1,1 +1,1 @@
-﻿feat(config): adiciona conversao 1pcs=Xm na configuracao e envia para /machine/config
+﻿feat(hora): calcula ultima_hora, baseline_hora, producao_hora e percentual_hora
