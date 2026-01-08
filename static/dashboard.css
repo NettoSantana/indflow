@@ -1,3 +1,4 @@
+/* static/dashboard.css */
 .dashboard-wrapper{
   width:100%;
   display:flex;
@@ -126,18 +127,29 @@
   color:#fff;
 }
 
-/* GRID DE CARDS */
+/* GRID DE CARDS (RESPONSIVO + MÁX 6 POR LINHA) */
 .machine-grid{
-  display:flex;
-  flex-wrap:wrap;
-  gap:22px;
-  justify-content:center;
   width:100%;
+  display:grid;
+  gap:22px;
+
+  /* 1 e 2 cards ficam "grandes" (até 460px).
+     3+ cards encolhem automaticamente pra caber. */
+  grid-template-columns:repeat(auto-fit, minmax(320px, 460px));
+
+  /* limita para NO MÁXIMO 6 colunas na tela */
+  max-width:calc(6 * 460px + 5 * 22px);
+
+  justify-content:center;
+  padding:0 16px;
+  margin:0 auto;
 }
 
+/* CARD */
 .machine-card{
   background:#ffffff;
-  width:460px;
+  width:100%;
+  max-width:460px; /* mantém o “tamanho atual” quando tem 1 ou 2 */
   border-radius:20px;
   padding:28px;
   box-shadow:0 4px 14px rgba(0,0,0,0.12);
@@ -147,6 +159,7 @@
   border:1px solid #e5e7eb;
   cursor:pointer;
   transition:0.15s;
+  justify-self:center; /* centraliza dentro da célula do grid */
 }
 .machine-card:hover{
   box-shadow:0 6px 18px rgba(0,0,0,0.2);
@@ -156,12 +169,15 @@
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:12px;
 }
 .machine-name{
   font-size:24px;
   font-weight:700;
   color:#0f172a;
 }
+
+/* STATUS */
 .machine-status{
   font-size:14px;
   font-weight:600;
@@ -169,10 +185,38 @@
   border-radius:6px;
   color:white;
   text-transform:uppercase;
+  white-space:nowrap;
 }
 .status-auto{ background:#16a34a; }
 .status-manual{ background:#dc2626; }
 
+/* BOTÃO EXCLUIR (✕) */
+.btn-delete-machine{
+  width:34px;
+  height:34px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  background:#ffffff;
+  color:#0f172a;
+  font-size:18px;
+  line-height:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  transition:0.12s;
+}
+.btn-delete-machine:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(0,0,0,0.14);
+  border-color:#cbd5e1;
+}
+.btn-delete-machine:active{
+  transform:translateY(0px);
+  box-shadow:none;
+}
+
+/* CONTEÚDO DO CARD */
 .percent-container{
   display:flex;
   justify-content:space-between;
