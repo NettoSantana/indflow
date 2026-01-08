@@ -275,28 +275,27 @@
   display:flex;
   justify-content:center;
   align-items:center;
-  gap:14px;
-  margin:28px 0;
+  gap:6px;              /* menor espaço */
+  margin:12px 0 0;      /* sobe o pager e reduz margem */
 }
 .pager button{
-  font-size:20px;
-  padding:6px 14px;
-  border-radius:10px;
+  font-size:16px;       /* menor */
+  padding:4px 8px;      /* mais estreito */
+  min-width:34px;       /* garante clique mas sem ficar largo */
+  height:30px;
+  border-radius:8px;
   border:1px solid #e5e7eb;
   background:#fff;
   cursor:pointer;
+  line-height:1;
 }
 .pager button:hover{
-  box-shadow:0 6px 14px rgba(0,0,0,0.10);
+  box-shadow:0 4px 10px rgba(0,0,0,0.10);
 }
 .pager button:disabled{
-  opacity:0.45;
+  opacity:0.35;
   cursor:not-allowed;
   box-shadow:none;
-}
-.pager span{
-  font-weight:700;
-  color:#0f172a;
 }
 
 /* DESKTOP:
