@@ -87,18 +87,17 @@ function ensurePager(){
   btnPrev.id = "btnPrev";
   btnPrev.type = "button";
   btnPrev.textContent = "←";
+  btnPrev.title = "Anterior";
 
-  const info = document.createElement("span");
-  info.id = "pagerInfo";
-  info.textContent = "";
+  // NÃO cria mais texto de página (ganha espaço)
 
   const btnNext = document.createElement("button");
   btnNext.id = "btnNext";
   btnNext.type = "button";
   btnNext.textContent = "→";
+  btnNext.title = "Próxima";
 
   pager.appendChild(btnPrev);
-  pager.appendChild(info);
   pager.appendChild(btnNext);
 
   // insere logo após o grid quando possível
@@ -130,11 +129,10 @@ function renderPager(){
   ensurePager();
 
   const pager = document.getElementById("pager");
-  const info = document.getElementById("pagerInfo");
   const btnPrev = document.getElementById("btnPrev");
   const btnNext = document.getElementById("btnNext");
 
-  if(!pager || !info || !btnPrev || !btnNext) return;
+  if(!pager || !btnPrev || !btnNext) return;
 
   const tp = totalPages();
   clampCurrentPage();
@@ -145,7 +143,6 @@ function renderPager(){
   }
 
   pager.style.display = "flex";
-  info.textContent = `Página ${currentPage + 1} / ${tp}`;
 
   btnPrev.disabled = currentPage === 0;
   btnNext.disabled = currentPage >= tp - 1;
@@ -297,7 +294,7 @@ function updateMachine(machineId){
       if(elMetaHoraUni) elMetaHoraUni.textContent = fmt(data.meta_hora_pcs);
       if(elMetaHoraMl)  elMetaHoraMl.textContent  = fmt(data.meta_hora_ml);
       if(elProdHoraUni) elProdHoraUni.textContent = fmt(data.producao_hora);
-      if(elProdHoraMl)  elProdHoraMl.textContent  = fmt(data.producao_hora_ml);
+      if(elProdHoraMl)  elProdHoraMl.textContent = fmt(data.producao_hora_ml);
 
       const tm = Number(data.tempo_medio_min_por_peca);
       if(elRitmo){
