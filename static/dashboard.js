@@ -1,3 +1,4 @@
+// static/dashboard.js
 const LS_KEY = "indflow_machines_v1";
 
 function fmt(n){
@@ -41,13 +42,64 @@ function nextMachineId(machines){
   return "maquina" + String(next).padStart(2, "0");
 }
 
+function safeSid(machineId){
+  return String(machineId).replace(/[^a-z0-9_\-]/g, "");
+}
+
+/* EXCLUIR */
+function removeMachine(machineId){
+  const id = String(machineId || "");
+  const machines = getMachines();
+
+  if(!machines.includes(id)) return;
+
+  const isDefault = id === "maquina01";
+
+  if(isDefault){
+    const ok1 = window.confirm("ATENÇÃO: você está tentando excluir a MAQUINA01 (padrão).\n\nDeseja continuar?");
+    if(!ok1) return;
+
+    const ok2 = window.confirm("Confirma MESMO a exclusão da MAQUINA01?\n\nIsso pode quebrar seus testes.");
+    if(!ok2) return;
+  }else{
+    const ok = window.confirm(`Excluir o equipamento "${id.toUpperCase()}"?\n\nEssa ação remove do dashboard (localStorage).`);
+    if(!ok) return;
+  }
+
+  const next = machines.filter(x => x !== id);
+
+  // Se removeu tudo, volta pro default
+  if(next.length === 0){
+    next.push("maquina01");
+  }
+
+  setMachines(next);
+  renderMachines();   // re-render do grid
+  updateAll();        // força atualizar já
+}
+
 function cardHTML(machineId){
-  const sid = machineId.replace(/[^a-z0-9_\-]/g, "");
+  const sid = safeSid(machineId);
+  const upper = String(machineId).toUpperCase();
+
   return `
     <div class="machine-card" onclick="window.location.href='/producao/config/${machineId}'">
       <div class="machine-header">
-        <div class="machine-name">${machineId.toUpperCase()}</div>
-        <div id="status-badge-${sid}" class="machine-status status-auto">AUTO</div>
+        <div class="machine-name">${upper}</div>
+
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div id="status-badge-${sid}" class="machine-status status-auto">AUTO</div>
+
+          <button
+            type="button"
+            class="btn-delete-machine"
+            title="Excluir equipamento"
+            aria-label="Excluir equipamento ${upper}"
+            onclick="event.stopPropagation(); removeMachine('${machineId}')"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
       <div class="percent-container">
@@ -90,7 +142,7 @@ function renderMachines(){
 }
 
 function updateMachine(machineId){
-  const sid = machineId.replace(/[^a-z0-9_\-]/g, "");
+  const sid = safeSid(machineId);
 
   fetch(`/machine/status?machine_id=${machineId}`)
     .then(r => r.json())
@@ -102,23 +154,39 @@ function updateMachine(machineId){
       statusBadge.className =
         "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
 
-      document.getElementById(`percent-turno-${sid}`).textContent = (data.percentual_turno ?? 0) + "%";
-      document.getElementById(`meta-turno-uni-${sid}`).textContent = fmt(data.meta_turno);
-      document.getElementById(`meta-turno-ml-${sid}`).textContent = fmt(data.meta_turno_ml);
-      document.getElementById(`prod-turno-uni-${sid}`).textContent = fmt(data.producao_turno);
-      document.getElementById(`prod-turno-ml-${sid}`).textContent = fmt(data.producao_turno_ml);
+      const elPercentTurno = document.getElementById(`percent-turno-${sid}`);
+      const elMetaTurnoUni = document.getElementById(`meta-turno-uni-${sid}`);
+      const elMetaTurnoMl  = document.getElementById(`meta-turno-ml-${sid}`);
+      const elProdTurnoUni = document.getElementById(`prod-turno-uni-${sid}`);
+      const elProdTurnoMl  = document.getElementById(`prod-turno-ml-${sid}`);
 
-      document.getElementById(`percent-hora-${sid}`).textContent = (data.percentual_hora ?? 0) + "%";
-      document.getElementById(`meta-hora-uni-${sid}`).textContent = fmt(data.meta_hora_pcs);
-      document.getElementById(`meta-hora-ml-${sid}`).textContent = fmt(data.meta_hora_ml);
-      document.getElementById(`prod-hora-uni-${sid}`).textContent = fmt(data.producao_hora);
-      document.getElementById(`prod-hora-ml-${sid}`).textContent = fmt(data.producao_hora_ml);
+      const elPercentHora = document.getElementById(`percent-hora-${sid}`);
+      const elMetaHoraUni = document.getElementById(`meta-hora-uni-${sid}`);
+      const elMetaHoraMl  = document.getElementById(`meta-hora-ml-${sid}`);
+      const elProdHoraUni = document.getElementById(`prod-hora-uni-${sid}`);
+      const elProdHoraMl  = document.getElementById(`prod-hora-ml-${sid}`);
+
+      const elRitmo = document.getElementById(`ritmo-medio-${sid}`);
+
+      if(elPercentTurno) elPercentTurno.textContent = (data.percentual_turno ?? 0) + "%";
+      if(elMetaTurnoUni) elMetaTurnoUni.textContent = fmt(data.meta_turno);
+      if(elMetaTurnoMl)  elMetaTurnoMl.textContent  = fmt(data.meta_turno_ml);
+      if(elProdTurnoUni) elProdTurnoUni.textContent = fmt(data.producao_turno);
+      if(elProdTurnoMl)  elProdTurnoMl.textContent  = fmt(data.producao_turno_ml);
+
+      if(elPercentHora) elPercentHora.textContent = (data.percentual_hora ?? 0) + "%";
+      if(elMetaHoraUni) elMetaHoraUni.textContent = fmt(data.meta_hora_pcs);
+      if(elMetaHoraMl)  elMetaHoraMl.textContent  = fmt(data.meta_hora_ml);
+      if(elProdHoraUni) elProdHoraUni.textContent = fmt(data.producao_hora);
+      if(elProdHoraMl)  elProdHoraMl.textContent  = fmt(data.producao_hora_ml);
 
       const tm = Number(data.tempo_medio_min_por_peca);
-      document.getElementById(`ritmo-medio-${sid}`).textContent =
-        Number.isFinite(tm) && tm > 0
-          ? "Ritmo médio: " + tm.toFixed(2).replace(".", ",") + " min/peça"
-          : "Ritmo médio: —";
+      if(elRitmo){
+        elRitmo.textContent =
+          Number.isFinite(tm) && tm > 0
+            ? "Ritmo médio: " + tm.toFixed(2).replace(".", ",") + " min/peça"
+            : "Ritmo médio: —";
+      }
     })
     .catch(() => {});
 }
