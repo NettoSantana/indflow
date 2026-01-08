@@ -1,6 +1,6 @@
-﻿fix(indflow-dev): DB sqlite preparado para volume (path absoluto via INDFLOW_DB_PATH)
+﻿feat(indflow-dev): persistência de produção por hora no SQLite + recarga após restart
 
-- evita DB relativo (perda de dados em container efêmero)
-- usa /data/indflow.db quando existir volume
-- cria pasta do DB automaticamente
-- sqlite com timeout e check_same_thread=False (waitress)
+- cria tabela producao_horaria (por hora do turno)
+- grava baseline/produção/meta/% por hora (upsert)
+- preenche m['producao_por_hora'] para a tabela manter horas anteriores
+- continua zerando o produzido da hora atual ao virar a hora (baseline_hora)
