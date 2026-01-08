@@ -265,3 +265,59 @@
   font-weight:600;
   color:#334155;
 }
+
+/* =========================================================
+   ADIÇÕES (SEM REMOVER NADA) — AJUSTE PARA 6 CARDS + PAGER
+   ========================================================= */
+
+/* Quando tiver 3+ cards (tela larga), permitir encolher pra caber até 6 */
+@media (min-width: 1200px){
+  .machine-grid{
+    gap:18px;
+
+    /* min menor p/ caber 6 cards */
+    grid-template-columns:repeat(auto-fit, minmax(260px, 460px));
+
+    /* max de 6 colunas (pela largura total do grid) */
+    max-width:calc(6 * 260px + 5 * 18px);
+  }
+
+  /* Card pode encolher dentro do grid (sem ficar travado em 460px) */
+  .machine-card{
+    max-width:100%;
+    padding:22px;
+    border-radius:18px;
+    gap:16px;
+  }
+
+  .machine-name{ font-size:20px; }
+  .machine-status{ font-size:13px; padding:6px 12px; }
+  .percent-value{ font-size:46px; }
+  .percent-label{ font-size:14px; margin-top:4px; }
+  .divider{ height:160px; }
+  .ritmo-medio{ font-size:14px; }
+}
+
+/* PAGER (setinhas) */
+.pager{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:14px;
+  margin:28px 0;
+}
+.pager button{
+  font-size:20px;
+  padding:6px 14px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  background:#fff;
+  cursor:pointer;
+}
+.pager button:hover{
+  box-shadow:0 6px 14px rgba(0,0,0,0.10);
+}
+.pager span{
+  font-weight:700;
+  color:#0f172a;
+}
