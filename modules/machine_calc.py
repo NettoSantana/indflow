@@ -1,7 +1,16 @@
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 from modules.db_indflow import get_db
 
 UNIDADES_VALIDAS = {"pcs", "m", "m2"}
+
+# ============================================================
+# FUSO HORÁRIO OFICIAL DO SISTEMA
+# ============================================================
+TZ_BAHIA = ZoneInfo("America/Bahia")
+
+def now_bahia():
+    return datetime.now(TZ_BAHIA)
 
 
 def norm_u(v):
@@ -38,7 +47,14 @@ def get_turno_inicio_dt(m, agora):
         return None
 
     inicio_dt = datetime.strptime(inicio_str, "%H:%M")
-    inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
+
+    # garante data + fuso da Bahia
+    inicio_dt = inicio_dt.replace(
+        year=agora.year,
+        month=agora.month,
+        day=agora.day,
+        tzinfo=TZ_BAHIA
+    )
 
     if agora < inicio_dt:
         inicio_dt -= timedelta(days=1)
@@ -51,7 +67,7 @@ def calcular_ultima_hora_idx(m):
     if not horas:
         return None
 
-    agora = datetime.now()
+    agora = now_bahia()
     inicio_dt = get_turno_inicio_dt(m, agora)
     if not inicio_dt:
         return None
@@ -129,12 +145,12 @@ def reset_contexto(m, machine_id):
     m["ultima_hora"] = None
     m["baseline_hora"] = m["esp_absoluto"]
 
-    m["ultimo_dia"] = datetime.now().date()
+    m["ultimo_dia"] = now_bahia().date()
     m["reset_executado_hoje"] = True
 
 
 def verificar_reset_diario(m, machine_id):
-    agora = datetime.now()
+    agora = now_bahia()
     horario_reset = time(23, 59)
 
     if agora.time() >= horario_reset and not m["reset_executado_hoje"]:
@@ -150,9 +166,15 @@ def calcular_tempo_medio(m):
         inicio_str = m.get("turno_inicio")
 
         if produzido > 0 and inicio_str:
-            agora = datetime.now()
+            agora = now_bahia()
             inicio_dt = datetime.strptime(inicio_str, "%H:%M")
-            inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
+
+            inicio_dt = inicio_dt.replace(
+                year=agora.year,
+                month=agora.month,
+                day=agora.day,
+                tzinfo=TZ_BAHIA
+            )
 
             if agora < inicio_dt:
                 inicio_dt -= timedelta(days=1)
