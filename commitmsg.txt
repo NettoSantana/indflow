@@ -1,5 +1,7 @@
-﻿feat(indflow-dev): botão de excluir equipamento no card (localStorage + confirmações)
+﻿style(indflow-dev): grid responsivo com cards autoajustáveis (máx 6 por linha)
 
-- adiciona botão ✕ no card sem quebrar clique (stopPropagation)
-- remove equipamento do localStorage e re-renderiza o grid
-- proteção extra para excluir maquina01 (dupla confirmação)
+- troca flex-wrap por CSS Grid
+- 1 e 2 cards mantêm tamanho grande (até 460px)
+- 3+ cards encolhem automaticamente para caber na tela
+- limita para no máximo 6 cards por linha (max-width do grid)
+- adiciona estilo do botão ✕ de excluir
