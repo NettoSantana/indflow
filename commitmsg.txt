@@ -1,5 +1,6 @@
-﻿style(indflow-dev): pager mais estreito e sem ocupar espaço
+﻿fix(indflow-dev): DB sqlite preparado para volume (path absoluto via INDFLOW_DB_PATH)
 
-- reduz gap/margem do pager
-- botões menores (padding/min-width/height/font-size)
-- remove dependência visual de texto no pager
+- evita DB relativo (perda de dados em container efêmero)
+- usa /data/indflow.db quando existir volume
+- cria pasta do DB automaticamente
+- sqlite com timeout e check_same_thread=False (waitress)
