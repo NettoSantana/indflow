@@ -1,5 +1,5 @@
-﻿feat(config): tabela por hora com Produzido Hora e Refugo Hora
+﻿feat(dashboard): botao + cria novo equipamento (card) via modal e redireciona para configuracao
 
-- adiciona 2 colunas na tabela: Produzido Hora e Refugo Hora
-- Produzido Hora aparece apenas na hora atual (ultima_hora)
-- Refugo Hora inicia em 0 (pronto para módulo de qualidade)
+- modal pede ID do equipamento (ex: maquina02)
+- lista de equipamentos salva em localStorage (modo manual/prototipo)
+- dashboard renderiza cards dinamicamente e consulta /machine/status por machine_id
