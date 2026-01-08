@@ -1,5 +1,5 @@
-﻿refactor(dashboard): move CSS e JS do dashboard para arquivos em /static
+﻿feat(indflow-dev): botão de excluir equipamento no card (localStorage + confirmações)
 
-- templates/index.html fica enxuto (sem style/script inline)
-- cria static/dashboard.css
-- cria static/dashboard.js
+- adiciona botão ✕ no card sem quebrar clique (stopPropagation)
+- remove equipamento do localStorage e re-renderiza o grid
+- proteção extra para excluir maquina01 (dupla confirmação)
