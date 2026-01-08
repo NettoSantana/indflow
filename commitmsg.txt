@@ -1,7 +1,5 @@
-﻿style(indflow-dev): grid responsivo com cards autoajustáveis (máx 6 por linha)
+﻿style(indflow-dev): pager mais estreito e sem ocupar espaço
 
-- troca flex-wrap por CSS Grid
-- 1 e 2 cards mantêm tamanho grande (até 460px)
-- 3+ cards encolhem automaticamente para caber na tela
-- limita para no máximo 6 cards por linha (max-width do grid)
-- adiciona estilo do botão ✕ de excluir
+- reduz gap/margem do pager
+- botões menores (padding/min-width/height/font-size)
+- remove dependência visual de texto no pager
