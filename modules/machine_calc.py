@@ -1,3 +1,4 @@
+# modules/machine_calc.py
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 from modules.db_indflow import get_db
@@ -8,6 +9,7 @@ UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 # FUSO HORÁRIO OFICIAL DO SISTEMA
 # ============================================================
 TZ_BAHIA = ZoneInfo("America/Bahia")
+
 
 def now_bahia():
     return datetime.now(TZ_BAHIA)
@@ -62,6 +64,17 @@ def get_turno_inicio_dt(m, agora):
     return inicio_dt
 
 
+def _turno_data_ref(m, agora):
+    """
+    Data de referência do turno (a data do início do turno).
+    Isso evita bagunça quando o turno cruza meia-noite.
+    """
+    inicio_dt = get_turno_inicio_dt(m, agora)
+    if inicio_dt:
+        return inicio_dt.date().isoformat()
+    return agora.date().isoformat()
+
+
 def calcular_ultima_hora_idx(m):
     horas = m.get("horas_turno") or []
     if not horas:
@@ -81,6 +94,134 @@ def calcular_ultima_hora_idx(m):
     return diff_h
 
 
+# ============================================================
+# PERSISTÊNCIA POR HORA (SQLITE)
+# ============================================================
+
+def _get_machine_id_from_m(m):
+    """
+    Não mexe em outros arquivos: tenta derivar machine_id do m.
+    Hoje m["nome"] é tipo "MAQUINA01" -> vira "maquina01".
+    """
+    nome = (m.get("nome") or "").strip()
+    if not nome:
+        return None
+    return nome.lower()
+
+
+def _ensure_producao_horaria(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS producao_horaria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            data_ref TEXT NOT NULL,         -- data do início do turno (YYYY-MM-DD)
+            hora_idx INTEGER NOT NULL,      -- índice da hora dentro do turno (0..n-1)
+            baseline_esp INTEGER NOT NULL,  -- esp_absoluto no início da hora
+            esp_last INTEGER NOT NULL,      -- último esp_absoluto visto
+            produzido INTEGER NOT NULL,
+            meta INTEGER NOT NULL,
+            percentual INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria
+        ON producao_horaria(machine_id, data_ref, hora_idx)
+    """)
+    conn.commit()
+
+
+def _upsert_hora(conn, machine_id, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual):
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO producao_horaria
+        (machine_id, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(machine_id, data_ref, hora_idx)
+        DO UPDATE SET
+            baseline_esp=excluded.baseline_esp,
+            esp_last=excluded.esp_last,
+            produzido=excluded.produzido,
+            meta=excluded.meta,
+            percentual=excluded.percentual,
+            updated_at=excluded.updated_at
+    """, (
+        machine_id,
+        data_ref,
+        int(hora_idx),
+        int(baseline_esp),
+        int(esp_last),
+        int(produzido),
+        int(meta),
+        int(percentual),
+        now_bahia().isoformat()
+    ))
+    conn.commit()
+
+
+def _get_baseline_for_hora(conn, machine_id, data_ref, hora_idx):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT baseline_esp
+        FROM producao_horaria
+        WHERE machine_id=? AND data_ref=? AND hora_idx=?
+        LIMIT 1
+    """, (machine_id, data_ref, int(hora_idx)))
+    row = cur.fetchone()
+    if row and row[0] is not None:
+        try:
+            return int(row[0])
+        except Exception:
+            return None
+    return None
+
+
+def _load_producao_por_hora(conn, machine_id, data_ref, n_horas):
+    """
+    Retorna lista tamanho n_horas com valores (int) ou None.
+    """
+    out = [None] * int(n_horas or 0)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT hora_idx, produzido
+        FROM producao_horaria
+        WHERE machine_id=? AND data_ref=?
+    """, (machine_id, data_ref))
+    rows = cur.fetchall() or []
+    for r in rows:
+        try:
+            idx = int(r[0])
+            val = int(r[1])
+            if 0 <= idx < len(out):
+                out[idx] = val
+        except Exception:
+            continue
+    return out
+
+
+def _meta_by_idx(m, idx):
+    meta_h = 0
+    try:
+        meta_h = (m.get("meta_por_hora") or [])[idx]
+    except Exception:
+        meta_h = 0
+    try:
+        meta_h = int(meta_h or 0)
+    except Exception:
+        meta_h = 0
+    return meta_h
+
+
+def _percentual(prod, meta):
+    if meta and meta > 0:
+        try:
+            return int(round((prod / meta) * 100))
+        except Exception:
+            return 0
+    return 0
+
+
 def atualizar_producao_hora(m):
     idx = calcular_ultima_hora_idx(m)
 
@@ -90,14 +231,117 @@ def atualizar_producao_hora(m):
         m["percentual_hora"] = 0
         return
 
-    if m.get("ultima_hora") is None or m.get("ultima_hora") != idx:
-        m["ultima_hora"] = idx
-        m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
-        m["producao_hora"] = 0
-        m["percentual_hora"] = 0
-        return
+    # garante estrutura pra tabela de "Produzido Hora"
+    horas = m.get("horas_turno") or []
+    if "producao_por_hora" not in m or not isinstance(m.get("producao_por_hora"), list) or len(m.get("producao_por_hora")) != len(horas):
+        m["producao_por_hora"] = [None] * len(horas)
+        m["_ph_loaded"] = False  # força recarga do DB
+
+    # tenta carregar do DB uma vez (pra persistir após restart)
+    machine_id = _get_machine_id_from_m(m)
+    agora = now_bahia()
+    data_ref = _turno_data_ref(m, agora)
+
+    if machine_id and not m.get("_ph_loaded"):
+        try:
+            conn = get_db()
+            _ensure_producao_horaria(conn)
+            m["producao_por_hora"] = _load_producao_por_hora(conn, machine_id, data_ref, len(horas))
+            conn.close()
+            m["_ph_loaded"] = True
+        except Exception:
+            # se falhar, segue sem travar o sistema
+            m["_ph_loaded"] = True
 
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
+
+    # Se mudou a hora, primeiro "fecha" a hora anterior e depois inicia a nova
+    prev_idx = m.get("ultima_hora")
+
+    if prev_idx is None or prev_idx != idx:
+        # 1) fecha a hora anterior (se existia)
+        if isinstance(prev_idx, int) and prev_idx >= 0:
+            base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
+            prod_prev = esp_abs - base_prev
+            if prod_prev < 0:
+                prod_prev = 0
+            prod_prev = int(prod_prev)
+
+            meta_prev = _meta_by_idx(m, prev_idx)
+            pct_prev = _percentual(prod_prev, meta_prev)
+
+            # atualiza lista (tabela)
+            try:
+                if 0 <= prev_idx < len(m["producao_por_hora"]):
+                    m["producao_por_hora"][prev_idx] = prod_prev
+            except Exception:
+                pass
+
+            # persiste no DB
+            if machine_id:
+                try:
+                    conn = get_db()
+                    _ensure_producao_horaria(conn)
+                    _upsert_hora(
+                        conn,
+                        machine_id=machine_id,
+                        data_ref=data_ref,
+                        hora_idx=prev_idx,
+                        baseline_esp=base_prev,
+                        esp_last=esp_abs,
+                        produzido=prod_prev,
+                        meta=meta_prev,
+                        percentual=pct_prev
+                    )
+                    conn.close()
+                except Exception:
+                    pass
+
+        # 2) inicia a hora atual
+        m["ultima_hora"] = idx
+
+        # se houver baseline salvo no DB para essa hora, usa ele (continua após restart)
+        baseline = None
+        if machine_id:
+            try:
+                conn = get_db()
+                _ensure_producao_horaria(conn)
+                baseline = _get_baseline_for_hora(conn, machine_id, data_ref, idx)
+                conn.close()
+            except Exception:
+                baseline = None
+
+        if baseline is None:
+            baseline = esp_abs
+
+        m["baseline_hora"] = int(baseline)
+        m["producao_hora"] = 0
+        m["percentual_hora"] = 0
+
+        # garante linha no DB já criada/atualizada (hora atual zerada mas com baseline certo)
+        if machine_id:
+            try:
+                meta_now = _meta_by_idx(m, idx)
+                conn = get_db()
+                _ensure_producao_horaria(conn)
+                _upsert_hora(
+                    conn,
+                    machine_id=machine_id,
+                    data_ref=data_ref,
+                    hora_idx=idx,
+                    baseline_esp=int(baseline),
+                    esp_last=esp_abs,
+                    produzido=0,
+                    meta=meta_now,
+                    percentual=0
+                )
+                conn.close()
+            except Exception:
+                pass
+
+        return
+
+    # Hora atual: calcula e atualiza
     base_h = int(m.get("baseline_hora", esp_abs) or esp_abs)
 
     prod_h = esp_abs - base_h
@@ -105,16 +349,35 @@ def atualizar_producao_hora(m):
         prod_h = 0
     m["producao_hora"] = int(prod_h)
 
-    meta_h = 0
-    try:
-        meta_h = (m.get("meta_por_hora") or [])[idx]
-    except Exception:
-        meta_h = 0
+    meta_h = _meta_by_idx(m, idx)
+    m["percentual_hora"] = _percentual(m["producao_hora"], meta_h)
 
-    if meta_h and meta_h > 0:
-        m["percentual_hora"] = round((m["producao_hora"] / meta_h) * 100)
-    else:
-        m["percentual_hora"] = 0
+    # atualiza lista (tabela) também para a hora atual (vai mudando em tempo real)
+    try:
+        if 0 <= idx < len(m["producao_por_hora"]):
+            m["producao_por_hora"][idx] = int(m["producao_hora"])
+    except Exception:
+        pass
+
+    # persiste a hora atual em tempo real (assim não perde no restart)
+    if machine_id:
+        try:
+            conn = get_db()
+            _ensure_producao_horaria(conn)
+            _upsert_hora(
+                conn,
+                machine_id=machine_id,
+                data_ref=data_ref,
+                hora_idx=idx,
+                baseline_esp=base_h,
+                esp_last=esp_abs,
+                produzido=int(m["producao_hora"]),
+                meta=meta_h,
+                percentual=int(m["percentual_hora"])
+            )
+            conn.close()
+        except Exception:
+            pass
 
 
 def reset_contexto(m, machine_id):
@@ -144,6 +407,9 @@ def reset_contexto(m, machine_id):
     m["tempo_medio_min_por_peca"] = None
     m["ultima_hora"] = None
     m["baseline_hora"] = m["esp_absoluto"]
+
+    # também força recarga da tabela horária no próximo ciclo do dashboard
+    m["_ph_loaded"] = False
 
     m["ultimo_dia"] = now_bahia().date()
     m["reset_executado_hoje"] = True
