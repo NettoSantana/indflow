@@ -305,14 +305,10 @@
 */
 @media (min-width: 1100px){
 
-  /* Só entra aqui se tiver 3+ cards no grid */
+  /* 3+ cards */
   .machine-grid:has(.machine-card:nth-child(3)){
     gap:18px;
-
-    /* força 3 colunas (6 cards => 2 linhas) */
     grid-template-columns:repeat(3, minmax(260px, 1fr));
-
-    /* segura o grid centralizado sem estourar em telas muito largas */
     max-width:1100px;
   }
 
@@ -342,5 +338,41 @@
   }
   .machine-grid:has(.machine-card:nth-child(3)) .ritmo-medio{
     font-size:14px;
+  }
+
+  /* 4+ cards => MAIS compacto ainda (pra caber sem scroll) */
+  .machine-grid:has(.machine-card:nth-child(4)){
+    gap:14px;
+    max-width:1040px;
+  }
+
+  .machine-grid:has(.machine-card:nth-child(4)) .machine-card{
+    padding:16px;
+    gap:12px;
+  }
+
+  .machine-grid:has(.machine-card:nth-child(4)) .machine-name{
+    font-size:18px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .machine-status{
+    font-size:12px;
+    padding:5px 10px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .percent-value{
+    font-size:40px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .percent-label{
+    font-size:13px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .divider{
+    height:130px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .stats-sub{
+    font-size:13px;
+    margin-top:8px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .ritmo-medio{
+    font-size:13px;
+    margin-top:8px;
   }
 }
