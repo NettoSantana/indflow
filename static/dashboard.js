@@ -1,6 +1,10 @@
 // static/dashboard.js
 const LS_KEY = "indflow_machines_v1";
 
+/* PAGINAÇÃO (ADIÇÃO) */
+const PAGE_SIZE = 6;
+let currentPage = 0;
+
 function fmt(n){
   const x = Number(n);
   if(!Number.isFinite(x)) return "0";
@@ -46,6 +50,107 @@ function safeSid(machineId){
   return String(machineId).replace(/[^a-z0-9_\-]/g, "");
 }
 
+/* ===========================
+   PAGINAÇÃO (ADIÇÕES)
+   =========================== */
+
+function totalPages(){
+  const total = getMachines().length;
+  return Math.max(1, Math.ceil(total / PAGE_SIZE));
+}
+
+function clampCurrentPage(){
+  const tp = totalPages();
+  if(currentPage < 0) currentPage = 0;
+  if(currentPage > tp - 1) currentPage = tp - 1;
+}
+
+function getMachinesPage(){
+  const machines = getMachines();
+  const start = currentPage * PAGE_SIZE;
+  return machines.slice(start, start + PAGE_SIZE);
+}
+
+function ensurePager(){
+  // cria o pager via JS se não existir no HTML (sem precisar mexer no template)
+  if(document.getElementById("pager")) return;
+
+  const wrapper = document.querySelector(".dashboard-wrapper") || document.body;
+  const grid = document.getElementById("machineGrid");
+
+  const pager = document.createElement("div");
+  pager.className = "pager";
+  pager.id = "pager";
+  pager.style.display = "none";
+
+  const btnPrev = document.createElement("button");
+  btnPrev.id = "btnPrev";
+  btnPrev.type = "button";
+  btnPrev.textContent = "←";
+
+  const info = document.createElement("span");
+  info.id = "pagerInfo";
+  info.textContent = "";
+
+  const btnNext = document.createElement("button");
+  btnNext.id = "btnNext";
+  btnNext.type = "button";
+  btnNext.textContent = "→";
+
+  pager.appendChild(btnPrev);
+  pager.appendChild(info);
+  pager.appendChild(btnNext);
+
+  // insere logo após o grid quando possível
+  if(grid && grid.parentNode){
+    grid.parentNode.insertBefore(pager, grid.nextSibling);
+  }else{
+    wrapper.appendChild(pager);
+  }
+
+  btnPrev.addEventListener("click", () => {
+    if(currentPage > 0){
+      currentPage--;
+      renderMachines();
+      updateAll();
+    }
+  });
+
+  btnNext.addEventListener("click", () => {
+    const tp = totalPages();
+    if(currentPage < tp - 1){
+      currentPage++;
+      renderMachines();
+      updateAll();
+    }
+  });
+}
+
+function renderPager(){
+  ensurePager();
+
+  const pager = document.getElementById("pager");
+  const info = document.getElementById("pagerInfo");
+  const btnPrev = document.getElementById("btnPrev");
+  const btnNext = document.getElementById("btnNext");
+
+  if(!pager || !info || !btnPrev || !btnNext) return;
+
+  const tp = totalPages();
+  clampCurrentPage();
+
+  if(tp <= 1){
+    pager.style.display = "none";
+    return;
+  }
+
+  pager.style.display = "flex";
+  info.textContent = `Página ${currentPage + 1} / ${tp}`;
+
+  btnPrev.disabled = currentPage === 0;
+  btnNext.disabled = currentPage >= tp - 1;
+}
+
 /* EXCLUIR */
 function removeMachine(machineId){
   const id = String(machineId || "");
@@ -74,6 +179,10 @@ function removeMachine(machineId){
   }
 
   setMachines(next);
+
+  // AJUSTE DE PÁGINA (ADIÇÃO)
+  clampCurrentPage();
+
   renderMachines();   // re-render do grid
   updateAll();        // força atualizar já
 }
@@ -135,10 +244,20 @@ function cardHTML(machineId){
   `;
 }
 
+/* ALTERADO: agora renderiza só a PÁGINA atual (máx 6) e desenha o pager */
 function renderMachines(){
   const grid = document.getElementById("machineGrid");
   const machines = getMachines();
-  grid.innerHTML = machines.map(cardHTML).join("");
+
+  // garante página válida sempre que renderizar
+  clampCurrentPage();
+
+  // renderiza apenas a página atual
+  const pageItems = getMachinesPage();
+  grid.innerHTML = pageItems.map(cardHTML).join("");
+
+  // pager (setinhas)
+  renderPager();
 }
 
 function updateMachine(machineId){
@@ -191,8 +310,10 @@ function updateMachine(machineId){
     .catch(() => {});
 }
 
+/* ALTERADO: agora atualiza só os 6 visíveis (página atual) */
 function updateAll(){
-  getMachines().forEach(updateMachine);
+  const pageItems = getMachinesPage();
+  pageItems.forEach(updateMachine);
 }
 
 /* MODAL */
@@ -227,6 +348,9 @@ document.getElementById("btnSave").addEventListener("click", () => {
   if(!current.includes(id)){
     current.push(id);
     setMachines(current);
+
+    // ADIÇÃO: vai pra página onde o novo item cairia (última)
+    currentPage = Math.floor((current.length - 1) / PAGE_SIZE);
   }
 
   closeModal();
