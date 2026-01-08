@@ -1,5 +1,5 @@
-﻿feat(dashboard): botao + cria novo equipamento (card) via modal e redireciona para configuracao
+﻿refactor(dashboard): move CSS e JS do dashboard para arquivos em /static
 
-- modal pede ID do equipamento (ex: maquina02)
-- lista de equipamentos salva em localStorage (modo manual/prototipo)
-- dashboard renderiza cards dinamicamente e consulta /machine/status por machine_id
+- templates/index.html fica enxuto (sem style/script inline)
+- cria static/dashboard.css
+- cria static/dashboard.js
