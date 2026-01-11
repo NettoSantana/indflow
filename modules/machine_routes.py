@@ -12,6 +12,7 @@ from modules.machine_calc import (
     calcular_ultima_hora_idx,
     calcular_tempo_medio,
     aplicar_derivados_ml,
+    carregar_baseline_turno,
 )
 
 machine_bp = Blueprint("machine_bp", __name__)
@@ -98,6 +99,9 @@ def update_machine():
     m["status"] = data.get("status", "DESCONHECIDO")
     m["esp_absoluto"] = int(data["producao_turno"])
 
+    # baseline_diario persistido no SQLite (não estoura após deploy/restart)
+    carregar_baseline_turno(m, machine_id)
+
     producao_atual = max(m["esp_absoluto"] - m["baseline_diario"], 0)
     m["producao_turno"] = producao_atual
 
@@ -126,6 +130,9 @@ def reset_manual():
 def machine_status():
     machine_id = request.args.get("machine_id", "maquina01")
     m = get_machine(machine_id)
+
+    # garante baseline carregado mesmo se o dashboard abrir logo após restart
+    carregar_baseline_turno(m, machine_id)
 
     atualizar_producao_hora(m)
     calcular_tempo_medio(m)

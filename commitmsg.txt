@@ -1,6 +1,5 @@
-﻿feat(indflow-dev): persistência de produção por hora no SQLite + recarga após restart
+﻿feat(indflow-dev): recarga robusta do histórico por hora (SQLite)
 
-- cria tabela producao_horaria (por hora do turno)
-- grava baseline/produção/meta/% por hora (upsert)
-- preenche m['producao_por_hora'] para a tabela manter horas anteriores
-- continua zerando o produzido da hora atual ao virar a hora (baseline_hora)
+- recarrega producao_por_hora quando muda data_ref (virada de turno/dia) ou muda len(horas_turno)
+- não marca _ph_loaded=True quando falha (tenta de novo no próximo ciclo)
+- mantém persistência por hora via upsert em producao_horaria
