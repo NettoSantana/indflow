@@ -31,6 +31,25 @@ def _dia_operacional_ref(agora: datetime) -> str:
     return (agora.date() - timedelta(days=1)).isoformat()
 
 
+# ============================================================
+# ✅ NOVO: compatibilidade para imports (machine_state)
+# ============================================================
+def dia_operacional_ref_dt(agora: datetime):
+    """
+    Retorna a date do dia operacional (vira às 23:59).
+    """
+    if agora.time() >= DIA_OPERACIONAL_VIRA:
+        return agora.date()
+    return agora.date() - timedelta(days=1)
+
+
+def dia_operacional_ref_str(agora: datetime) -> str:
+    """
+    Retorna YYYY-MM-DD do dia operacional (vira às 23:59).
+    """
+    return _dia_operacional_ref(agora)
+
+
 def norm_u(v):
     if v is None:
         return None
