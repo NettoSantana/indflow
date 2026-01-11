@@ -1,5 +1,5 @@
-﻿fix(indflow-dev): reset_contexto persiste baseline_diario no SQLite
+﻿fix(indflow-dev): recuperar ultimo_dia do SQLite no boot
 
-- reset manual agora grava baseline_diario (dia operacional 23:59)
-- evita voltar total após deploy/restart
-- normaliza machine_id no reset_contexto
+- get_machine agora busca dia_ref mais recente em baseline_diario (ORDER BY updated_at)
+- ultimo_dia passa a ser string YYYY-MM-DD (compatível com verificar_reset_diario)
+- evita perder referência do dia operacional após deploy/restart
