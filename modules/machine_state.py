@@ -30,6 +30,10 @@ def _ensure_machine_config_table():
 def _load_machine_config(machine_id: str):
     _ensure_machine_config_table()
 
+    machine_id = (machine_id or "").strip().lower()
+    if not machine_id:
+        return None
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
@@ -82,6 +86,11 @@ def _load_machine_config(machine_id: str):
 
 
 def get_machine(machine_id: str):
+    # ✅ normaliza sempre (evita MAQUINA01 vs maquina01 virar duas máquinas)
+    machine_id = (machine_id or "").strip().lower()
+    if not machine_id:
+        machine_id = "maquina01"
+
     if machine_id not in machine_data:
         agora = now_bahia()
         dia_operacional = dia_operacional_ref_dt(agora)

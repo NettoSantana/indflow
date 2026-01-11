@@ -1,3 +1,4 @@
+# modules/machine_routes.py
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 import json
@@ -13,10 +14,15 @@ from modules.machine_calc import (
     calcular_ultima_hora_idx,
     calcular_tempo_medio,
     aplicar_derivados_ml,
-    carregar_baseline_turno,
+    carregar_baseline_diario,  # ✅ correto para o seu machine_calc.py
 )
 
 machine_bp = Blueprint("machine_bp", __name__)
+
+
+def _norm_machine_id(v):
+    v = (v or "").strip().lower()
+    return v or "maquina01"
 
 
 def _ensure_machine_config_table():
@@ -43,8 +49,8 @@ def _ensure_machine_config_table():
 # ============================================================
 @machine_bp.route("/machine/config", methods=["POST"])
 def configurar_maquina():
-    data = request.get_json()
-    machine_id = data.get("machine_id", "maquina01")
+    data = request.get_json() or {}
+    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
     meta_turno = int(data["meta_turno"])
@@ -117,7 +123,7 @@ def configurar_maquina():
                 meta_por_hora_json=excluded.meta_por_hora_json,
                 updated_at=excluded.updated_at
         """, (
-            machine_id,
+            machine_id,  # ✅ normalizado
             int(m.get("meta_turno") or 0),
             m.get("turno_inicio"),
             m.get("turno_fim"),
@@ -133,6 +139,7 @@ def configurar_maquina():
 
     return jsonify({
         "status": "configurado",
+        "machine_id": machine_id,
         "meta_por_hora": m["meta_por_hora"],
         "unidade_1": m.get("unidade_1"),
         "unidade_2": m.get("unidade_2"),
@@ -145,8 +152,8 @@ def configurar_maquina():
 # ============================================================
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
-    data = request.get_json()
-    machine_id = data.get("machine_id", "maquina01")
+    data = request.get_json() or {}
+    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
     # ✅ reset pelo dia operacional (vira 23:59)
@@ -156,7 +163,7 @@ def update_machine():
     m["esp_absoluto"] = int(data["producao_turno"])
 
     # ✅ baseline diário persistido no SQLite (dia operacional)
-    carregar_baseline_turno(m, machine_id)
+    carregar_baseline_diario(m, machine_id)
 
     producao_atual = max(int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0), 0)
     m["producao_turno"] = producao_atual
@@ -168,7 +175,7 @@ def update_machine():
 
     atualizar_producao_hora(m)
 
-    return jsonify({"message": "OK"})
+    return jsonify({"message": "OK", "machine_id": machine_id})
 
 
 # ============================================================
@@ -176,11 +183,11 @@ def update_machine():
 # ============================================================
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
-    data = request.get_json()
-    machine_id = data.get("machine_id", "maquina01")
+    data = request.get_json() or {}
+    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
     reset_contexto(m, machine_id)
-    return jsonify({"status": "resetado"})
+    return jsonify({"status": "resetado", "machine_id": machine_id})
 
 
 # ============================================================
@@ -188,11 +195,11 @@ def reset_manual():
 # ============================================================
 @machine_bp.route("/machine/status", methods=["GET"])
 def machine_status():
-    machine_id = request.args.get("machine_id", "maquina01")
+    machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
     # garante baseline carregado mesmo se o dashboard abrir logo após restart
-    carregar_baseline_turno(m, machine_id)
+    carregar_baseline_diario(m, machine_id)
 
     atualizar_producao_hora(m)
     calcular_tempo_medio(m)
@@ -219,7 +226,7 @@ def historico_producao():
 
     if machine_id:
         query += " AND machine_id = ?"
-        params.append(machine_id)
+        params.append(_norm_machine_id(machine_id))
 
     if inicio:
         query += " AND data >= ?"
