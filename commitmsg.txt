@@ -1,5 +1,4 @@
-﻿fix(indflow-dev): persistir meta/config e zerar turno no dia operacional 23:59
+﻿fix(indflow-dev): adicionar dia_operacional_ref_dt/str no machine_calc
 
-- /machine/config agora salva machine_config no SQLite (meta_turno/meta_por_hora não viram 0 após restart)
-- produzido do turno usa baseline_diario persistido (tabela baseline_diario)
-- virada do dia operacional às 23:59 (reset automático por mudança de dia_operacional)
+- cria helpers do dia operacional (vira 23:59) para compatibilidade de imports
+- mantém a lógica existente do baseline_diario/horária sem mudanças
