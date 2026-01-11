@@ -1,5 +1,5 @@
-﻿fix(indflow-dev): persistir baseline_diario no reset_contexto
+﻿fix(indflow-dev): reset_contexto persiste baseline_diario no SQLite
 
-- reset manual agora grava baseline_diario no SQLite (baseline_diario)
-- evita voltar 'produzido gigante' após deploy/restart
+- reset manual agora grava baseline_diario (dia operacional 23:59)
+- evita voltar total após deploy/restart
 - normaliza machine_id no reset_contexto

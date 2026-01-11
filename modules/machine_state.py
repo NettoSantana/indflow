@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 
 from modules.db_indflow import get_db
-from modules.machine_calc import now_bahia, dia_operacional_ref_dt
+from modules.machine_calc import now_bahia, dia_operacional_ref_str
 
 machine_data = {}
 
@@ -85,6 +85,39 @@ def _load_machine_config(machine_id: str):
     }
 
 
+def _load_ultimo_dia_from_db(machine_id: str) -> str | None:
+    """
+    ✅ Fonte da verdade do "dia operacional" pós-deploy:
+    usa baseline_diario (já persistido e atualizado pelo sistema).
+    Retorna dia_ref (YYYY-MM-DD) ou None.
+    """
+    machine_id = (machine_id or "").strip().lower()
+    if not machine_id:
+        return None
+
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        # baseline_diario: (machine_id, dia_ref, updated_at...)
+        cur.execute("""
+            SELECT dia_ref
+            FROM baseline_diario
+            WHERE machine_id=?
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """, (machine_id,))
+        row = cur.fetchone()
+        conn.close()
+
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        return None
+
+    return None
+
+
 def get_machine(machine_id: str):
     # ✅ normaliza sempre (evita MAQUINA01 vs maquina01 virar duas máquinas)
     machine_id = (machine_id or "").strip().lower()
@@ -93,7 +126,13 @@ def get_machine(machine_id: str):
 
     if machine_id not in machine_data:
         agora = now_bahia()
-        dia_operacional = dia_operacional_ref_dt(agora)
+
+        # ✅ pós-deploy: tenta recuperar o "dia operacional" do DB (baseline_diario)
+        ultimo_dia_db = _load_ultimo_dia_from_db(machine_id)
+        if ultimo_dia_db:
+            ultimo_dia = ultimo_dia_db
+        else:
+            ultimo_dia = dia_operacional_ref_str(agora)
 
         machine_data[machine_id] = {
             "nome": machine_id.upper(),
@@ -124,8 +163,8 @@ def get_machine(machine_id: str):
             "percentual_turno": 0,
             "tempo_medio_min_por_peca": None,
 
-            # ✅ importante: dia operacional, não date() normal
-            "ultimo_dia": dia_operacional,
+            # ✅ agora é STRING YYYY-MM-DD (combina com machine_calc.verificar_reset_diario)
+            "ultimo_dia": ultimo_dia,
             "reset_executado_hoje": False
         }
 
