@@ -1,5 +1,5 @@
-﻿fix(indflow-dev): usar carregar_baseline_diario e normalizar machine_id no routes
+﻿fix(indflow-dev): criar baseline_diario no init_db
 
-- corrige import/função do baseline diário (dia operacional 23:59)
-- normaliza machine_id (lower) em config/update/status/historico
-- evita duplicidade MAQUINA01 vs maquina01 e meta virar 0 por chave diferente
+- adiciona tabela baseline_diario (dia operacional 23:59)
+- cria índice único (machine_id, dia_ref)
+- garante persistência correta do baseline após deploy/restart

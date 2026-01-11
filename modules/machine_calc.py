@@ -152,6 +152,44 @@ def _ensure_baseline_diario(conn):
     conn.commit()
 
 
+def _persistir_baseline_diario(machine_id: str, esp_abs: int):
+    """
+    ✅ Usado no reset manual.
+    Garante que o baseline do dia operacional atual fique gravado no SQLite.
+    """
+    machine_id = (machine_id or "").strip().lower()
+    if not machine_id:
+        return
+
+    agora = now_bahia()
+    dia_ref = _dia_operacional_ref(agora)
+
+    try:
+        esp_abs = int(esp_abs or 0)
+    except Exception:
+        esp_abs = 0
+
+    try:
+        conn = get_db()
+        _ensure_baseline_diario(conn)
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(machine_id, dia_ref)
+            DO UPDATE SET
+                baseline_esp=excluded.baseline_esp,
+                esp_last=excluded.esp_last,
+                updated_at=excluded.updated_at
+        """, (machine_id, dia_ref, int(esp_abs), int(esp_abs), now_bahia().isoformat()))
+
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def carregar_baseline_diario(m, machine_id):
     """
     Persistência REAL do baseline do "Produzido do Turno" (dia operacional 23:59).
@@ -503,6 +541,9 @@ def atualizar_producao_hora(m):
 
 
 def reset_contexto(m, machine_id):
+    # ✅ normaliza machine_id (evita MAQUINA01 vs maquina01)
+    machine_id = (machine_id or "").strip().lower() or "maquina01"
+
     conn = get_db()
     cur = conn.cursor()
 
@@ -533,6 +574,17 @@ def reset_contexto(m, machine_id):
     m["_ph_loaded"] = False
     m["_bd_dia_ref"] = None
     m["_bd_esp_last"] = None
+
+    # ✅ ESSA É A CHAVE: persistir baseline no DB no reset manual
+    _persistir_baseline_diario(machine_id, int(m.get("esp_absoluto", 0) or 0))
+
+    # mantém o cache alinhado (evita "pulo" logo após reset)
+    try:
+        agora = now_bahia()
+        m["_bd_dia_ref"] = _dia_operacional_ref(agora)
+        m["_bd_esp_last"] = int(m.get("esp_absoluto", 0) or 0)
+    except Exception:
+        pass
 
 
 def verificar_reset_diario(m, machine_id):
