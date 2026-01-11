@@ -95,6 +95,105 @@ def calcular_ultima_hora_idx(m):
 
 
 # ============================================================
+# BASELINE DO TURNO (PERSISTIDO NO SQLITE)  ✅
+# ============================================================
+
+def _ensure_baseline_turno(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS baseline_turno (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            data_ref TEXT NOT NULL,           -- data do início do turno (YYYY-MM-DD)
+            baseline_diario INTEGER NOT NULL, -- esp_absoluto no início do turno
+            esp_last INTEGER NOT NULL,        -- último esp_absoluto visto
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_turno
+        ON baseline_turno(machine_id, data_ref)
+    """)
+    conn.commit()
+
+
+def carregar_baseline_turno(m, machine_id):
+    """
+    Garante m["baseline_diario"] persistido no SQLite por:
+      - machine_id
+      - data_ref (data do início do turno)
+
+    Regra:
+      - se não existir, cria baseline = esp_absoluto atual
+      - se esp_absoluto voltar (reset do ESP), reancora baseline no novo valor
+    """
+    try:
+        machine_id = (machine_id or "").strip().lower()
+        if not machine_id:
+            return
+    except Exception:
+        return
+
+    agora = now_bahia()
+    data_ref = _turno_data_ref(m, agora)
+
+    try:
+        esp_abs = int(m.get("esp_absoluto", 0) or 0)
+    except Exception:
+        esp_abs = 0
+
+    # micro-cache pra reduzir I/O
+    if m.get("_bt_data_ref") == data_ref and m.get("_bt_esp_last") == esp_abs and isinstance(m.get("baseline_diario"), int):
+        return
+
+    try:
+        conn = get_db()
+        _ensure_baseline_turno(conn)
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT baseline_diario
+            FROM baseline_turno
+            WHERE machine_id=? AND data_ref=?
+            LIMIT 1
+        """, (machine_id, data_ref))
+        row = cur.fetchone()
+
+        if row and row[0] is not None:
+            try:
+                baseline = int(row[0])
+            except Exception:
+                baseline = esp_abs
+        else:
+            baseline = esp_abs
+
+        # se o contador resetou, reancora
+        if esp_abs < baseline:
+            baseline = esp_abs
+
+        cur.execute("""
+            INSERT INTO baseline_turno (machine_id, data_ref, baseline_diario, esp_last, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(machine_id, data_ref)
+            DO UPDATE SET
+                baseline_diario=excluded.baseline_diario,
+                esp_last=excluded.esp_last,
+                updated_at=excluded.updated_at
+        """, (machine_id, data_ref, int(baseline), int(esp_abs), now_bahia().isoformat()))
+
+        conn.commit()
+        conn.close()
+
+        m["baseline_diario"] = int(baseline)
+        m["_bt_data_ref"] = data_ref
+        m["_bt_esp_last"] = esp_abs
+    except Exception:
+        # fallback seguro (não derruba o app)
+        if "baseline_diario" not in m or m.get("baseline_diario") is None:
+            m["baseline_diario"] = esp_abs
+
+
+# ============================================================
 # PERSISTÊNCIA POR HORA (SQLITE)
 # ============================================================
 
@@ -235,11 +334,9 @@ def atualizar_producao_hora(m):
     agora = now_bahia()
     data_ref = _turno_data_ref(m, agora)
 
-    # garante estrutura pra tabela de "Produzido Hora"
     horas = m.get("horas_turno") or []
     horas_len = len(horas)
 
-    # se mudou o turno/dia_ref ou mudou a quantidade de horas (config), força recarga do DB
     if m.get("_ph_data_ref") != data_ref or m.get("_ph_len") != horas_len:
         m["_ph_loaded"] = False
         m["_ph_data_ref"] = data_ref
@@ -249,7 +346,6 @@ def atualizar_producao_hora(m):
         m["producao_por_hora"] = [None] * horas_len
         m["_ph_loaded"] = False
 
-    # tenta carregar do DB (e se falhar, tenta de novo no próximo ciclo)
     if machine_id and not m.get("_ph_loaded"):
         try:
             conn = get_db()
@@ -261,12 +357,9 @@ def atualizar_producao_hora(m):
             m["_ph_loaded"] = False
 
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
-
-    # Se mudou a hora, primeiro "fecha" a hora anterior e depois inicia a nova
     prev_idx = m.get("ultima_hora")
 
     if prev_idx is None or prev_idx != idx:
-        # 1) fecha a hora anterior (se existia)
         if isinstance(prev_idx, int) and prev_idx >= 0:
             base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
             prod_prev = esp_abs - base_prev
@@ -277,14 +370,12 @@ def atualizar_producao_hora(m):
             meta_prev = _meta_by_idx(m, prev_idx)
             pct_prev = _percentual(prod_prev, meta_prev)
 
-            # atualiza lista (tabela)
             try:
                 if 0 <= prev_idx < len(m["producao_por_hora"]):
                     m["producao_por_hora"][prev_idx] = prod_prev
             except Exception:
                 pass
 
-            # persiste no DB
             if machine_id:
                 try:
                     conn = get_db()
@@ -304,10 +395,8 @@ def atualizar_producao_hora(m):
                 except Exception:
                     pass
 
-        # 2) inicia a hora atual
         m["ultima_hora"] = idx
 
-        # se houver baseline salvo no DB para essa hora, usa ele (continua após restart)
         baseline = None
         if machine_id:
             try:
@@ -325,7 +414,6 @@ def atualizar_producao_hora(m):
         m["producao_hora"] = 0
         m["percentual_hora"] = 0
 
-        # garante linha no DB já criada/atualizada (hora atual zerada mas com baseline certo)
         if machine_id:
             try:
                 meta_now = _meta_by_idx(m, idx)
@@ -348,9 +436,7 @@ def atualizar_producao_hora(m):
 
         return
 
-    # Hora atual: calcula e atualiza
     base_h = int(m.get("baseline_hora", esp_abs) or esp_abs)
-
     prod_h = esp_abs - base_h
     if prod_h < 0:
         prod_h = 0
@@ -359,14 +445,12 @@ def atualizar_producao_hora(m):
     meta_h = _meta_by_idx(m, idx)
     m["percentual_hora"] = _percentual(m["producao_hora"], meta_h)
 
-    # atualiza lista (tabela) também para a hora atual (vai mudando em tempo real)
     try:
         if 0 <= idx < len(m["producao_por_hora"]):
             m["producao_por_hora"][idx] = int(m["producao_hora"])
     except Exception:
         pass
 
-    # persiste a hora atual em tempo real (assim não perde no restart)
     if machine_id:
         try:
             conn = get_db()
@@ -415,8 +499,9 @@ def reset_contexto(m, machine_id):
     m["ultima_hora"] = None
     m["baseline_hora"] = m["esp_absoluto"]
 
-    # força recarga da tabela horária no próximo ciclo do dashboard
     m["_ph_loaded"] = False
+    m["_bt_data_ref"] = None
+    m["_bt_esp_last"] = None
 
     m["ultimo_dia"] = now_bahia().date()
     m["reset_executado_hoje"] = True
