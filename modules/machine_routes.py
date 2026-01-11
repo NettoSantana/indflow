@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
+import json
 
 from modules.db_indflow import get_db
 from modules.machine_state import get_machine
@@ -16,6 +17,26 @@ from modules.machine_calc import (
 )
 
 machine_bp = Blueprint("machine_bp", __name__)
+
+
+def _ensure_machine_config_table():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS machine_config (
+            machine_id TEXT PRIMARY KEY,
+            meta_turno INTEGER NOT NULL DEFAULT 0,
+            turno_inicio TEXT,
+            turno_fim TEXT,
+            rampa_percentual INTEGER NOT NULL DEFAULT 0,
+            horas_turno_json TEXT NOT NULL DEFAULT '[]',
+            meta_por_hora_json TEXT NOT NULL DEFAULT '[]',
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 
 # ============================================================
 # CONFIGURAÇÃO DA MÁQUINA
@@ -53,6 +74,7 @@ def configurar_maquina():
     m["horas_turno"] = horas
 
     qtd_horas = len(horas)
+    metas = []
     if qtd_horas > 0:
         meta_base = meta_turno / qtd_horas
 
@@ -70,12 +92,44 @@ def configurar_maquina():
                 valor = meta_restante_base + (1 if i < sobra else 0)
                 metas.append(valor)
 
-        m["meta_por_hora"] = metas
+    m["meta_por_hora"] = metas
 
     m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
     m["ultima_hora"] = calcular_ultima_hora_idx(m)
     m["producao_hora"] = 0
     m["percentual_hora"] = 0
+
+    # ✅ PERSISTE CONFIG (pra meta não virar 0 após deploy/restart)
+    try:
+        _ensure_machine_config_table()
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO machine_config
+            (machine_id, meta_turno, turno_inicio, turno_fim, rampa_percentual, horas_turno_json, meta_por_hora_json, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(machine_id) DO UPDATE SET
+                meta_turno=excluded.meta_turno,
+                turno_inicio=excluded.turno_inicio,
+                turno_fim=excluded.turno_fim,
+                rampa_percentual=excluded.rampa_percentual,
+                horas_turno_json=excluded.horas_turno_json,
+                meta_por_hora_json=excluded.meta_por_hora_json,
+                updated_at=excluded.updated_at
+        """, (
+            machine_id,
+            int(m.get("meta_turno") or 0),
+            m.get("turno_inicio"),
+            m.get("turno_fim"),
+            int(m.get("rampa_percentual") or 0),
+            json.dumps(m.get("horas_turno") or []),
+            json.dumps(m.get("meta_por_hora") or []),
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
 
     return jsonify({
         "status": "configurado",
@@ -84,6 +138,7 @@ def configurar_maquina():
         "unidade_2": m.get("unidade_2"),
         "conv_m_por_pcs": m.get("conv_m_por_pcs")
     })
+
 
 # ============================================================
 # UPDATE ESP
@@ -94,23 +149,27 @@ def update_machine():
     machine_id = data.get("machine_id", "maquina01")
     m = get_machine(machine_id)
 
+    # ✅ reset pelo dia operacional (vira 23:59)
     verificar_reset_diario(m, machine_id)
 
     m["status"] = data.get("status", "DESCONHECIDO")
     m["esp_absoluto"] = int(data["producao_turno"])
 
-    # baseline_diario persistido no SQLite (não estoura após deploy/restart)
+    # ✅ baseline diário persistido no SQLite (dia operacional)
     carregar_baseline_turno(m, machine_id)
 
-    producao_atual = max(m["esp_absoluto"] - m["baseline_diario"], 0)
+    producao_atual = max(int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0), 0)
     m["producao_turno"] = producao_atual
 
-    if m["meta_turno"] > 0:
+    if int(m.get("meta_turno", 0) or 0) > 0:
         m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
+    else:
+        m["percentual_turno"] = 0
 
     atualizar_producao_hora(m)
 
     return jsonify({"message": "OK"})
+
 
 # ============================================================
 # RESET MANUAL
@@ -122,6 +181,7 @@ def reset_manual():
     m = get_machine(machine_id)
     reset_contexto(m, machine_id)
     return jsonify({"status": "resetado"})
+
 
 # ============================================================
 # STATUS
@@ -139,6 +199,7 @@ def machine_status():
     aplicar_derivados_ml(m)
 
     return jsonify(m)
+
 
 # ============================================================
 # HISTÓRICO

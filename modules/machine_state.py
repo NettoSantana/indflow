@@ -3,8 +3,10 @@ from datetime import datetime
 import json
 
 from modules.db_indflow import get_db
+from modules.machine_calc import now_bahia, dia_operacional_ref_dt
 
 machine_data = {}
+
 
 def _ensure_machine_config_table():
     conn = get_db()
@@ -23,6 +25,7 @@ def _ensure_machine_config_table():
     """)
     conn.commit()
     conn.close()
+
 
 def _load_machine_config(machine_id: str):
     _ensure_machine_config_table()
@@ -77,8 +80,12 @@ def _load_machine_config(machine_id: str):
         "meta_por_hora": meta_por_hora,
     }
 
+
 def get_machine(machine_id: str):
     if machine_id not in machine_data:
+        agora = now_bahia()
+        dia_operacional = dia_operacional_ref_dt(agora)
+
         machine_data[machine_id] = {
             "nome": machine_id.upper(),
             "status": "DESCONHECIDO",
@@ -88,18 +95,12 @@ def get_machine(machine_id: str):
             "turno_fim": None,
             "rampa_percentual": 0,
 
-            # NOVO: unidade (até 2)
-            "unidade_1": None,  # ex: "pcs" | "m" | "m2"
-            "unidade_2": None,  # ex: "pcs" | "m" | "m2"
-
-            # NOVO: conversão (base atual = pcs)
-            # 1 pcs = X metros (m)
+            "unidade_1": None,
+            "unidade_2": None,
             "conv_m_por_pcs": 1.0,
 
             "esp_absoluto": 0,
             "baseline_diario": 0,
-
-            # NOVO: baseline para calcular produção da HORA
             "baseline_hora": 0,
 
             "producao_turno": 0,
@@ -114,7 +115,8 @@ def get_machine(machine_id: str):
             "percentual_turno": 0,
             "tempo_medio_min_por_peca": None,
 
-            "ultimo_dia": datetime.now().date(),
+            # ✅ importante: dia operacional, não date() normal
+            "ultimo_dia": dia_operacional,
             "reset_executado_hoje": False
         }
 

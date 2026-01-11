@@ -10,9 +10,25 @@ UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 # ============================================================
 TZ_BAHIA = ZoneInfo("America/Bahia")
 
+# Dia operacional vira às 23:59 (não à meia-noite)
+DIA_OPERACIONAL_VIRA = time(23, 59)
+
 
 def now_bahia():
     return datetime.now(TZ_BAHIA)
+
+
+def _dia_operacional_ref(agora: datetime) -> str:
+    """
+    Dia operacional:
+      - de 23:59 até 23:58 do dia seguinte.
+    Logo:
+      - antes de 23:59 => ainda é "dia operacional" de ontem
+      - a partir de 23:59 => vira para o dia de hoje
+    """
+    if agora.time() >= DIA_OPERACIONAL_VIRA:
+        return agora.date().isoformat()
+    return (agora.date() - timedelta(days=1)).isoformat()
 
 
 def norm_u(v):
@@ -95,36 +111,36 @@ def calcular_ultima_hora_idx(m):
 
 
 # ============================================================
-# BASELINE DO TURNO (PERSISTIDO NO SQLITE)  ✅
+# BASELINE DIÁRIO (DIA OPERACIONAL 23:59) - PERSISTIDO NO SQLITE
 # ============================================================
 
-def _ensure_baseline_turno(conn):
+def _ensure_baseline_diario(conn):
     cur = conn.cursor()
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS baseline_turno (
+        CREATE TABLE IF NOT EXISTS baseline_diario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
-            data_ref TEXT NOT NULL,           -- data do início do turno (YYYY-MM-DD)
-            baseline_diario INTEGER NOT NULL, -- esp_absoluto no início do turno
-            esp_last INTEGER NOT NULL,        -- último esp_absoluto visto
+            dia_ref TEXT NOT NULL,            -- dia operacional (vira às 23:59)
+            baseline_esp INTEGER NOT NULL,    -- esp_absoluto no início do dia operacional
+            esp_last INTEGER NOT NULL,
             updated_at TEXT NOT NULL
         )
     """)
     cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_turno
-        ON baseline_turno(machine_id, data_ref)
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
+        ON baseline_diario(machine_id, dia_ref)
     """)
     conn.commit()
 
 
-def carregar_baseline_turno(m, machine_id):
+def carregar_baseline_diario(m, machine_id):
     """
-    Garante m["baseline_diario"] persistido no SQLite por:
-      - machine_id
-      - data_ref (data do início do turno)
+    Persistência REAL do baseline do "Produzido do Turno" (dia operacional 23:59).
 
-    Regra:
-      - se não existir, cria baseline = esp_absoluto atual
+    Regras:
+      - dia_ref = _dia_operacional_ref(now)
+      - baseline_esp é o esp_absoluto no início do dia operacional
+      - se não existir, cria com baseline = esp_absoluto atual
       - se esp_absoluto voltar (reset do ESP), reancora baseline no novo valor
     """
     try:
@@ -135,28 +151,28 @@ def carregar_baseline_turno(m, machine_id):
         return
 
     agora = now_bahia()
-    data_ref = _turno_data_ref(m, agora)
+    dia_ref = _dia_operacional_ref(agora)
 
     try:
         esp_abs = int(m.get("esp_absoluto", 0) or 0)
     except Exception:
         esp_abs = 0
 
-    # micro-cache pra reduzir I/O
-    if m.get("_bt_data_ref") == data_ref and m.get("_bt_esp_last") == esp_abs and isinstance(m.get("baseline_diario"), int):
+    # micro-cache
+    if m.get("_bd_dia_ref") == dia_ref and m.get("_bd_esp_last") == esp_abs and isinstance(m.get("baseline_diario"), int):
         return
 
     try:
         conn = get_db()
-        _ensure_baseline_turno(conn)
+        _ensure_baseline_diario(conn)
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT baseline_diario
-            FROM baseline_turno
-            WHERE machine_id=? AND data_ref=?
+            SELECT baseline_esp
+            FROM baseline_diario
+            WHERE machine_id=? AND dia_ref=?
             LIMIT 1
-        """, (machine_id, data_ref))
+        """, (machine_id, dia_ref))
         row = cur.fetchone()
 
         if row and row[0] is not None:
@@ -167,41 +183,40 @@ def carregar_baseline_turno(m, machine_id):
         else:
             baseline = esp_abs
 
-        # se o contador resetou, reancora
         if esp_abs < baseline:
             baseline = esp_abs
 
         cur.execute("""
-            INSERT INTO baseline_turno (machine_id, data_ref, baseline_diario, esp_last, updated_at)
+            INSERT INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
             VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(machine_id, data_ref)
+            ON CONFLICT(machine_id, dia_ref)
             DO UPDATE SET
-                baseline_diario=excluded.baseline_diario,
+                baseline_esp=excluded.baseline_esp,
                 esp_last=excluded.esp_last,
                 updated_at=excluded.updated_at
-        """, (machine_id, data_ref, int(baseline), int(esp_abs), now_bahia().isoformat()))
+        """, (machine_id, dia_ref, int(baseline), int(esp_abs), now_bahia().isoformat()))
 
         conn.commit()
         conn.close()
 
         m["baseline_diario"] = int(baseline)
-        m["_bt_data_ref"] = data_ref
-        m["_bt_esp_last"] = esp_abs
+        m["_bd_dia_ref"] = dia_ref
+        m["_bd_esp_last"] = esp_abs
     except Exception:
-        # fallback seguro (não derruba o app)
         if "baseline_diario" not in m or m.get("baseline_diario") is None:
             m["baseline_diario"] = esp_abs
 
 
+def dia_operacional_atual():
+    """Ajuda para outros módulos decidirem a virada às 23:59."""
+    return _dia_operacional_ref(now_bahia())
+
+
 # ============================================================
-# PERSISTÊNCIA POR HORA (SQLITE)
+# PERSISTÊNCIA POR HORA (SQLITE)  (mantém como você já tinha)
 # ============================================================
 
 def _get_machine_id_from_m(m):
-    """
-    Não mexe em outros arquivos: tenta derivar machine_id do m.
-    Hoje m["nome"] é tipo "MAQUINA01" -> vira "maquina01".
-    """
     nome = (m.get("nome") or "").strip()
     if not nome:
         return None
@@ -217,7 +232,7 @@ def _ensure_producao_horaria(conn):
             data_ref TEXT NOT NULL,         -- data do início do turno (YYYY-MM-DD)
             hora_idx INTEGER NOT NULL,      -- índice da hora dentro do turno (0..n-1)
             baseline_esp INTEGER NOT NULL,  -- esp_absoluto no início da hora
-            esp_last INTEGER NOT NULL,      -- último esp_absoluto visto
+            esp_last INTEGER NOT NULL,
             produzido INTEGER NOT NULL,
             meta INTEGER NOT NULL,
             percentual INTEGER NOT NULL,
@@ -277,9 +292,6 @@ def _get_baseline_for_hora(conn, machine_id, data_ref, hora_idx):
 
 
 def _load_producao_por_hora(conn, machine_id, data_ref, n_horas):
-    """
-    Retorna lista tamanho n_horas com valores (int) ou None.
-    """
     out = [None] * int(n_horas or 0)
     cur = conn.cursor()
     cur.execute("""
@@ -480,7 +492,7 @@ def reset_contexto(m, machine_id):
         VALUES (?, ?, ?, ?, ?)
     """, (
         machine_id,
-        m["ultimo_dia"].isoformat(),
+        m["ultimo_dia"],
         m["producao_turno"],
         m["meta_turno"],
         m["percentual_turno"]
@@ -500,22 +512,24 @@ def reset_contexto(m, machine_id):
     m["baseline_hora"] = m["esp_absoluto"]
 
     m["_ph_loaded"] = False
-    m["_bt_data_ref"] = None
-    m["_bt_esp_last"] = None
-
-    m["ultimo_dia"] = now_bahia().date()
-    m["reset_executado_hoje"] = True
+    m["_bd_dia_ref"] = None
+    m["_bd_esp_last"] = None
 
 
 def verificar_reset_diario(m, machine_id):
+    """
+    Reset do "dia operacional" na virada 23:59.
+    Agora a regra é:
+      - se dia_operacional_ref mudou => reset
+    """
     agora = now_bahia()
-    horario_reset = time(23, 59)
+    dia_ref = _dia_operacional_ref(agora)
 
-    if agora.time() >= horario_reset and not m["reset_executado_hoje"]:
+    if m.get("ultimo_dia") != dia_ref:
+        # fecha o dia anterior
         reset_contexto(m, machine_id)
-
-    if agora.date() != m["ultimo_dia"]:
-        m["reset_executado_hoje"] = False
+        # inicia o novo dia operacional
+        m["ultimo_dia"] = dia_ref
 
 
 def calcular_tempo_medio(m):
