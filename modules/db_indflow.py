@@ -3,6 +3,7 @@ import os
 import sqlite3
 from pathlib import Path
 
+
 def _default_db_path() -> str:
     """
     Prioridade:
@@ -19,13 +20,16 @@ def _default_db_path() -> str:
 
     return "indflow.db"
 
+
 DB_PATH = _default_db_path()
+
 
 def get_db():
     # check_same_thread=False ajuda quando Waitress/Flask usa threads
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
 
 def init_db():
     # garante pasta do DB (quando for path tipo /data/indflow.db)
@@ -37,7 +41,7 @@ def init_db():
     cur = conn.cursor()
 
     # ============================================
-    # 1) HISTÓRICO DIÁRIO (já existia)
+    # 1) HISTÓRICO DIÁRIO
     # ============================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_diaria (
@@ -73,10 +77,10 @@ def init_db():
         CREATE TABLE IF NOT EXISTS producao_horaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
-            data_ref TEXT NOT NULL,         -- data do início do turno (YYYY-MM-DD)
-            hora_idx INTEGER NOT NULL,      -- índice da hora no turno (0..n-1)
-            baseline_esp INTEGER NOT NULL,  -- esp_absoluto no início da hora
-            esp_last INTEGER NOT NULL,      -- último esp_absoluto visto
+            data_ref TEXT NOT NULL,         -- data do início do turno
+            hora_idx INTEGER NOT NULL,      -- índice da hora no turno
+            baseline_esp INTEGER NOT NULL,
+            esp_last INTEGER NOT NULL,
             produzido INTEGER NOT NULL,
             meta INTEGER NOT NULL,
             percentual INTEGER NOT NULL,
@@ -87,6 +91,25 @@ def init_db():
     cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria
         ON producao_horaria(machine_id, data_ref, hora_idx)
+    """)
+
+    # ============================================
+    # 4) BASELINE DIÁRIO (DIA OPERACIONAL 23:59)
+    # ============================================
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS baseline_diario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            dia_ref TEXT NOT NULL,            -- dia operacional (vira às 23:59)
+            baseline_esp INTEGER NOT NULL,    -- esp_absoluto no início do dia
+            esp_last INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
+        ON baseline_diario(machine_id, dia_ref)
     """)
 
     conn.commit()
