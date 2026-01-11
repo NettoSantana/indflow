@@ -1,4 +1,5 @@
-﻿fix(indflow-dev): adicionar carregar_baseline_turno no machine_calc
+﻿fix(indflow-dev): persistir meta/config e zerar turno no dia operacional 23:59
 
-- corrige ImportError no boot (waitress) ao importar em machine_routes
-- baseline_turno cria sob demanda (CREATE TABLE IF NOT EXISTS)
+- /machine/config agora salva machine_config no SQLite (meta_turno/meta_por_hora não viram 0 após restart)
+- produzido do turno usa baseline_diario persistido (tabela baseline_diario)
+- virada do dia operacional às 23:59 (reset automático por mudança de dia_operacional)
