@@ -1,5 +1,5 @@
-﻿fix(indflow-dev): criar baseline_diario no init_db
+﻿fix(indflow-dev): persistir baseline_diario no reset_contexto
 
-- adiciona tabela baseline_diario (dia operacional 23:59)
-- cria índice único (machine_id, dia_ref)
-- garante persistência correta do baseline após deploy/restart
+- reset manual agora grava baseline_diario no SQLite (baseline_diario)
+- evita voltar 'produzido gigante' após deploy/restart
+- normaliza machine_id no reset_contexto
