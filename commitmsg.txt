@@ -1,5 +1,4 @@
-﻿feat(indflow-dev): persistir baseline_diario do turno no SQLite
+﻿fix(indflow-dev): adicionar carregar_baseline_turno no machine_calc
 
-- cria baseline_turno (machine_id + data_ref)
-- carrega/grava baseline_diario para manter producao_turno correta após restart/deploy
-- routes mantém seu layout/fluxo e só injeta carregar_baseline_turno em update/status
+- corrige ImportError no boot (waitress) ao importar em machine_routes
+- baseline_turno cria sob demanda (CREATE TABLE IF NOT EXISTS)
