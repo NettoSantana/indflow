@@ -1,4 +1,5 @@
-﻿fix(indflow-dev): adicionar dia_operacional_ref_dt/str no machine_calc
+﻿fix(indflow-dev): usar carregar_baseline_diario e normalizar machine_id no routes
 
-- cria helpers do dia operacional (vira 23:59) para compatibilidade de imports
-- mantém a lógica existente do baseline_diario/horária sem mudanças
+- corrige import/função do baseline diário (dia operacional 23:59)
+- normaliza machine_id (lower) em config/update/status/historico
+- evita duplicidade MAQUINA01 vs maquina01 e meta virar 0 por chave diferente
