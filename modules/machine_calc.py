@@ -231,27 +231,34 @@ def atualizar_producao_hora(m):
         m["percentual_hora"] = 0
         return
 
-    # garante estrutura pra tabela de "Produzido Hora"
-    horas = m.get("horas_turno") or []
-    if "producao_por_hora" not in m or not isinstance(m.get("producao_por_hora"), list) or len(m.get("producao_por_hora")) != len(horas):
-        m["producao_por_hora"] = [None] * len(horas)
-        m["_ph_loaded"] = False  # força recarga do DB
-
-    # tenta carregar do DB uma vez (pra persistir após restart)
     machine_id = _get_machine_id_from_m(m)
     agora = now_bahia()
     data_ref = _turno_data_ref(m, agora)
 
+    # garante estrutura pra tabela de "Produzido Hora"
+    horas = m.get("horas_turno") or []
+    horas_len = len(horas)
+
+    # se mudou o turno/dia_ref ou mudou a quantidade de horas (config), força recarga do DB
+    if m.get("_ph_data_ref") != data_ref or m.get("_ph_len") != horas_len:
+        m["_ph_loaded"] = False
+        m["_ph_data_ref"] = data_ref
+        m["_ph_len"] = horas_len
+
+    if "producao_por_hora" not in m or not isinstance(m.get("producao_por_hora"), list) or len(m.get("producao_por_hora")) != horas_len:
+        m["producao_por_hora"] = [None] * horas_len
+        m["_ph_loaded"] = False
+
+    # tenta carregar do DB (e se falhar, tenta de novo no próximo ciclo)
     if machine_id and not m.get("_ph_loaded"):
         try:
             conn = get_db()
             _ensure_producao_horaria(conn)
-            m["producao_por_hora"] = _load_producao_por_hora(conn, machine_id, data_ref, len(horas))
+            m["producao_por_hora"] = _load_producao_por_hora(conn, machine_id, data_ref, horas_len)
             conn.close()
             m["_ph_loaded"] = True
         except Exception:
-            # se falhar, segue sem travar o sistema
-            m["_ph_loaded"] = True
+            m["_ph_loaded"] = False
 
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
 
@@ -408,7 +415,7 @@ def reset_contexto(m, machine_id):
     m["ultima_hora"] = None
     m["baseline_hora"] = m["esp_absoluto"]
 
-    # também força recarga da tabela horária no próximo ciclo do dashboard
+    # força recarga da tabela horária no próximo ciclo do dashboard
     m["_ph_loaded"] = False
 
     m["ultimo_dia"] = now_bahia().date()
