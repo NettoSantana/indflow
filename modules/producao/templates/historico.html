@@ -73,49 +73,96 @@
     return new URLSearchParams(window.location.search).get(name) || "";
   }
 
-  // Regras de cálculo por dia:
-  // - produzido é snapshot/acumulado (contador) e pode vir 0 em leituras "ruins"
-  // - produção do dia = max_nonzero - min_nonzero (se existir nonzero)
-  // - se só tiver zero, produção do dia = 0
-  // - refugo ainda não vem => 0 (mas se vier em algum campo comum, usamos max também)
+  // ====== PRODUÇÃO DIÁRIA (OPÇÃO A) ======
+  // - produzido é contador absoluto do ESP (odômetro)
+  // - produção do dia = deltas do contador ao longo do dia
+  // - se cair: pode ser ruído (ex: leitura pequena isolada) ou reset real
+  // - heurística:
+  //   * ignora 0
+  //   * se cair e MAIS À FRENTE voltar perto do valor anterior (>= 95% do prev),
+  //     considera ruído e ignora a leitura baixa
+  //   * se cair e NÃO voltar perto do anterior, considera reset real:
+  //       fecha segmento (prev - segStart) e inicia novo segmento em curr
+  function calcDailyFromAbsolute(values){
+    const v = (Array.isArray(values) ? values : [])
+      .map(toInt)
+      .filter(x => x > 0);
+
+    if(v.length < 2) return 0;
+
+    let total = 0;
+    let segStart = v[0];
+    let prev = v[0];
+
+    for(let i = 1; i < v.length; i++){
+      const curr = v[i];
+
+      if(curr >= prev){
+        prev = curr;
+        continue;
+      }
+
+      // curr < prev => queda: ruído ou reset
+      // olha pra frente: se existir futuro >= 95% do prev, é ruído
+      let voltaPerto = false;
+      const limiar = Math.floor(prev * 0.95);
+
+      for(let j = i + 1; j < v.length; j++){
+        if(v[j] >= limiar){
+          voltaPerto = true;
+          break;
+        }
+      }
+
+      if(voltaPerto){
+        // ruído: ignora leitura baixa e segue
+        continue;
+      }
+
+      // reset real: fecha segmento
+      total += Math.max(0, prev - segStart);
+      segStart = curr;
+      prev = curr;
+    }
+
+    total += Math.max(0, prev - segStart);
+    return total;
+  }
+
+  // ====== AGRUPAR POR DATA ======
+  // - Para cada dia, usamos apenas valores do contador absoluto (produzido)
+  // - Refugo ainda não vem no payload => 0 por enquanto (mas preparado)
   function groupByDateDaily(rows){
-    const m = new Map();
+    const byDate = new Map();
 
     (Array.isArray(rows) ? rows : []).forEach(r => {
       const data = String(r?.data || "").trim();
       if(!data) return;
 
       const prod = toInt(r?.produzido);
-      const ref =
-        toInt(r?.refugo ?? r?.refugos ?? r?.refugo_total ?? 0);
+      const ref = toInt(r?.refugo ?? r?.refugos ?? r?.refugo_total ?? 0);
 
-      if(!m.has(data)){
-        m.set(data, {
-          data,
-          minNonZero: null,
-          maxNonZero: 0,
-          maxRefugo: 0
-        });
+      if(!byDate.has(data)){
+        byDate.set(data, { data, producedList: [], refugoList: [] });
       }
-      const it = m.get(data);
+      const it = byDate.get(data);
 
-      if(prod > 0){
-        it.maxNonZero = Math.max(it.maxNonZero, prod);
-        it.minNonZero = (it.minNonZero === null) ? prod : Math.min(it.minNonZero, prod);
-      }
-
-      if(ref > 0){
-        it.maxRefugo = Math.max(it.maxRefugo, ref);
-      }
+      if(prod > 0) it.producedList.push(prod);
+      if(ref > 0) it.refugoList.push(ref);
     });
 
     const out = [];
-    for(const it of m.values()){
-      const maxP = it.maxNonZero || 0;
-      const minP = (it.minNonZero === null) ? 0 : it.minNonZero;
-      const totalDia = (maxP > 0 && minP > 0) ? Math.max(0, maxP - minP) : 0;
+    for(const it of byDate.values()){
+      const totalDia = calcDailyFromAbsolute(it.producedList);
 
-      const refugoDia = it.maxRefugo || 0;
+      // Refugo: enquanto não vem no JSON, fica 0.
+      // Se no futuro vier (como contador também), dá pra calcular delta igual.
+      // Por agora, se vier por snapshot, usamos o maior.
+      let refugoDia = 0;
+      if(it.refugoList && it.refugoList.length){
+        refugoDia = Math.max(...it.refugoList.map(toInt));
+      }
+
       const boasDia = Math.max(0, totalDia - refugoDia);
 
       out.push({
