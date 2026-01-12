@@ -4,72 +4,253 @@
 
 {% block content %}
 
-<h1 style="margin-bottom:16px;">Histórico de Produção</h1>
+<style>
+  .hist-wrap{
+    max-width:1200px;
+    margin:0 auto;
+    padding:8px 12px 24px;
+  }
+  .hist-header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+  .hist-title{
+    margin:0;
+    font-size:26px;
+    font-weight:900;
+    color:#0f172a;
+    letter-spacing:-0.02em;
+  }
+  .machine-name{
+    margin-top:6px;
+    font-size:14px;
+    font-weight:800;
+    color:#334155;
+  }
+  .card{
+    background:#ffffff;
+    border-radius:14px;
+    border:1px solid #e5e7eb;
+    box-shadow:0 4px 12px rgba(0,0,0,0.08);
+    overflow:hidden;
+  }
+  .filter-bar{
+    display:flex;
+    align-items:flex-end;
+    gap:10px;
+    padding:14px;
+    background:linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+    border-bottom:1px solid #e5e7eb;
+    flex-wrap:wrap;
+  }
+  .filter-group label{
+    display:block;
+    font-size:12px;
+    font-weight:900;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    margin-bottom:6px;
+  }
+  .filter-group input{
+    height:40px;
+    padding:8px 10px;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    font-size:14px;
+    outline:none;
+    background:#fff;
+    min-width:220px;
+  }
+  .filter-group input:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+  .hint{
+    font-size:12px;
+    color:#64748b;
+    margin-left:auto;
+    padding-bottom:6px;
+    white-space:nowrap;
+  }
 
-<div style="
-  background:#ffffff;
-  border-radius:12px;
-  box-shadow:0 4px 12px rgba(0,0,0,0.08);
-  padding:20px;
-">
-
-  <table style="
+  table{
     width:100%;
     border-collapse:collapse;
-    font-size:15px;
-  ">
-    <thead>
-      <tr style="background:#f1f5f9;">
-        <th style="padding:12px;text-align:left;">Data</th>
-        <th style="padding:12px;text-align:left;">Máquina</th>
-        <th style="padding:12px;text-align:right;">Produzido</th>
-        <th style="padding:12px;text-align:right;">Meta</th>
-        <th style="padding:12px;text-align:right;">%</th>
-      </tr>
-    </thead>
+    font-size:14px;
+  }
+  thead th{
+    background:#f1f5f9;
+    color:#0f172a;
+    font-weight:900;
+    padding:12px 14px;
+    text-align:left;
+    border-bottom:1px solid #e5e7eb;
+  }
+  tbody td{
+    padding:10px 14px;
+    border-bottom:1px solid #e5e7eb;
+    color:#0f172a;
+  }
+  tbody tr:nth-child(odd){ background:#ffffff; }
+  tbody tr:nth-child(even){ background:#f8fbff; }
+  tbody tr:hover{ background:#eff6ff; }
+  .text-right{ text-align:right; }
+  .muted{ color:#64748b; }
+  .loading td{
+    padding:14px;
+    text-align:center;
+    color:#64748b;
+  }
+</style>
 
-    <tbody id="historico-body">
-      <tr>
-        <td colspan="5" style="padding:14px;text-align:center;color:#64748b;">
-          Carregando histórico...
-        </td>
-      </tr>
-    </tbody>
-  </table>
+<div class="hist-wrap">
+
+  <div class="hist-header">
+    <div>
+      <h1 class="hist-title">Histórico</h1>
+      <div class="machine-name" id="machine-name">Máquina: —</div>
+    </div>
+  </div>
+
+  <div class="card">
+
+    <!-- FILTRO (POR ENQUANTO, SÓ DATA) -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label for="filter-date">Buscar por data</label>
+        <input id="filter-date" type="date">
+      </div>
+
+      <div class="hint" id="hint">Selecione uma data para filtrar (opcional)</div>
+    </div>
+
+    <!-- TABELA RESUMO POR DIA -->
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th class="text-right">Produção Total</th>
+          <th class="text-right">Peças Boas</th>
+          <th class="text-right">Refugo</th>
+        </tr>
+      </thead>
+
+      <tbody id="historico-body">
+        <tr class="loading">
+          <td colspan="4">Carregando histórico...</td>
+        </tr>
+      </tbody>
+    </table>
+
+  </div>
 
 </div>
 
 <script>
-fetch("/producao/historico")
-  .then(r => r.json())
-  .then(dados => {
+  function toIntSafe(v){
+    const n = Number(v);
+    if(!Number.isFinite(n)) return 0;
+    return Math.floor(n);
+  }
+
+  function fmtInt(n){
+    try { return new Intl.NumberFormat("pt-BR").format(toIntSafe(n)); }
+    catch(e){ return String(toIntSafe(n)); }
+  }
+
+  function getMachineIdFromQuery(){
+    const params = new URLSearchParams(window.location.search);
+    return params.get("machine_id") || "";
+  }
+
+  function groupByDate(rows){
+    // Saída: [{data, total, refugo, boas}]
+    const m = new Map();
+
+    (Array.isArray(rows) ? rows : []).forEach(r => {
+      const data = String((r && r.data) ? r.data : "").trim();
+      if(!data) return;
+
+      // Compat: tenta achar campos possíveis
+      const produzido = toIntSafe(r.produzido ?? r.total ?? r.quantidade ?? 0);
+      const refugo = toIntSafe(r.refugo ?? r.refugos ?? r.refugo_total ?? 0);
+
+      if(!m.has(data)){
+        m.set(data, { data, total: 0, refugo: 0 });
+      }
+      const item = m.get(data);
+      item.total += produzido;
+      item.refugo += refugo;
+    });
+
+    const out = Array.from(m.values());
+    out.forEach(x => { x.boas = Math.max(0, x.total - x.refugo); });
+
+    // Ordena por data desc (assumindo YYYY-MM-DD)
+    out.sort((a,b) => String(b.data).localeCompare(String(a.data)));
+    return out;
+  }
+
+  function renderTable(grouped, filtroData){
     const tbody = document.getElementById("historico-body");
     tbody.innerHTML = "";
 
-    if(dados.length === 0){
+    const list = (filtroData)
+      ? grouped.filter(x => String(x.data) === String(filtroData))
+      : grouped;
+
+    if(!list.length){
       tbody.innerHTML = `
-        <tr>
-          <td colspan="5" style="padding:14px;text-align:center;color:#64748b;">
-            Nenhum registro encontrado
-          </td>
+        <tr class="loading">
+          <td colspan="4">Nenhum registro encontrado</td>
         </tr>
       `;
       return;
     }
 
-    dados.forEach(linha => {
+    list.forEach(x => {
       tbody.innerHTML += `
-        <tr style="border-bottom:1px solid #e5e7eb;">
-          <td style="padding:10px;">${linha.data}</td>
-          <td style="padding:10px;">${linha.machine_id}</td>
-          <td style="padding:10px;text-align:right;">${linha.produzido}</td>
-          <td style="padding:10px;text-align:right;">${linha.meta}</td>
-          <td style="padding:10px;text-align:right;">${linha.percentual}%</td>
+        <tr>
+          <td>${x.data}</td>
+          <td class="text-right">${fmtInt(x.total)}</td>
+          <td class="text-right">${fmtInt(x.boas)}</td>
+          <td class="text-right">${fmtInt(x.refugo)}</td>
         </tr>
       `;
     });
+  }
+
+  const machineId = getMachineIdFromQuery();
+  const machineLabel = machineId ? machineId.toUpperCase() : "—";
+  document.getElementById("machine-name").textContent = `Máquina: ${machineLabel}`;
+
+  // Mantém seu modelo: HTML consome JSON do endpoint
+  const url = machineId
+    ? `/producao/historico?machine_id=${encodeURIComponent(machineId)}`
+    : "/producao/historico";
+
+  let groupedCache = [];
+
+  fetch(url)
+    .then(r => r.json())
+    .then(rows => {
+      groupedCache = groupByDate(rows);
+      renderTable(groupedCache, "");
+    })
+    .catch(() => {
+      groupedCache = [];
+      renderTable(groupedCache, "");
+    });
+
+  document.getElementById("filter-date").addEventListener("change", (e) => {
+    const v = (e.target && e.target.value) ? String(e.target.value) : "";
+    renderTable(groupedCache, v);
   });
 </script>
 
 {% endblock %}
-##
