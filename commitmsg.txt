@@ -1,5 +1,4 @@
-﻿fix: não acumular producao_hora fora do turno (card zera corretamente)
+﻿feat: extrai persistencia de producao horaria para producao_horaria_repo
 
-- calcular_ultima_hora_idx retorna None quando o horário atual está fora da janela do turno
-- evita idx travar na última hora e baseline_hora não reancorar
-- Meta da Hora e Produzido Hora no dashboard deixam de acumular fora do turno
+- cria repo com upsert e leitura de producao por hora no SQLite
+- prepara reducao do machine_calc sem mudar comportamento
