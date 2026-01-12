@@ -1,5 +1,5 @@
 # modules/machine_routes.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, render_template
 from datetime import datetime, timedelta
 
 from modules.db_indflow import get_db
@@ -250,10 +250,19 @@ def machine_status():
 
 
 # ============================================================
-# HISTÓRICO (AGORA COM refugo_total e pecas_boas)
+# HISTÓRICO - TELA (HTML)
 # ============================================================
 @machine_bp.route("/producao/historico", methods=["GET"])
-def historico_producao():
+def historico_page():
+    # A tela usa JS para buscar o JSON na rota /api/producao/historico
+    return render_template("historico.html")
+
+
+# ============================================================
+# HISTÓRICO - API (JSON)
+# ============================================================
+@machine_bp.route("/api/producao/historico", methods=["GET"])
+def historico_producao_api():
     machine_id = request.args.get("machine_id")
     inicio = request.args.get("inicio")
     fim = request.args.get("fim")
