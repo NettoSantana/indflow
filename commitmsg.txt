@@ -1,6 +1,6 @@
-﻿ui: historico por dia com producao diaria (max-min) ignorando zeros
+﻿ui: historico por dia com contador absoluto do ESP (opcao A)
 
-- produzido no JSON e snapshot/acumulado, entao nao soma
-- producao do dia = max_nonzero - min_nonzero por data
-- mantem filtro por data e nome da maquina
-- refugo permanece 0 ate vir no payload (ja preparado)
+- Calcula producao diaria a partir do contador absoluto: soma de deltas
+- Ignora leituras 0 e trata quedas como ruido ou reset (heuristica)
+- Mantem filtro por data e nome da maquina
+- Refugo segue 0 ate vir no payload
