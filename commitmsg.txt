@@ -1,5 +1,6 @@
-﻿feat: persistência de refugo por hora no SQLite
+﻿feat: refugo deixa de usar localStorage e passa a persistir no SQLite
 
-- cria tabela refugo_horaria (machine_id + dia_ref + hora_dia)
-- adiciona endpoint POST /machine/refugo com validação (apenas horas passadas)
-- status passa a devolver refugo_por_hora (24) e producao_hora_liquida
+- carrega refugo_por_hora (24) via /machine/status
+- salva refugo via POST /machine/refugo (dia_ref + hora_dia)
+- mantém regra: só horas passadas editáveis
+- produzido hora exibido como (produzido - refugo), clamp >= 0
