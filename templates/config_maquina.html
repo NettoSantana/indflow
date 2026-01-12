@@ -8,6 +8,14 @@
   #tabela-horas tbody tr:nth-child(even) { background-color: #f3f4f6; }
   #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
   #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
+
+  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo início->fim) */
+  #tabela-horas tbody tr.turno-ativo {
+    background-color: #fff7ed; /* leve destaque */
+  }
+  #tabela-horas tbody tr.turno-ativo:hover {
+    background-color: #ffedd5; /* hover do turno */
+  }
 </style>
 
 <div class="container">
@@ -139,6 +147,39 @@ function parseHourFromTimeStr(s){
   return h;
 }
 
+function parseMinFromTimeStr(s){
+  // "08:30" -> 510
+  if(!s || typeof s !== "string") return null;
+  const parts = s.split(":");
+  const h = Number(parts[0]);
+  const m = Number(parts[1] ?? 0);
+  if(!Number.isFinite(h) || h < 0 || h > 23) return null;
+  if(!Number.isFinite(m) || m < 0 || m > 59) return null;
+  return h * 60 + m;
+}
+
+function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
+  // marca a linha se a HORA (ex.: 8 representa 08:00–09:00) está dentro do turno
+  const ini = parseMinFromTimeStr(inicioStr);
+  const fim = parseMinFromTimeStr(fimStr);
+  if(ini === null || fim === null) return false;
+
+  const t = horaIndex * 60;
+
+  // turno "normal" (08:00–16:00)
+  if(ini < fim){
+    return (t >= ini) && (t < fim);
+  }
+
+  // turno cruzando meia-noite (22:00–06:00)
+  if(ini > fim){
+    return (t >= ini) || (t < fim);
+  }
+
+  // ini == fim -> considerado "sem turno"
+  return false;
+}
+
 // ✅ CORREÇÃO: remap meta_por_hora (indexado pelo turno)
 // para meta fixa por hora real (0..23)
 function mapMetaTurnoPara24h(meta_por_hora, inicioStr){
@@ -239,8 +280,11 @@ function carregarTabela(){
       // carrega conversão salva
       document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      // metas: vem indexado pelo turno -> remapeia pra 0..23
+      // início/fim do turno (para destacar linhas)
       const inicioTurnoStr = (data.inicio ?? document.getElementById("inicio").value);
+      const fimTurnoStr = (data.fim ?? document.getElementById("fim").value);
+
+      // metas: vem indexado pelo turno -> remapeia pra 0..23
       const meta24 = mapMetaTurnoPara24h(data.meta_por_hora, inicioTurnoStr);
 
       // produzido por hora (persistido pelo backend)
@@ -255,6 +299,11 @@ function carregarTabela(){
 
       for(let i = 0; i < 24; i++){
         const tr = document.createElement("tr");
+
+        // ✅ destaque do turno ativo
+        if(horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr)){
+          tr.classList.add("turno-ativo");
+        }
 
         const tdHora = document.createElement("td");
         tdHora.textContent = HORAS_FIXAS_24[i];
