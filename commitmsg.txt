@@ -1,4 +1,4 @@
-﻿feat: historico retorna refugo_total e pecas_boas
+﻿fix: fechamento diario idempotente (1 linha por dia)
 
-- /producao/historico agora inclui refugo_total (soma 24h) e pecas_boas
-- sem mudar regras de producao; apenas enriquece o JSON
+- reset_contexto agora apaga registro anterior do dia e grava novamente
+- evita duplicacao em producao_diaria em caso de restart/deploy/multi-worker
