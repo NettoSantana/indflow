@@ -1,5 +1,5 @@
-﻿ui: ocultar valores futuros na tabela de produzido por hora (regra A)
+﻿fix: tabela de horas fixa 24h (00–24) na config_maquina
 
-- 'Produzido Hora' mostra apenas ate a hora atual (inclui parcial da hora atual)
-- linhas futuras (i > ultima_hora) ficam sempre com '—'
-- evita exibir dados antigos como se fossem horarios futuros
+- tabela deixa de depender de horas_turno e sempre renderiza 24 linhas
+- meta da hora usa meta_por_hora[i] ou 0
+- produzido hora mantém Regra A (não mostra horas futuras) e usa producao_por_hora

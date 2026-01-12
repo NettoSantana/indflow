@@ -1,24 +1,11 @@
-
 {% extends "base.html" %}
 {% block title %}Configuração da Máquina{% endblock %}
-
 {% block content %}
 
 <style>
-  /* ============================================================
-     TABELA ZEBRADA (linha sim, linha não) - cinza claro
-     ============================================================ */
-  #tabela-horas tbody tr:nth-child(even) {
-    background-color: #f3f4f6; /* cinza claro */
-  }
-
-  #tabela-horas tbody tr:nth-child(odd) {
-    background-color: #ffffff;
-  }
-
-  #tabela-horas tbody tr:hover {
-    background-color: #e5e7eb; /* hover */
-  }
+  #tabela-horas tbody tr:nth-child(even){ background:#f3f4f6; }
+  #tabela-horas tbody tr:nth-child(odd){ background:#fff; }
+  #tabela-horas tbody tr:hover{ background:#e5e7eb; }
 </style>
 
 <div class="container">
@@ -27,36 +14,17 @@
     <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
 
     <div style="display:flex; gap:10px;">
-      <!-- BOTÃO HISTÓRICO -->
-
-
-
-      <a id="btn-historico"
-         href="#"
-         class="btn btn-secondary">
-         Histórico
-      </a>
-
-      <!-- BOTÃO RESET -->
-      <button id="btn-reset"
-              class="btn"
-              style="background:#dc2626;color:#fff;">
-        Zerar Produção
-      </button>
+      <a id="btn-historico" href="#" class="btn btn-secondary">Histórico</a>
+      <button id="btn-reset" class="btn" style="background:#dc2626;color:#fff;">Zerar Produção</button>
     </div>
   </div>
 
   <div class="card">
-
     <form id="config-form">
-
-      <!-- META DO TURNO -->
       <label>Meta do Turno (pcs):</label>
       <input type="number" id="meta" required>
 
-      <!-- NOVO: UNIDADE DE PRODUÇÃO (ATÉ 2) -->
       <label class="mt-20">Unidade de Produção (até 2):</label>
-
       <div class="row">
         <div class="col">
           <select id="unidade_1" class="input">
@@ -66,7 +34,6 @@
             <option value="m2">Metro quadrado (m²)</option>
           </select>
         </div>
-
         <div class="col">
           <select id="unidade_2" class="input">
             <option value="">—</option>
@@ -77,43 +44,27 @@
         </div>
       </div>
 
-      <!-- NOVO: CONVERSOR (1 pcs = X m) -->
       <label class="mt-20">Conversão (1 pcs = X metros):</label>
-      <input
-        type="number"
-        id="conv_m_por_pcs"
-        class="input"
-        step="0.001"
-        min="0.001"
-        placeholder="Ex: 0.85"
-        required
-      >
+      <input type="number" id="conv_m_por_pcs" class="input" step="0.001" min="0.001" placeholder="Ex: 0.85" required>
 
-      <!-- HORÁRIOS -->
       <div class="row mt-20">
         <div class="col">
           <label>Início do Turno:</label>
           <input type="time" id="inicio" required>
         </div>
-
         <div class="col">
           <label>Fim do Turno:</label>
           <input type="time" id="fim" required>
         </div>
       </div>
 
-      <!-- RAMPA -->
       <label class="mt-20">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
 
-      <button class="btn btn-primary mt-20" type="submit">
-        Salvar Configuração
-      </button>
+      <button class="btn btn-primary mt-20" type="submit">Salvar Configuração</button>
     </form>
-
   </div>
 
-  <!-- TABELA GERADA AUTOMATICAMENTE -->
   <h2 class="section-title mt-30">Distribuição da Meta por Hora</h2>
 
   <div class="card">
@@ -122,8 +73,6 @@
         <tr>
           <th>Faixa Horária</th>
           <th>Meta da Hora</th>
-
-          <!-- NOVO -->
           <th>Produzido Hora</th>
           <th>Refugo Hora</th>
         </tr>
@@ -136,25 +85,28 @@
 
 <script>
 const machine_id = window.location.pathname.split("/").pop();
+const $ = (id) => document.getElementById(id);
 
-document.getElementById("titulo-maquina").textContent =
-  "Configuração da Máquina — " + machine_id.toUpperCase();
+$("titulo-maquina").textContent = "Configuração da Máquina — " + machine_id.toUpperCase();
+$("btn-historico").href = `/producao/historico?machine_id=${machine_id}`;
 
-document.getElementById("btn-historico").href =
-  `/producao/historico?machine_id=${machine_id}`;
-
-// ===========================================
-// RESET MANUAL
-// ===========================================
-document.getElementById("btn-reset").addEventListener("click", function(){
-  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")){
-    return;
+function pad2(n){ return String(n).padStart(2,"0"); }
+function faixas24(){
+  const a = [];
+  for(let h=0; h<24; h++){
+    const h2 = (h+1)%24;
+    a.push(`${pad2(h)}:00–${pad2(h2)}:00`);
   }
+  return a;
+}
+const HORAS_FIXAS = faixas24();
 
+$("btn-reset").addEventListener("click", () => {
+  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")) return;
   fetch("/admin/reset-manual", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ machine_id })
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({ machine_id })
   })
   .then(r => r.json())
   .then(() => {
@@ -163,48 +115,35 @@ document.getElementById("btn-reset").addEventListener("click", function(){
   });
 });
 
-// ===========================================
-// UNIDADES: não permitir duplicado
-// ===========================================
 function garantirSemDuplicar(){
-  const u1 = document.getElementById("unidade_1");
-  const u2 = document.getElementById("unidade_2");
-  if(u1.value && u2.value && u1.value === u2.value){
-    u2.value = "";
-  }
+  const u1 = $("unidade_1"), u2 = $("unidade_2");
+  if(u1.value && u2.value && u1.value === u2.value) u2.value = "";
 }
-document.getElementById("unidade_1").addEventListener("change", garantirSemDuplicar);
-document.getElementById("unidade_2").addEventListener("change", garantirSemDuplicar);
+$("unidade_1").addEventListener("change", garantirSemDuplicar);
+$("unidade_2").addEventListener("change", garantirSemDuplicar);
 
-// ===========================================
-// SUBMIT DO FORMULÁRIO
-// ===========================================
-document.getElementById("config-form").addEventListener("submit", function(e){
+$("config-form").addEventListener("submit", (e) => {
   e.preventDefault();
-
   garantirSemDuplicar();
 
-  // valida conversão > 0
-  const conv = Number(document.getElementById("conv_m_por_pcs").value);
+  const conv = Number($("conv_m_por_pcs").value);
   if(!Number.isFinite(conv) || conv <= 0){
     alert("Conversão inválida. Use um número maior que zero. Ex: 0.85");
     return;
   }
 
   fetch("/machine/config", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      machine_id: machine_id,
-      meta_turno: document.getElementById("meta").value,
-      inicio: document.getElementById("inicio").value,
-      fim: document.getElementById("fim").value,
-      rampa: document.getElementById("rampa").value,
-
-      unidade_1: document.getElementById("unidade_1").value,
-      unidade_2: document.getElementById("unidade_2").value,
-
-      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      machine_id,
+      meta_turno:$("meta").value,
+      inicio:$("inicio").value,
+      fim:$("fim").value,
+      rampa:$("rampa").value,
+      unidade_1:$("unidade_1").value,
+      unidade_2:$("unidade_2").value,
+      conv_m_por_pcs:$("conv_m_por_pcs").value
     })
   })
   .then(r => r.json())
@@ -214,75 +153,60 @@ document.getElementById("config-form").addEventListener("submit", function(e){
   });
 });
 
-// ===========================================
-// BUSCAR STATUS + TABELA
-// ===========================================
 function carregarTabela(){
   fetch(`/machine/status?machine_id=${machine_id}`)
     .then(r => r.json())
     .then(data => {
-
-      // carrega unidades salvas
-      document.getElementById("unidade_1").value = data.unidade_1 ?? "";
-      document.getElementById("unidade_2").value = data.unidade_2 ?? "";
+      $("unidade_1").value = data.unidade_1 ?? "";
+      $("unidade_2").value = data.unidade_2 ?? "";
       garantirSemDuplicar();
+      $("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      // carrega conversão salva
-      // default: 1 (pra não ficar vazio)
-      document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
+      const metas = Array.isArray(data.meta_por_hora) ? data.meta_por_hora : [];
+      const produzidos = Array.isArray(data.producao_por_hora) ? data.producao_por_hora : [];
 
-      const horas = data.horas_turno || [];
-      const metas = data.meta_por_hora || [];
+      let idxHoraAtual = (typeof data.ultima_hora === "number" && data.ultima_hora >= 0 && data.ultima_hora <= 23)
+        ? data.ultima_hora
+        : new Date().getHours();
 
-      // ✅ PERSISTIDO: lista por hora (vem do backend)
-      const produzidosPorHora = Array.isArray(data.producao_por_hora) ? data.producao_por_hora : [];
+      const parcialHoraAtual = data.producao_hora ?? 0;
 
-      // fallback da hora atual
-      const idxHoraAtual = data.ultima_hora;
-      const produzidoHoraAtual = data.producao_hora ?? 0;
-
-      let tbody = document.querySelector("#tabela-horas tbody");
+      const tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
 
-      for(let i = 0; i < horas.length; i++){
-        let tr = document.createElement("tr");
+      for(let i=0; i<24; i++){
+        const tr = document.createElement("tr");
 
-        let tdHora = document.createElement("td");
-        tdHora.textContent = horas[i];
+        const tdHora = document.createElement("td");
+        tdHora.textContent = HORAS_FIXAS[i];
 
-        let tdMeta = document.createElement("td");
-        tdMeta.textContent = metas[i];
+        const tdMeta = document.createElement("td");
+        tdMeta.textContent = metas[i] ?? 0;
 
-        // ✅ Regra A:
-        // - se for hora FUTURA (i > idxHoraAtual) => sempre "—"
-        // - se não for futura => usa persistido; se não tiver e for hora atual => usa parcial; senão "—"
-        let tdProduzidoHora = document.createElement("td");
-        const v = produzidosPorHora[i];
+        const tdProd = document.createElement("td");
+        const v = produzidos[i];
 
-        if (typeof idxHoraAtual === "number" && i > idxHoraAtual) {
-          tdProduzidoHora.textContent = "—";
-        } else if (v !== null && v !== undefined && v !== "") {
-          tdProduzidoHora.textContent = v;
-        } else if (i === idxHoraAtual) {
-          tdProduzidoHora.textContent = produzidoHoraAtual;
+        if(i > idxHoraAtual){
+          tdProd.textContent = "—";
+        } else if(v !== null && v !== undefined && v !== ""){
+          tdProd.textContent = v;
+        } else if(i === idxHoraAtual){
+          tdProd.textContent = parcialHoraAtual;
         } else {
-          tdProduzidoHora.textContent = "—";
+          tdProd.textContent = "—";
         }
 
-        // NOVO: Refugo Hora (por enquanto 0)
-        let tdRefugoHora = document.createElement("td");
-        tdRefugoHora.textContent = 0;
+        const tdRef = document.createElement("td");
+        tdRef.textContent = 0;
 
         tr.appendChild(tdHora);
         tr.appendChild(tdMeta);
-        tr.appendChild(tdProduzidoHora);
-        tr.appendChild(tdRefugoHora);
-
+        tr.appendChild(tdProd);
+        tr.appendChild(tdRef);
         tbody.appendChild(tr);
       }
     });
 }
-
 carregarTabela();
 </script>
 
