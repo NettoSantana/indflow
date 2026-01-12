@@ -9,12 +9,17 @@
   #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
   #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
 
-  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo início->fim) */
-  #tabela-horas tbody tr.turno-ativo {
-    background-color: #fff7ed; /* leve destaque */
+  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo início->fim)
+     Azul claro + branco, com "duas faixas" (topo mais claro / base mais azul). */
+  #tabela-horas tbody tr.turno-ativo{
+    background-color:#e0f2fe; /* fallback */
+    background-image:linear-gradient(180deg, #ffffff 0%, #e0f2fe 100%);
+    border-top:1px solid #ffffff;
+    border-bottom:1px solid #bfdbfe;
   }
-  #tabela-horas tbody tr.turno-ativo:hover {
-    background-color: #ffedd5; /* hover do turno */
+  #tabela-horas tbody tr.turno-ativo:hover{
+    background-color:#bae6fd; /* fallback */
+    background-image:linear-gradient(180deg, #f0f9ff 0%, #bae6fd 100%);
   }
 
   /* REFUGO EDITÁVEL */
@@ -196,7 +201,7 @@ function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
 }
 
 // ===============================
-// MAP TURN0 -> 24H (meta e produzido)
+// MAP TURNO -> 24H (meta e produzido)
 // ===============================
 function mapTurnoListPara24h(lista_turno, inicioStr, fillValue){
   const out = new Array(24).fill(fillValue);
@@ -234,8 +239,8 @@ function salvarRefugoAPI(machineId, diaRef, horaDia, refugo){
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       machine_id: machineId,
-      dia_ref: diaRef,      // usa o dia operacional do status (bate com o backend)
-      hora_dia: horaDia,    // 0..23 (hora do dia)
+      dia_ref: diaRef,
+      hora_dia: horaDia, // 0..23 (hora do dia)
       refugo: refugo
     })
   })
