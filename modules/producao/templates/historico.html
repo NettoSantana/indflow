@@ -73,21 +73,28 @@
     return new URLSearchParams(window.location.search).get(name) || "";
   }
 
-  // ====== PRODUÇÃO DIÁRIA (OPÇÃO A) ======
-  // - produzido é contador absoluto do ESP (odômetro)
-  // - produção do dia = deltas do contador ao longo do dia
-  // - se cair: pode ser ruído (ex: leitura pequena isolada) ou reset real
-  // - heurística:
-  //   * ignora 0
-  //   * se cair e MAIS À FRENTE voltar perto do valor anterior (>= 95% do prev),
-  //     considera ruído e ignora a leitura baixa
-  //   * se cair e NÃO voltar perto do anterior, considera reset real:
-  //       fecha segmento (prev - segStart) e inicia novo segmento em curr
+  // ====== PRODUÇÃO DIÁRIA (ODÔMETRO DO ESP) ======
+  // Problema atual do seu JSON:
+  // - no mesmo dia aparecem valores gigantes (odômetro) e valores pequenos (lixo)
+  //
+  // Solução:
+  // 1) Dentro do dia, acha o MAX (odômetro)
+  // 2) Considera válido somente quem for >= 50% do MAX (remove lixo)
+  // 3) Calcula produção do dia por segmentos (tratando quedas/reset)
   function calcDailyFromAbsolute(values){
-    const v = (Array.isArray(values) ? values : [])
+    const raw = (Array.isArray(values) ? values : [])
       .map(toInt)
       .filter(x => x > 0);
 
+    if(raw.length < 2) return 0;
+
+    const maxVal = Math.max(...raw);
+    if(maxVal <= 0) return 0;
+
+    // Corte: remove valores pequenos que não são odômetro (ruído / registro errado)
+    const cutoff = Math.floor(maxVal * 0.50);
+
+    const v = raw.filter(x => x >= cutoff);
     if(v.length < 2) return 0;
 
     let total = 0;
@@ -102,7 +109,7 @@
         continue;
       }
 
-      // curr < prev => queda: ruído ou reset
+      // curr < prev => queda: ruído ou reset real
       // olha pra frente: se existir futuro >= 95% do prev, é ruído
       let voltaPerto = false;
       const limiar = Math.floor(prev * 0.95);
@@ -130,8 +137,6 @@
   }
 
   // ====== AGRUPAR POR DATA ======
-  // - Para cada dia, usamos apenas valores do contador absoluto (produzido)
-  // - Refugo ainda não vem no payload => 0 por enquanto (mas preparado)
   function groupByDateDaily(rows){
     const byDate = new Map();
 
@@ -156,8 +161,7 @@
       const totalDia = calcDailyFromAbsolute(it.producedList);
 
       // Refugo: enquanto não vem no JSON, fica 0.
-      // Se no futuro vier (como contador também), dá pra calcular delta igual.
-      // Por agora, se vier por snapshot, usamos o maior.
+      // Se no futuro vier por snapshot, usamos o maior.
       let refugoDia = 0;
       if(it.refugoList && it.refugoList.length){
         refugoDia = Math.max(...it.refugoList.map(toInt));
