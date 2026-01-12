@@ -1,17 +1,4 @@
-tdProduzidoHora.textContent = (i === idxHoraAtual) ? produzidoHora : "—";
-``` :contentReference[oaicite:0]{index=0}
 
-Ou seja: mesmo que o backend esteja persistindo (`producao_horaria`), **a UI ignora**.
-
-✅ Correção (1 arquivo só): **usar `data.producao_por_hora`** (lista) para preencher a coluna “Produzido Hora”. Se não tiver valor naquela posição, aí sim usa fallback da hora atual.
-
-Abaixo vai o **ARQUIVO COMPLETO** (o mesmo que você mandou) com a mudança **somente no JS** dentro de `carregarTabela()`.
-
----
-
-## ✅ `modules/producao/templates/config_maquina.html` (ARQUIVO COMPLETO)
-
-```html
 {% extends "base.html" %}
 {% block title %}Configuração da Máquina{% endblock %}
 
