@@ -89,25 +89,18 @@
 </div>
 
 <script>
-/*
-   ==========================================
-   CARREGAR MÁQUINAS DINAMICAMENTE
-   (Hoje só temos maquina01, mas agora já
-    deixamos preparado para várias)
-   ==========================================
-*/
-
 const maquinas = ["maquina01"];
-// No futuro basta adicionar: ["maquina01", "maquina02", "maquina03"]...
 
 function formatTempoMedio(v) {
-    // v pode vir número, string, null...
     const n = Number(v);
     if (!Number.isFinite(n) || n <= 0) return "—";
-    // 2 casas se precisar, senão 1 já fica ok
     const fixed = n >= 10 ? n.toFixed(1) : n.toFixed(2);
-    // troca ponto por vírgula (pt-BR)
     return fixed.replace(".", ",");
+}
+
+function labelUnidade(u){
+    if(!u) return "";
+    return u.toUpperCase();
 }
 
 function carregarMaquinas() {
@@ -124,11 +117,31 @@ function carregarMaquinas() {
                 ? "status-auto"
                 : "status-manual";
 
-            // Percentual turno = destaque principal do card
             let percent = data.percentual_turno ?? 0;
-
-            // Tempo médio (min/peça) desde o início do turno
             const tempoMedioTxt = formatTempoMedio(data.tempo_medio_min_por_peca);
+
+            const unidade1 = data.unidade_1;
+            const unidade2 = data.unidade_2;
+
+            let unidadesHtml = `
+                <div class="machine-subtext">
+                    Meta (${labelUnidade(unidade1)}): ${data.meta_turno ?? 0}
+                </div>
+                <div class="machine-subtext">
+                    Produzido (${labelUnidade(unidade1)}): ${data.produzido_turno ?? 0}
+                </div>
+            `;
+
+            if(unidade2){
+                unidadesHtml += `
+                    <div class="machine-subtext">
+                        Meta (${labelUnidade(unidade2)}): ${data.meta_turno ?? 0}
+                    </div>
+                    <div class="machine-subtext">
+                        Produzido (${labelUnidade(unidade2)}): ${data.produzido_turno ?? 0}
+                    </div>
+                `;
+            }
 
             let card = `
                 <a href="/producao/config/${id}" class="machine-card-link">
@@ -143,7 +156,11 @@ function carregarMaquinas() {
                         <div class="machine-value">${percent}%</div>
                         <div class="machine-subtext">Meta do Dia</div>
 
-                        <div class="machine-subtext">Ritmo médio: ${tempoMedioTxt} min/peça</div>
+                        ${unidadesHtml}
+
+                        <div class="machine-subtext">
+                            Ritmo médio: ${tempoMedioTxt} min/peça
+                        </div>
 
                     </div>
                 </a>
@@ -155,7 +172,6 @@ function carregarMaquinas() {
 }
 
 carregarMaquinas();
-// Atualiza a cada 2s
 setInterval(carregarMaquinas, 2000);
 </script>
 
