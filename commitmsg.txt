@@ -1,4 +1,4 @@
-﻿ui: historico consome JSON da rota /api
+﻿feat: separa historico em tela (HTML) e api (JSON)
 
-- historico.html agora faz fetch em /api/producao/historico
-- evita abrir JSON cru na rota de tela
+- /producao/historico agora renderiza historico.html
+- /api/producao/historico retorna JSON do historico
