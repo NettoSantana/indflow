@@ -1,6 +1,4 @@
-﻿ui: historico com layout do producao_home + lista por dia
+﻿ui: historico consome JSON da rota /api
 
-- Layout alinhado ao producao_home (page, card, tabela)
-- Topo com Maquina + busca por data
-- Tabela por dia: Data, Producao Total, Pecas Boas, Refugo
-- Remove heuristicas antigas do odometro; usa JSON pronto do backend
+- historico.html agora faz fetch em /api/producao/historico
+- evita abrir JSON cru na rota de tela
