@@ -251,6 +251,80 @@ def atualizar_producao_hora(m):
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
     prev_idx = m.get("ultima_hora")
 
+    # ============================================================
+    # ✅ FIX OFFLINE/WIFI: se a hora "pulou" (ficou sem update),
+    # não perder produção. Joga o delta acumulado na hora atual.
+    # ============================================================
+    if isinstance(prev_idx, int) and prev_idx >= 0 and prev_idx < idx:
+        jump = idx - prev_idx
+        if jump >= 2:
+            # baseline do início da hora anterior (guardado em memória)
+            base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
+            delta_total = esp_abs - base_prev
+            if delta_total < 0:
+                delta_total = 0
+            delta_total = int(delta_total)
+
+            # horas intermediárias: marca 0 no array e no banco (para não ficar "—")
+            for h in range(prev_idx, idx):
+                try:
+                    if 0 <= h < len(m["producao_por_hora"]):
+                        m["producao_por_hora"][h] = 0
+                except Exception:
+                    pass
+
+                if machine_id:
+                    try:
+                        ensure_producao_horaria_table()
+                        meta_h = _meta_by_idx(m, h)
+                        upsert_hora(
+                            machine_id=machine_id,
+                            data_ref=data_ref,
+                            hora_idx=h,
+                            baseline_esp=base_prev,
+                            esp_last=base_prev,
+                            produzido=0,
+                            meta=meta_h,
+                            percentual=_percentual(0, meta_h),
+                        )
+                    except Exception:
+                        pass
+
+            # hora atual recebe todo o delta
+            m["ultima_hora"] = idx
+            m["baseline_hora"] = base_prev
+            m["producao_hora"] = delta_total
+
+            meta_now = _meta_by_idx(m, idx)
+            m["percentual_hora"] = _percentual(delta_total, meta_now)
+
+            try:
+                if 0 <= idx < len(m["producao_por_hora"]):
+                    m["producao_por_hora"][idx] = int(delta_total)
+            except Exception:
+                pass
+
+            if machine_id:
+                try:
+                    ensure_producao_horaria_table()
+                    upsert_hora(
+                        machine_id=machine_id,
+                        data_ref=data_ref,
+                        hora_idx=idx,
+                        baseline_esp=base_prev,
+                        esp_last=esp_abs,
+                        produzido=int(delta_total),
+                        meta=meta_now,
+                        percentual=int(m["percentual_hora"]),
+                    )
+                except Exception:
+                    pass
+
+            return
+
+    # ============================================================
+    # Fluxo normal (sem pulo grande)
+    # ============================================================
     if prev_idx is None or prev_idx != idx:
         # fecha a hora anterior (se existia)
         if isinstance(prev_idx, int) and prev_idx >= 0:
@@ -366,10 +440,6 @@ def reset_contexto(m, machine_id):
     from modules.db_indflow import get_db  # import local (só aqui)
 
     # ✅ FIX: FECHAMENTO DIÁRIO IDEMPOTENTE
-    # Garante 1 linha por máquina por dia mesmo com:
-    # - deploy/restart
-    # - múltiplos workers
-    # - chamadas repetidas do reset
     dia_ref = str(m.get("ultimo_dia") or "").strip()
 
     conn = get_db()
