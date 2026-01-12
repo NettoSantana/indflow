@@ -74,9 +74,9 @@
         font-weight: 900;
     }
 
-    .ind-good { color: #16a34a; }   /* verde */
-    .ind-normal { color: #2563eb; } /* azul */
-    .ind-bad { color: #dc2626; }    /* vermelho */
+    .ind-good { color: #16a34a; }
+    .ind-normal { color: #2563eb; }
+    .ind-bad { color: #dc2626; }
 
     .machine-value {
         font-size: 48px;
@@ -116,18 +116,46 @@ function labelUnidade(u){
     return u.toUpperCase();
 }
 
+/* MANTIDA – não removida */
 function calcularIndicador(percentual){
     const p = Number(percentual) || 0;
 
-    if (p >= 102) {
-        return { icon: "▲", cls: "ind-good" };
-    }
-
-    if (p <= 98) {
-        return { icon: "▼", cls: "ind-bad" };
-    }
-
+    if (p >= 102) return { icon: "▲", cls: "ind-good" };
+    if (p <= 98)  return { icon: "▼", cls: "ind-bad" };
     return { icon: "—", cls: "ind-normal" };
+}
+
+/* NOVA – cálculo por ritmo (sem quebrar nada) */
+function calcularIndicadorPorRitmo(data){
+    const meta = Number(data.meta_turno) || 0;
+    const produzido = Number(data.produzido_turno) || 0;
+
+    if (!meta || !data.turno_inicio || !data.turno_fim) {
+        return { icon: "—", cls: "ind-normal" };
+    }
+
+    const agora = new Date();
+    const inicio = new Date(data.turno_inicio);
+    const fim = new Date(data.turno_fim);
+
+    if (agora < inicio) {
+        return { icon: "—", cls: "ind-normal" };
+    }
+
+    const totalMs = fim - inicio;
+    const decorridoMs = Math.min(Math.max(agora - inicio, 0), totalMs);
+
+    if (totalMs <= 0) {
+        return { icon: "—", cls: "ind-normal" };
+    }
+
+    const esperado = meta * (decorridoMs / totalMs);
+    if (esperado <= 0) {
+        return { icon: "—", cls: "ind-normal" };
+    }
+
+    const percentual = (produzido / esperado) * 100;
+    return calcularIndicador(percentual);
 }
 
 function carregarMaquinas() {
@@ -145,7 +173,7 @@ function carregarMaquinas() {
                 : "status-manual";
 
             let percent = data.percentual_turno ?? 0;
-            const indicador = calcularIndicador(percent);
+            const indicador = calcularIndicadorPorRitmo(data);
             const tempoMedioTxt = formatTempoMedio(data.tempo_medio_min_por_peca);
 
             const unidade1 = data.unidade_1;
