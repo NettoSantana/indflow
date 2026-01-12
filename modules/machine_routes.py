@@ -97,6 +97,7 @@ def configurar_maquina():
     m["producao_hora"] = 0
     m["percentual_hora"] = 0
 
+    # ✅ Persistência da config (agora via repo)
     try:
         upsert_machine_config(machine_id, m)
     except Exception:
@@ -128,10 +129,7 @@ def update_machine():
 
     carregar_baseline_diario(m, machine_id)
 
-    producao_atual = max(
-        int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0),
-        0
-    )
+    producao_atual = max(int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0), 0)
     m["producao_turno"] = producao_atual
 
     if int(m.get("meta_turno", 0) or 0) > 0:
@@ -157,7 +155,7 @@ def reset_manual():
 
 
 # ============================================================
-# REFUGO
+# REFUGO: SALVAR (PERSISTENTE)
 # ============================================================
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
@@ -172,13 +170,18 @@ def salvar_refugo():
     refugo = _safe_int(data.get("refugo"), 0)
 
     if hora_dia < 0 or hora_dia > 23:
-        return jsonify({"ok": False, "error": "hora_dia inválida"}), 400
+        return jsonify({"ok": False, "error": "hora_dia inválida (0..23)"}), 400
+
+    if refugo < 0:
+        refugo = 0
 
     if dia_ref > dia_atual:
-        return jsonify({"ok": False, "error": "dia_ref futuro"}), 400
+        return jsonify({"ok": False, "error": "dia_ref futuro não permitido"}), 400
 
-    if dia_ref == dia_atual and hora_dia >= agora.hour:
-        return jsonify({"ok": False, "error": "hora futura"}), 400
+    if dia_ref == dia_atual:
+        hora_atual = int(agora.hour)
+        if hora_dia >= hora_atual:
+            return jsonify({"ok": False, "error": "Só é permitido lançar refugo em horas passadas"}), 400
 
     ok = upsert_refugo(
         machine_id=machine_id,
@@ -189,20 +192,61 @@ def salvar_refugo():
     )
 
     if not ok:
-        return jsonify({"ok": False}), 500
+        return jsonify({"ok": False, "error": "Falha ao salvar no banco"}), 500
 
-    return jsonify({"ok": True})
+    return jsonify({
+        "ok": True,
+        "machine_id": machine_id,
+        "dia_ref": dia_ref,
+        "hora_dia": hora_dia,
+        "refugo": refugo
+    })
 
 
 # ============================================================
-# HISTÓRICO (JSON FINAL DO DIA)
+# STATUS
+# ============================================================
+@machine_bp.route("/machine/status", methods=["GET"])
+def machine_status():
+    machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
+    m = get_machine(machine_id)
+
+    carregar_baseline_diario(m, machine_id)
+
+    atualizar_producao_hora(m)
+    calcular_tempo_medio(m)
+    aplicar_derivados_ml(m)
+
+    dia_ref = dia_operacional_ref_str(now_bahia())
+    m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
+
+    # produzido líquido da hora atual (helper)
+    try:
+        hora_atual = int(now_bahia().hour)
+    except Exception:
+        hora_atual = None
+
+    try:
+        ph = int(m.get("producao_hora", 0) or 0)
+    except Exception:
+        ph = 0
+
+    if isinstance(hora_atual, int) and 0 <= hora_atual < 24:
+        m["producao_hora_liquida"] = max(0, ph - int(m["refugo_por_hora"][hora_atual] or 0))
+    else:
+        m["producao_hora_liquida"] = ph
+
+    return jsonify(m)
+
+
+# ============================================================
+# HISTÓRICO
 # ============================================================
 @machine_bp.route("/producao/historico", methods=["GET"])
 def historico_producao():
     machine_id = request.args.get("machine_id")
-
-    conn = get_db()
-    cur = conn.cursor()
+    inicio = request.args.get("inicio")
+    fim = request.args.get("fim")
 
     query = """
         SELECT machine_id, data, produzido, meta, percentual
@@ -215,28 +259,20 @@ def historico_producao():
         query += " AND machine_id = ?"
         params.append(_norm_machine_id(machine_id))
 
+    if inicio:
+        query += " AND data >= ?"
+        params.append(inicio)
+
+    if fim:
+        query += " AND data <= ?"
+        params.append(fim)
+
     query += " ORDER BY data DESC"
 
+    conn = get_db()
+    cur = conn.cursor()
     cur.execute(query, params)
     rows = cur.fetchall()
     conn.close()
 
-    out = []
-    for r in rows:
-        d = dict(r)
-
-        mid = d["machine_id"]
-        dia = d["data"]
-
-        ref_list = load_refugo_24(mid, dia)
-        refugo_total = sum(int(x or 0) for x in ref_list)
-
-        produzido = int(d.get("produzido", 0))
-        pecas_boas = max(0, produzido - refugo_total)
-
-        d["refugo_total"] = refugo_total
-        d["pecas_boas"] = pecas_boas
-
-        out.append(d)
-
-    return jsonify(out)
+    return jsonify([dict(r) for r in rows])
