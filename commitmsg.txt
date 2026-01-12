@@ -1,4 +1,4 @@
-﻿ui: trocar rotulo 'Meta do Turno' por 'Meta do Dia' no dashboard
+﻿ui: preencher 'Produzido Hora' com valores persistidos (producao_por_hora)
 
-- altera label exibida no card do dashboard (static/dashboard.js)
-- sem impacto em logica ou API
+- tabela config_maquina passa a usar data.producao_por_hora para mostrar horas anteriores
+- mantém fallback para parcial da hora atual (data.producao_hora)
