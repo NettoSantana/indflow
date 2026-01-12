@@ -104,17 +104,20 @@ function updateMachine(machineId){
       const indTurno = calcularIndicador(pTurno);
       const indHora  = calcularIndicador(pHora);
 
-      setText(
-        `percent-turno-${sid}`,
-        `${indTurno.icon} ${pTurno}%`
-      );
-      document.getElementById(`percent-turno-${sid}`)?.classList.add(indTurno.cls);
+      const elTurno = document.getElementById(`percent-turno-${sid}`);
+      const elHora  = document.getElementById(`percent-hora-${sid}`);
 
-      setText(
-        `percent-hora-${sid}`,
-        `${indHora.icon} ${pHora}%`
-      );
-      document.getElementById(`percent-hora-${sid}`)?.classList.add(indHora.cls);
+      if(elTurno){
+        elTurno.textContent = `${indTurno.icon} ${pTurno}%`;
+        elTurno.classList.remove("ind-good","ind-normal","ind-bad");
+        elTurno.classList.add(indTurno.cls);
+      }
+
+      if(elHora){
+        elHora.textContent = `${indHora.icon} ${pHora}%`;
+        elHora.classList.remove("ind-good","ind-normal","ind-bad");
+        elHora.classList.add(indHora.cls);
+      }
 
       /* ===== TURNO ===== */
 
