@@ -1,6 +1,5 @@
-﻿feat: refugo deixa de usar localStorage e passa a persistir no SQLite
+﻿fix: não acumular producao_hora fora do turno (card zera corretamente)
 
-- carrega refugo_por_hora (24) via /machine/status
-- salva refugo via POST /machine/refugo (dia_ref + hora_dia)
-- mantém regra: só horas passadas editáveis
-- produzido hora exibido como (produzido - refugo), clamp >= 0
+- calcular_ultima_hora_idx retorna None quando o horário atual está fora da janela do turno
+- evita idx travar na última hora e baseline_hora não reancorar
+- Meta da Hora e Produzido Hora no dashboard deixam de acumular fora do turno
