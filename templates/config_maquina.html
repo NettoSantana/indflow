@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Configuração da Máquina{% endblock %}
+
 {% block content %}
 
 <style>
-  #tabela-horas tbody tr:nth-child(even){ background:#f3f4f6; }
-  #tabela-horas tbody tr:nth-child(odd){ background:#fff; }
-  #tabela-horas tbody tr:hover{ background:#e5e7eb; }
+  /* TABELA ZEBRADA */
+  #tabela-horas tbody tr:nth-child(even) { background-color: #f3f4f6; }
+  #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
+  #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
 </style>
 
 <div class="container">
@@ -15,16 +17,21 @@
 
     <div style="display:flex; gap:10px;">
       <a id="btn-historico" href="#" class="btn btn-secondary">Histórico</a>
-      <button id="btn-reset" class="btn" style="background:#dc2626;color:#fff;">Zerar Produção</button>
+
+      <button id="btn-reset" class="btn" style="background:#dc2626;color:#fff;">
+        Zerar Produção
+      </button>
     </div>
   </div>
 
   <div class="card">
     <form id="config-form">
+
       <label>Meta do Turno (pcs):</label>
       <input type="number" id="meta" required>
 
       <label class="mt-20">Unidade de Produção (até 2):</label>
+
       <div class="row">
         <div class="col">
           <select id="unidade_1" class="input">
@@ -34,6 +41,7 @@
             <option value="m2">Metro quadrado (m²)</option>
           </select>
         </div>
+
         <div class="col">
           <select id="unidade_2" class="input">
             <option value="">—</option>
@@ -45,13 +53,22 @@
       </div>
 
       <label class="mt-20">Conversão (1 pcs = X metros):</label>
-      <input type="number" id="conv_m_por_pcs" class="input" step="0.001" min="0.001" placeholder="Ex: 0.85" required>
+      <input
+        type="number"
+        id="conv_m_por_pcs"
+        class="input"
+        step="0.001"
+        min="0.001"
+        placeholder="Ex: 0.85"
+        required
+      >
 
       <div class="row mt-20">
         <div class="col">
           <label>Início do Turno:</label>
           <input type="time" id="inicio" required>
         </div>
+
         <div class="col">
           <label>Fim do Turno:</label>
           <input type="time" id="fim" required>
@@ -61,7 +78,9 @@
       <label class="mt-20">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
 
-      <button class="btn btn-primary mt-20" type="submit">Salvar Configuração</button>
+      <button class="btn btn-primary mt-20" type="submit">
+        Salvar Configuração
+      </button>
     </form>
   </div>
 
@@ -85,28 +104,69 @@
 
 <script>
 const machine_id = window.location.pathname.split("/").pop();
-const $ = (id) => document.getElementById(id);
 
-$("titulo-maquina").textContent = "Configuração da Máquina — " + machine_id.toUpperCase();
-$("btn-historico").href = `/producao/historico?machine_id=${machine_id}`;
+document.getElementById("titulo-maquina").textContent =
+  "Configuração da Máquina — " + machine_id.toUpperCase();
 
-function pad2(n){ return String(n).padStart(2,"0"); }
-function faixas24(){
-  const a = [];
-  for(let h=0; h<24; h++){
-    const h2 = (h+1)%24;
-    a.push(`${pad2(h)}:00–${pad2(h2)}:00`);
+document.getElementById("btn-historico").href =
+  `/producao/historico?machine_id=${machine_id}`;
+
+// ===============================
+// TABELA FIXA 24H
+// ===============================
+function pad2(n){ return String(n).padStart(2, "0"); }
+
+function buildFaixas24(){
+  const out = [];
+  for(let h = 0; h < 24; h++){
+    const h2 = (h + 1) % 24;
+    out.push(`${pad2(h)}:00–${pad2(h2)}:00`);
   }
-  return a;
+  return out;
 }
-const HORAS_FIXAS = faixas24();
 
-$("btn-reset").addEventListener("click", () => {
-  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")) return;
+const HORAS_FIXAS_24 = buildFaixas24();
+
+// ===============================
+// TIME HELPERS
+// ===============================
+function parseHourFromTimeStr(s){
+  // "08:00" -> 8
+  if(!s || typeof s !== "string") return null;
+  const parts = s.split(":");
+  const h = Number(parts[0]);
+  if(!Number.isFinite(h) || h < 0 || h > 23) return null;
+  return h;
+}
+
+// ✅ CORREÇÃO: remap meta_por_hora (indexado pelo turno)
+// para meta fixa por hora real (0..23)
+function mapMetaTurnoPara24h(meta_por_hora, inicioStr){
+  const meta24 = new Array(24).fill(0);
+
+  const inicioHour = parseHourFromTimeStr(inicioStr);
+  if(inicioHour === null) return meta24;
+
+  const metas = Array.isArray(meta_por_hora) ? meta_por_hora : [];
+  for(let i = 0; i < metas.length; i++){
+    const hour = (inicioHour + i) % 24;
+    meta24[hour] = metas[i] ?? 0;
+  }
+  return meta24;
+}
+
+// ===============================
+// RESET MANUAL
+// ===============================
+document.getElementById("btn-reset").addEventListener("click", function(){
+  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")){
+    return;
+  }
+
   fetch("/admin/reset-manual", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({ machine_id })
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ machine_id })
   })
   .then(r => r.json())
   .then(() => {
@@ -115,35 +175,45 @@ $("btn-reset").addEventListener("click", () => {
   });
 });
 
+// ===============================
+// UNIDADES: não permitir duplicado
+// ===============================
 function garantirSemDuplicar(){
-  const u1 = $("unidade_1"), u2 = $("unidade_2");
-  if(u1.value && u2.value && u1.value === u2.value) u2.value = "";
+  const u1 = document.getElementById("unidade_1");
+  const u2 = document.getElementById("unidade_2");
+  if(u1.value && u2.value && u1.value === u2.value){
+    u2.value = "";
+  }
 }
-$("unidade_1").addEventListener("change", garantirSemDuplicar);
-$("unidade_2").addEventListener("change", garantirSemDuplicar);
+document.getElementById("unidade_1").addEventListener("change", garantirSemDuplicar);
+document.getElementById("unidade_2").addEventListener("change", garantirSemDuplicar);
 
-$("config-form").addEventListener("submit", (e) => {
+// ===============================
+// SUBMIT DO FORMULÁRIO
+// ===============================
+document.getElementById("config-form").addEventListener("submit", function(e){
   e.preventDefault();
+
   garantirSemDuplicar();
 
-  const conv = Number($("conv_m_por_pcs").value);
+  const conv = Number(document.getElementById("conv_m_por_pcs").value);
   if(!Number.isFinite(conv) || conv <= 0){
     alert("Conversão inválida. Use um número maior que zero. Ex: 0.85");
     return;
   }
 
   fetch("/machine/config", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      machine_id,
-      meta_turno:$("meta").value,
-      inicio:$("inicio").value,
-      fim:$("fim").value,
-      rampa:$("rampa").value,
-      unidade_1:$("unidade_1").value,
-      unidade_2:$("unidade_2").value,
-      conv_m_por_pcs:$("conv_m_por_pcs").value
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      machine_id: machine_id,
+      meta_turno: document.getElementById("meta").value,
+      inicio: document.getElementById("inicio").value,
+      fim: document.getElementById("fim").value,
+      rampa: document.getElementById("rampa").value,
+      unidade_1: document.getElementById("unidade_1").value,
+      unidade_2: document.getElementById("unidade_2").value,
+      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value
     })
   })
   .then(r => r.json())
@@ -153,60 +223,71 @@ $("config-form").addEventListener("submit", (e) => {
   });
 });
 
+// ===============================
+// BUSCAR STATUS + TABELA (FIXA 24H)
+// ===============================
 function carregarTabela(){
   fetch(`/machine/status?machine_id=${machine_id}`)
     .then(r => r.json())
     .then(data => {
-      $("unidade_1").value = data.unidade_1 ?? "";
-      $("unidade_2").value = data.unidade_2 ?? "";
+
+      // carrega unidades salvas
+      document.getElementById("unidade_1").value = data.unidade_1 ?? "";
+      document.getElementById("unidade_2").value = data.unidade_2 ?? "";
       garantirSemDuplicar();
-      $("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      const metas = Array.isArray(data.meta_por_hora) ? data.meta_por_hora : [];
-      const produzidos = Array.isArray(data.producao_por_hora) ? data.producao_por_hora : [];
+      // carrega conversão salva
+      document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      let idxHoraAtual = (typeof data.ultima_hora === "number" && data.ultima_hora >= 0 && data.ultima_hora <= 23)
-        ? data.ultima_hora
-        : new Date().getHours();
+      // metas: vem indexado pelo turno -> remapeia pra 0..23
+      const inicioTurnoStr = (data.inicio ?? document.getElementById("inicio").value);
+      const meta24 = mapMetaTurnoPara24h(data.meta_por_hora, inicioTurnoStr);
 
-      const parcialHoraAtual = data.producao_hora ?? 0;
+      // produzido por hora (persistido pelo backend)
+      const produzidosPorHora = Array.isArray(data.producao_por_hora) ? data.producao_por_hora : [];
+
+      // regra A (não mostrar horas futuras)
+      const idxHoraAtual = (typeof data.ultima_hora === "number") ? data.ultima_hora : new Date().getHours();
+      const produzidoHoraAtual = data.producao_hora ?? 0;
 
       const tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
 
-      for(let i=0; i<24; i++){
+      for(let i = 0; i < 24; i++){
         const tr = document.createElement("tr");
 
         const tdHora = document.createElement("td");
-        tdHora.textContent = HORAS_FIXAS[i];
+        tdHora.textContent = HORAS_FIXAS_24[i];
 
         const tdMeta = document.createElement("td");
-        tdMeta.textContent = metas[i] ?? 0;
+        tdMeta.textContent = meta24[i] ?? 0;
 
-        const tdProd = document.createElement("td");
-        const v = produzidos[i];
+        const tdProduzidoHora = document.createElement("td");
+        const v = produzidosPorHora[i];
 
-        if(i > idxHoraAtual){
-          tdProd.textContent = "—";
-        } else if(v !== null && v !== undefined && v !== ""){
-          tdProd.textContent = v;
-        } else if(i === idxHoraAtual){
-          tdProd.textContent = parcialHoraAtual;
+        if (typeof idxHoraAtual === "number" && i > idxHoraAtual) {
+          tdProduzidoHora.textContent = "—";
+        } else if (v !== null && v !== undefined && v !== "") {
+          tdProduzidoHora.textContent = v;
+        } else if (i === idxHoraAtual) {
+          tdProduzidoHora.textContent = produzidoHoraAtual;
         } else {
-          tdProd.textContent = "—";
+          tdProduzidoHora.textContent = "—";
         }
 
-        const tdRef = document.createElement("td");
-        tdRef.textContent = 0;
+        const tdRefugoHora = document.createElement("td");
+        tdRefugoHora.textContent = 0;
 
         tr.appendChild(tdHora);
         tr.appendChild(tdMeta);
-        tr.appendChild(tdProd);
-        tr.appendChild(tdRef);
+        tr.appendChild(tdProduzidoHora);
+        tr.appendChild(tdRefugoHora);
+
         tbody.appendChild(tr);
       }
     });
 }
+
 carregarTabela();
 </script>
 
