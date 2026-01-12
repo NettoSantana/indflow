@@ -1,4 +1,4 @@
-﻿style: aplicar zebra striping na tabela de horas (config_maquina)
+﻿ui: renomear 'Meta do Turno' para 'Meta do Dia' no card de produção
 
-- adiciona linhas alternadas em cinza claro na tabela #tabela-horas
-- melhora leitura visual sem alterar lógica/JS
+- ajusta rótulo exibido no dashboard de Produção (producao_home.html)
+- sem impacto em lógica ou métricas
