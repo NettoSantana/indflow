@@ -1,6 +1,6 @@
-﻿feat: dashboard usa unidades da configuração (unidade_1 e unidade_2)
+﻿fix: meta da hora na tabela 24h usando turno_inicio/turno_fim e remapeando arrays do turno
 
-- remove hardcoded UNI/ML do card
-- unidade_1 (obrigatória) aparece na linha de cima
-- unidade_2 (opcional) aparece na linha de baixo e some quando vazia
-- valores seguem a unidade (pcs -> base; m -> campos *_ml; m2 -> base)
+- usa data.turno_inicio/turno_fim (campos corretos do /machine/status)
+- preenche inputs de inicio/fim/meta/rampa a partir do status
+- remapeia meta_por_hora e producao_por_hora (indexados pelo turno) para a grade fixa 00-24
+- Regra A passa a usar hora do dia (inclui parcial da hora atual na hora correta)
