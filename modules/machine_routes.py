@@ -36,6 +36,16 @@ def _safe_int(v, default=0):
         return default
 
 
+def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
+    try:
+        arr = load_refugo_24(_norm_machine_id(machine_id), (dia_ref or "").strip())
+        if not isinstance(arr, list):
+            return 0
+        return sum(_safe_int(x, 0) for x in arr)
+    except Exception:
+        return 0
+
+
 # ============================================================
 # CONFIGURAÇÃO DA MÁQUINA
 # ============================================================
@@ -240,7 +250,7 @@ def machine_status():
 
 
 # ============================================================
-# HISTÓRICO
+# HISTÓRICO (AGORA COM refugo_total e pecas_boas)
 # ============================================================
 @machine_bp.route("/producao/historico", methods=["GET"])
 def historico_producao():
@@ -275,4 +285,21 @@ def historico_producao():
     rows = cur.fetchall()
     conn.close()
 
-    return jsonify([dict(r) for r in rows])
+    out = []
+    for r in rows:
+        d = dict(r)
+
+        mid = d.get("machine_id") or "maquina01"
+        dia_ref = d.get("data") or ""
+
+        refugo_total = _sum_refugo_24(mid, dia_ref)
+
+        produzido = _safe_int(d.get("produzido"), 0)
+        pecas_boas = max(0, produzido - refugo_total)
+
+        d["refugo_total"] = refugo_total
+        d["pecas_boas"] = pecas_boas
+
+        out.append(d)
+
+    return jsonify(out)

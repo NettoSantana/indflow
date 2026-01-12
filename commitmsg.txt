@@ -1,6 +1,5 @@
-﻿ui: historico diario robusto (odometro ESP com filtro de ruido)
+﻿feat: historico diario com refugo_total e pecas_boas
 
-- produzido e contador absoluto (odometro)
-- remove leituras pequenas (ruido) usando cutoff = 50% do max do dia
-- calcula producao do dia por segmentos (deltas) apos filtro
-- mantem filtro por data e nome da maquina
+- /producao/historico agora retorna resumo final do dia
+- refugo_total somado das 24h
+- pecas_boas calculadas no backend
