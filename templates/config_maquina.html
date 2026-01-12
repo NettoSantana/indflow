@@ -1,3 +1,17 @@
+tdProduzidoHora.textContent = (i === idxHoraAtual) ? produzidoHora : "—";
+``` :contentReference[oaicite:0]{index=0}
+
+Ou seja: mesmo que o backend esteja persistindo (`producao_horaria`), **a UI ignora**.
+
+✅ Correção (1 arquivo só): **usar `data.producao_por_hora`** (lista) para preencher a coluna “Produzido Hora”. Se não tiver valor naquela posição, aí sim usa fallback da hora atual.
+
+Abaixo vai o **ARQUIVO COMPLETO** (o mesmo que você mandou) com a mudança **somente no JS** dentro de `carregarTabela()`.
+
+---
+
+## ✅ `modules/producao/templates/config_maquina.html` (ARQUIVO COMPLETO)
+
+```html
 {% extends "base.html" %}
 {% block title %}Configuração da Máquina{% endblock %}
 
@@ -233,9 +247,12 @@ function carregarTabela(){
       const horas = data.horas_turno || [];
       const metas = data.meta_por_hora || [];
 
-      // NOVO: dados da hora atual
+      // ✅ PERSISTIDO: lista por hora (vem do backend)
+      const produzidosPorHora = Array.isArray(data.producao_por_hora) ? data.producao_por_hora : [];
+
+      // fallback da hora atual
       const idxHoraAtual = data.ultima_hora;
-      const produzidoHora = data.producao_hora ?? 0;
+      const produzidoHoraAtual = data.producao_hora ?? 0;
 
       let tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
@@ -249,9 +266,17 @@ function carregarTabela(){
         let tdMeta = document.createElement("td");
         tdMeta.textContent = metas[i];
 
-        // NOVO: Produzido Hora
+        // ✅ Produzido Hora: primeiro tenta o persistido; se não tiver, usa o parcial da hora atual.
         let tdProduzidoHora = document.createElement("td");
-        tdProduzidoHora.textContent = (i === idxHoraAtual) ? produzidoHora : "—";
+        const v = produzidosPorHora[i];
+
+        if (v !== null && v !== undefined && v !== "") {
+          tdProduzidoHora.textContent = v;
+        } else if (i === idxHoraAtual) {
+          tdProduzidoHora.textContent = produzidoHoraAtual;
+        } else {
+          tdProduzidoHora.textContent = "—";
+        }
 
         // NOVO: Refugo Hora (por enquanto 0)
         let tdRefugoHora = document.createElement("td");
