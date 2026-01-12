@@ -85,11 +85,14 @@ def _load_machine_config(machine_id: str):
     }
 
 
-def _load_ultimo_dia_from_db(machine_id: str) -> str | None:
+def _load_baseline_diario_state(machine_id: str):
     """
-    ✅ Fonte da verdade do "dia operacional" pós-deploy:
-    usa baseline_diario (já persistido e atualizado pelo sistema).
-    Retorna dia_ref (YYYY-MM-DD) ou None.
+    ✅ Evita 'ancorar 0' após deploy.
+    Carrega do SQLite o último estado conhecido do dia operacional:
+      - dia_ref
+      - baseline_esp
+      - esp_last
+    Retorna dict ou None.
     """
     machine_id = (machine_id or "").strip().lower()
     if not machine_id:
@@ -98,10 +101,8 @@ def _load_ultimo_dia_from_db(machine_id: str) -> str | None:
     try:
         conn = get_db()
         cur = conn.cursor()
-
-        # baseline_diario: (machine_id, dia_ref, updated_at...)
         cur.execute("""
-            SELECT dia_ref
+            SELECT dia_ref, baseline_esp, esp_last
             FROM baseline_diario
             WHERE machine_id=?
             ORDER BY updated_at DESC
@@ -110,16 +111,29 @@ def _load_ultimo_dia_from_db(machine_id: str) -> str | None:
         row = cur.fetchone()
         conn.close()
 
-        if row and row[0]:
-            return str(row[0])
+        if not row:
+            return None
+
+        dia_ref = str(row[0]) if row[0] else None
+        try:
+            baseline_esp = int(row[1])
+        except Exception:
+            baseline_esp = None
+        try:
+            esp_last = int(row[2])
+        except Exception:
+            esp_last = None
+
+        if not dia_ref or baseline_esp is None or esp_last is None:
+            return None
+
+        return {"dia_ref": dia_ref, "baseline_esp": baseline_esp, "esp_last": esp_last}
     except Exception:
         return None
 
-    return None
-
 
 def get_machine(machine_id: str):
-    # ✅ normaliza sempre (evita MAQUINA01 vs maquina01 virar duas máquinas)
+    # ✅ normaliza sempre
     machine_id = (machine_id or "").strip().lower()
     if not machine_id:
         machine_id = "maquina01"
@@ -127,12 +141,20 @@ def get_machine(machine_id: str):
     if machine_id not in machine_data:
         agora = now_bahia()
 
-        # ✅ pós-deploy: tenta recuperar o "dia operacional" do DB (baseline_diario)
-        ultimo_dia_db = _load_ultimo_dia_from_db(machine_id)
-        if ultimo_dia_db:
-            ultimo_dia = ultimo_dia_db
+        # ✅ Fonte da verdade pós-deploy: baseline_diario (se existir)
+        st = _load_baseline_diario_state(machine_id)
+        if st:
+            ultimo_dia = st["dia_ref"]
+            baseline_diario = st["baseline_esp"]
+            esp_absoluto = st["esp_last"]
+            bd_dia_ref = st["dia_ref"]
+            bd_esp_last = st["esp_last"]
         else:
             ultimo_dia = dia_operacional_ref_str(agora)
+            baseline_diario = 0
+            esp_absoluto = 0
+            bd_dia_ref = None
+            bd_esp_last = None
 
         machine_data[machine_id] = {
             "nome": machine_id.upper(),
@@ -147,8 +169,9 @@ def get_machine(machine_id: str):
             "unidade_2": None,
             "conv_m_por_pcs": 1.0,
 
-            "esp_absoluto": 0,
-            "baseline_diario": 0,
+            # ✅ nasce do DB quando possível (evita ancorar baseline em 0 no status)
+            "esp_absoluto": esp_absoluto,
+            "baseline_diario": baseline_diario,
             "baseline_hora": 0,
 
             "producao_turno": 0,
@@ -163,9 +186,13 @@ def get_machine(machine_id: str):
             "percentual_turno": 0,
             "tempo_medio_min_por_peca": None,
 
-            # ✅ agora é STRING YYYY-MM-DD (combina com machine_calc.verificar_reset_diario)
+            # ✅ string YYYY-MM-DD
             "ultimo_dia": ultimo_dia,
-            "reset_executado_hoje": False
+            "reset_executado_hoje": False,
+
+            # ✅ cache do baseline diário (machine_calc usa isso)
+            "_bd_dia_ref": bd_dia_ref,
+            "_bd_esp_last": bd_esp_last,
         }
 
         # Carrega config persistida (se existir) e aplica no estado
