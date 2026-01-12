@@ -1,5 +1,5 @@
-﻿fix: remap meta_por_hora do turno para tabela fixa 24h
+﻿feat: destacar linhas do turno ativo na tabela fixa 24h
 
-- tabela permanece fixa 00–24 (24 linhas)
-- meta_por_hora agora é deslocada pelo inicio do turno (ex.: 08:00 -> metas aparecem 08–16)
-- produzido hora mantém Regra A (não exibe horas futuras) e usa producao_por_hora
+- adiciona estilo e classe 'turno-ativo' nas horas dentro do intervalo inicio->fim
+- suporta turno normal (08:00–16:00) e turno cruzando meia-noite (22:00–06:00)
+- mantém tabela fixa 24h, meta remapeada e Regra A do produzido hora
