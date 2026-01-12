@@ -1,4 +1,4 @@
-﻿ui: renomear 'Meta do Turno' para 'Meta do Dia' no card de produção
+﻿ui: trocar rotulo 'Meta do Turno' por 'Meta do Dia' no dashboard
 
-- ajusta rótulo exibido no dashboard de Produção (producao_home.html)
-- sem impacto em lógica ou métricas
+- altera label exibida no card do dashboard (static/dashboard.js)
+- sem impacto em logica ou API
