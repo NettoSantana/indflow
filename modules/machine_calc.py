@@ -111,6 +111,15 @@ def _turno_data_ref(m, agora):
 
 
 def calcular_ultima_hora_idx(m):
+    """
+    ✅ FIX DO BUG:
+    Antes: fora do turno, o idx ficava travado na última hora (len(horas)-1),
+    então baseline_hora nunca reancorava e producao_hora acumulava (card não zerava).
+
+    Agora:
+      - se agora estiver fora da janela do turno => retorna None
+      - se dentro => retorna 0..len(horas)-1
+    """
     horas = m.get("horas_turno") or []
     if not horas:
         return None
@@ -120,11 +129,22 @@ def calcular_ultima_hora_idx(m):
     if not inicio_dt:
         return None
 
+    fim_dt = inicio_dt + timedelta(hours=len(horas))
+
+    # se ainda não chegou no início (ou turno não está "ativo" nessa janela)
+    if agora < inicio_dt:
+        return None
+
+    # se já passou do fim do turno, não existe "hora atual" do turno
+    if agora >= fim_dt:
+        return None
+
     diff_h = int((agora - inicio_dt).total_seconds() // 3600)
+
     if diff_h < 0:
-        diff_h = 0
+        return None
     if diff_h >= len(horas):
-        diff_h = len(horas) - 1
+        return None
 
     return diff_h
 
@@ -402,7 +422,7 @@ def atualizar_producao_hora(m):
     machine_id = _get_machine_id_from_m(m)
     agora = now_bahia()
 
-    # ✅ CHAVE CERTA: dia operacional (vira 23:59) — mantém parciais e não “zera” ao virar a hora
+    # ✅ CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
 
     horas = m.get("horas_turno") or []
@@ -543,7 +563,6 @@ def atualizar_producao_hora(m):
 
 
 def reset_contexto(m, machine_id):
-    # ✅ normaliza machine_id (evita MAQUINA01 vs maquina01)
     machine_id = (machine_id or "").strip().lower() or "maquina01"
 
     conn = get_db()
@@ -577,10 +596,8 @@ def reset_contexto(m, machine_id):
     m["_bd_dia_ref"] = None
     m["_bd_esp_last"] = None
 
-    # ✅ ESSA É A CHAVE: persistir baseline no DB no reset manual
     _persistir_baseline_diario(machine_id, int(m.get("esp_absoluto", 0) or 0))
 
-    # mantém o cache alinhado (evita "pulo" logo após reset)
     try:
         agora = now_bahia()
         m["_bd_dia_ref"] = _dia_operacional_ref(agora)
@@ -590,18 +607,11 @@ def reset_contexto(m, machine_id):
 
 
 def verificar_reset_diario(m, machine_id):
-    """
-    Reset do "dia operacional" na virada 23:59.
-    Agora a regra é:
-      - se dia_operacional_ref mudou => reset
-    """
     agora = now_bahia()
     dia_ref = _dia_operacional_ref(agora)
 
     if m.get("ultimo_dia") != dia_ref:
-        # fecha o dia anterior
         reset_contexto(m, machine_id)
-        # inicia o novo dia operacional
         m["ultimo_dia"] = dia_ref
 
 
