@@ -3,43 +3,137 @@
 {% block content %}
 
 <style>
-  .wrap{max-width:1200px;margin:0 auto;padding:8px 12px 24px;}
-  .top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:14px;}
-  .title{margin:0;font-size:26px;font-weight:900;color:#0f172a;letter-spacing:-.02em;}
-  .machine{margin-top:6px;font-size:14px;font-weight:800;color:#334155;}
-  .card{background:#fff;border-radius:14px;border:1px solid #e5e7eb;box-shadow:0 4px 12px rgba(0,0,0,.08);overflow:hidden;}
-  .bar{display:flex;align-items:flex-end;gap:10px;padding:14px;background:linear-gradient(180deg,#fff 0%,#eff6ff 100%);border-bottom:1px solid #e5e7eb;flex-wrap:wrap;}
-  .g label{display:block;font-size:12px;font-weight:900;color:#475569;text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px;}
-  .g input{height:40px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;outline:none;background:#fff;min-width:220px;}
-  .g input:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.18);}
-  .hint{font-size:12px;color:#64748b;margin-left:auto;padding-bottom:6px;white-space:nowrap;}
-  table{width:100%;border-collapse:collapse;font-size:14px;}
-  thead th{background:#f1f5f9;color:#0f172a;font-weight:900;padding:12px 14px;text-align:left;border-bottom:1px solid #e5e7eb;}
-  tbody td{padding:10px 14px;border-bottom:1px solid #e5e7eb;color:#0f172a;}
-  tbody tr:nth-child(odd){background:#fff;}
-  tbody tr:nth-child(even){background:#f8fbff;}
-  tbody tr:hover{background:#eff6ff;}
-  .r{text-align:right;}
-  .loading td{padding:14px;text-align:center;color:#64748b;}
+  /* Referência: producao_home.html */
+  .page{
+    padding:24px;
+  }
+
+  .header-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+
+  .subtitle{
+    margin-top:6px;
+    font-size:14px;
+    font-weight:700;
+    color:#334155;
+  }
+
+  .card{
+    background:#ffffff;
+    border-radius:16px;
+    padding:16px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.10);
+    border:1px solid #e5e7eb;
+  }
+
+  .filter-bar{
+    display:flex;
+    align-items:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+
+  .filter-group label{
+    display:block;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    margin-bottom:6px;
+  }
+
+  .filter-group input{
+    height:40px;
+    padding:8px 10px;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    font-size:14px;
+    outline:none;
+    background:#fff;
+    min-width:220px;
+  }
+
+  .filter-group input:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+
+  .hint{
+    font-size:12px;
+    color:#64748b;
+    margin-left:auto;
+    padding-bottom:6px;
+    white-space:nowrap;
+  }
+
+  /* Tabela */
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:14px;
+  }
+
+  thead th{
+    background:#f1f5f9;
+    color:#0f172a;
+    font-weight:800;
+    padding:12px 14px;
+    text-align:left;
+    border-bottom:1px solid #e5e7eb;
+  }
+
+  tbody td{
+    padding:10px 14px;
+    border-bottom:1px solid #e5e7eb;
+    color:#0f172a;
+  }
+
+  tbody tr:nth-child(odd){ background:#ffffff; }
+  tbody tr:nth-child(even){ background:#f8fbff; }
+
+  tbody tr:hover{
+    background:#eff6ff;
+  }
+
+  .r{ text-align:right; }
+
+  .loading td{
+    padding:14px;
+    text-align:center;
+    color:#64748b;
+  }
 </style>
 
-<div class="wrap">
-  <div class="top">
+<div class="page">
+
+  <div class="header-row">
     <div>
-      <h1 class="title">Histórico</h1>
-      <div class="machine" id="machine-name">Máquina: —</div>
+      <h1 class="section-title">Histórico</h1>
+      <div class="subtitle" id="machine-name">Máquina: —</div>
     </div>
   </div>
 
   <div class="card">
-    <div class="bar">
-      <div class="g">
+
+    <!-- EM CIMA: BUSCA POR DATA -->
+    <div class="filter-bar">
+      <div class="filter-group">
         <label for="filter-date">Buscar por data</label>
         <input id="filter-date" type="date">
       </div>
+
       <div class="hint">Selecione uma data para filtrar (opcional)</div>
     </div>
 
+    <!-- EMBAIXO: TABELA POR DIA -->
     <table>
       <thead>
         <tr>
@@ -49,157 +143,58 @@
           <th class="r">Refugo</th>
         </tr>
       </thead>
+
       <tbody id="historico-body">
         <tr class="loading"><td colspan="4">Carregando histórico...</td></tr>
       </tbody>
     </table>
+
   </div>
+
 </div>
 
 <script>
-  function toNum(v){
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  }
-  function toInt(v){
-    const n = toNum(v);
-    return n > 0 ? Math.floor(n) : 0;
-  }
-  function fmt(n){
+  function fmtInt(n){
     try { return new Intl.NumberFormat("pt-BR").format(Math.floor(Number(n) || 0)); }
     catch(e){ return String(Math.floor(Number(n) || 0)); }
   }
+
   function q(name){
     return new URLSearchParams(window.location.search).get(name) || "";
   }
 
-  // ====== PRODUÇÃO DIÁRIA (ODÔMETRO DO ESP) ======
-  // Problema atual do seu JSON:
-  // - no mesmo dia aparecem valores gigantes (odômetro) e valores pequenos (lixo)
-  //
-  // Solução:
-  // 1) Dentro do dia, acha o MAX (odômetro)
-  // 2) Considera válido somente quem for >= 50% do MAX (remove lixo)
-  // 3) Calcula produção do dia por segmentos (tratando quedas/reset)
-  function calcDailyFromAbsolute(values){
-    const raw = (Array.isArray(values) ? values : [])
-      .map(toInt)
-      .filter(x => x > 0);
-
-    if(raw.length < 2) return 0;
-
-    const maxVal = Math.max(...raw);
-    if(maxVal <= 0) return 0;
-
-    // Corte: remove valores pequenos que não são odômetro (ruído / registro errado)
-    const cutoff = Math.floor(maxVal * 0.50);
-
-    const v = raw.filter(x => x >= cutoff);
-    if(v.length < 2) return 0;
-
-    let total = 0;
-    let segStart = v[0];
-    let prev = v[0];
-
-    for(let i = 1; i < v.length; i++){
-      const curr = v[i];
-
-      if(curr >= prev){
-        prev = curr;
-        continue;
-      }
-
-      // curr < prev => queda: ruído ou reset real
-      // olha pra frente: se existir futuro >= 95% do prev, é ruído
-      let voltaPerto = false;
-      const limiar = Math.floor(prev * 0.95);
-
-      for(let j = i + 1; j < v.length; j++){
-        if(v[j] >= limiar){
-          voltaPerto = true;
-          break;
-        }
-      }
-
-      if(voltaPerto){
-        // ruído: ignora leitura baixa e segue
-        continue;
-      }
-
-      // reset real: fecha segmento
-      total += Math.max(0, prev - segStart);
-      segStart = curr;
-      prev = curr;
-    }
-
-    total += Math.max(0, prev - segStart);
-    return total;
-  }
-
-  // ====== AGRUPAR POR DATA ======
-  function groupByDateDaily(rows){
-    const byDate = new Map();
-
-    (Array.isArray(rows) ? rows : []).forEach(r => {
-      const data = String(r?.data || "").trim();
-      if(!data) return;
-
-      const prod = toInt(r?.produzido);
-      const ref = toInt(r?.refugo ?? r?.refugos ?? r?.refugo_total ?? 0);
-
-      if(!byDate.has(data)){
-        byDate.set(data, { data, producedList: [], refugoList: [] });
-      }
-      const it = byDate.get(data);
-
-      if(prod > 0) it.producedList.push(prod);
-      if(ref > 0) it.refugoList.push(ref);
-    });
-
-    const out = [];
-    for(const it of byDate.values()){
-      const totalDia = calcDailyFromAbsolute(it.producedList);
-
-      // Refugo: enquanto não vem no JSON, fica 0.
-      // Se no futuro vier por snapshot, usamos o maior.
-      let refugoDia = 0;
-      if(it.refugoList && it.refugoList.length){
-        refugoDia = Math.max(...it.refugoList.map(toInt));
-      }
-
-      const boasDia = Math.max(0, totalDia - refugoDia);
-
-      out.push({
-        data: it.data,
-        total: totalDia,
-        refugo: refugoDia,
-        boas: boasDia
-      });
-    }
-
-    out.sort((a,b) => String(b.data).localeCompare(String(a.data)));
-    return out;
-  }
-
-  function render(list, filtroData){
+  function renderRows(rows, filtroData){
     const tbody = document.getElementById("historico-body");
     tbody.innerHTML = "";
 
     const dataFiltrada = (filtroData || "").trim();
-    const view = dataFiltrada ? list.filter(x => x.data === dataFiltrada) : list;
 
-    if(!view.length){
+    const list = (Array.isArray(rows) ? rows : [])
+      .filter(r => {
+        const d = String(r?.data || "").trim();
+        return dataFiltrada ? d === dataFiltrada : true;
+      });
+
+    if(!list.length){
       tbody.innerHTML = `<tr class="loading"><td colspan="4">Nenhum registro encontrado</td></tr>`;
       return;
     }
 
-    for(const x of view){
+    // Ordena por data desc (YYYY-MM-DD)
+    list.sort((a,b) => String(b.data||"").localeCompare(String(a.data||"")));
+
+    for(const r of list){
+      const data = String(r?.data || "");
+      const produzido = fmtInt(r?.produzido ?? 0);
+      const boas = fmtInt(r?.pecas_boas ?? 0);
+      const refugo = fmtInt(r?.refugo_total ?? r?.refugo ?? 0);
+
       tbody.innerHTML += `
         <tr>
-          <td>${x.data}</td>
-          <td class="r">${fmt(x.total)}</td>
-          <td class="r">${fmt(x.boas)}</td>
-          <td class="r">${fmt(x.refugo)}</td>
+          <td>${data}</td>
+          <td class="r">${produzido}</td>
+          <td class="r">${boas}</td>
+          <td class="r">${refugo}</td>
         </tr>
       `;
     }
@@ -218,16 +213,16 @@
   fetch(url)
     .then(r => r.json())
     .then(rows => {
-      cache = groupByDateDaily(rows);
-      render(cache, "");
+      cache = Array.isArray(rows) ? rows : [];
+      renderRows(cache, "");
     })
     .catch(() => {
       cache = [];
-      render(cache, "");
+      renderRows(cache, "");
     });
 
   document.getElementById("filter-date").addEventListener("change", (e) => {
-    render(cache, e?.target?.value || "");
+    renderRows(cache, e?.target?.value || "");
   });
 </script>
 
