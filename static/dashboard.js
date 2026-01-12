@@ -51,6 +51,70 @@ function safeSid(machineId){
 }
 
 /* ===========================
+   UNIDADES (DINÂMICO)
+   =========================== */
+
+function normUnidade(u){
+  const v = (u || "").toString().trim().toLowerCase();
+  return v ? v : null;
+}
+
+function labelUnidade(u){
+  const v = normUnidade(u);
+  if(!v) return "PCS";
+  if(v === "pcs") return "PCS";
+  if(v === "m") return "M";
+  if(v === "m2") return "M²";
+  return v.toUpperCase();
+}
+
+function pickValuesByUnit(u, data, scope){
+  // scope: "turno" | "hora"
+  const unit = normUnidade(u) || "pcs";
+
+  // Observação importante:
+  // - backend hoje calcula derivados "ml" (metros lineares) via conv_m_por_pcs
+  // - então, quando unidade for "m", usamos os campos *_ml
+  // - para "m2" não existe derivado pronto -> usa base (mesma dos pcs)
+  if(scope === "turno"){
+    if(unit === "m"){
+      return {
+        meta: data.meta_turno_ml,
+        prod: data.producao_turno_ml
+      };
+    }
+    // pcs ou m2
+    return {
+      meta: data.meta_turno,
+      prod: data.producao_turno
+    };
+  }
+
+  // scope === "hora"
+  if(unit === "m"){
+    return {
+      meta: data.meta_hora_ml,
+      prod: data.producao_hora_ml
+    };
+  }
+  // pcs ou m2
+  return {
+    meta: data.meta_hora_pcs,
+    prod: data.producao_hora
+  };
+}
+
+function setText(id, txt){
+  const el = document.getElementById(id);
+  if(el) el.textContent = txt;
+}
+
+function setVisible(id, isVisible){
+  const el = document.getElementById(id);
+  if(el) el.style.display = isVisible ? "" : "none";
+}
+
+/* ===========================
    PAGINAÇÃO (ADIÇÕES)
    =========================== */
 
@@ -72,7 +136,6 @@ function getMachinesPage(){
 }
 
 function ensurePager(){
-  // cria o pager via JS se não existir no HTML (sem precisar mexer no template)
   if(document.getElementById("pager")) return;
 
   const wrapper = document.querySelector(".dashboard-wrapper") || document.body;
@@ -89,8 +152,6 @@ function ensurePager(){
   btnPrev.textContent = "←";
   btnPrev.title = "Anterior";
 
-  // NÃO cria mais texto de página (ganha espaço)
-
   const btnNext = document.createElement("button");
   btnNext.id = "btnNext";
   btnNext.type = "button";
@@ -100,7 +161,6 @@ function ensurePager(){
   pager.appendChild(btnPrev);
   pager.appendChild(btnNext);
 
-  // insere logo após o grid quando possível
   if(grid && grid.parentNode){
     grid.parentNode.insertBefore(pager, grid.nextSibling);
   }else{
@@ -170,18 +230,16 @@ function removeMachine(machineId){
 
   const next = machines.filter(x => x !== id);
 
-  // Se removeu tudo, volta pro default
   if(next.length === 0){
     next.push("maquina01");
   }
 
   setMachines(next);
 
-  // AJUSTE DE PÁGINA (ADIÇÃO)
   clampCurrentPage();
 
-  renderMachines();   // re-render do grid
-  updateAll();        // força atualizar já
+  renderMachines();
+  updateAll();
 }
 
 function cardHTML(machineId){
@@ -214,10 +272,23 @@ function cardHTML(machineId){
           <div class="percent-value" id="percent-turno-${sid}">0%</div>
           <div class="percent-label">Meta do Dia</div>
 
-          <div class="stats-sub"><span>Meta (UNI)</span><b id="meta-turno-uni-${sid}">0</b></div>
-          <div class="stats-sub"><span>Meta (ML)</span><b id="meta-turno-ml-${sid}">0</b></div>
-          <div class="stats-sub"><span>Produzido (UNI)</span><b id="prod-turno-uni-${sid}">0</b></div>
-          <div class="stats-sub"><span>Produzido (ML)</span><b id="prod-turno-ml-${sid}">0</b></div>
+          <div class="stats-sub">
+            <span id="lbl-meta-turno-u1-${sid}">Meta (—)</span>
+            <b id="meta-turno-u1-${sid}">0</b>
+          </div>
+          <div class="stats-sub">
+            <span id="lbl-prod-turno-u1-${sid}">Produzido (—)</span>
+            <b id="prod-turno-u1-${sid}">0</b>
+          </div>
+
+          <div class="stats-sub" id="row-meta-turno-u2-${sid}">
+            <span id="lbl-meta-turno-u2-${sid}">Meta (—)</span>
+            <b id="meta-turno-u2-${sid}">0</b>
+          </div>
+          <div class="stats-sub" id="row-prod-turno-u2-${sid}">
+            <span id="lbl-prod-turno-u2-${sid}">Produzido (—)</span>
+            <b id="prod-turno-u2-${sid}">0</b>
+          </div>
         </div>
 
         <div class="divider"></div>
@@ -226,10 +297,23 @@ function cardHTML(machineId){
           <div class="percent-value" id="percent-hora-${sid}">0%</div>
           <div class="percent-label">Meta da Hora</div>
 
-          <div class="stats-sub"><span>Meta (UNI)</span><b id="meta-hora-uni-${sid}">0</b></div>
-          <div class="stats-sub"><span>Meta (ML)</span><b id="meta-hora-ml-${sid}">0</b></div>
-          <div class="stats-sub"><span>Produzido (UNI)</span><b id="prod-hora-uni-${sid}">0</b></div>
-          <div class="stats-sub"><span>Produzido (ML)</span><b id="prod-hora-ml-${sid}">0</b></div>
+          <div class="stats-sub">
+            <span id="lbl-meta-hora-u1-${sid}">Meta (—)</span>
+            <b id="meta-hora-u1-${sid}">0</b>
+          </div>
+          <div class="stats-sub">
+            <span id="lbl-prod-hora-u1-${sid}">Produzido (—)</span>
+            <b id="prod-hora-u1-${sid}">0</b>
+          </div>
+
+          <div class="stats-sub" id="row-meta-hora-u2-${sid}">
+            <span id="lbl-meta-hora-u2-${sid}">Meta (—)</span>
+            <b id="meta-hora-u2-${sid}">0</b>
+          </div>
+          <div class="stats-sub" id="row-prod-hora-u2-${sid}">
+            <span id="lbl-prod-hora-u2-${sid}">Produzido (—)</span>
+            <b id="prod-hora-u2-${sid}">0</b>
+          </div>
         </div>
 
       </div>
@@ -244,17 +328,20 @@ function cardHTML(machineId){
 /* ALTERADO: agora renderiza só a PÁGINA atual (máx 6) e desenha o pager */
 function renderMachines(){
   const grid = document.getElementById("machineGrid");
-  const machines = getMachines();
 
-  // garante página válida sempre que renderizar
   clampCurrentPage();
 
-  // renderiza apenas a página atual
   const pageItems = getMachinesPage();
   grid.innerHTML = pageItems.map(cardHTML).join("");
 
-  // pager (setinhas)
   renderPager();
+}
+
+function formatTempoMedio(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  const fixed = n >= 10 ? n.toFixed(1) : n.toFixed(2);
+  return fixed.replace(".", ",");
 }
 
 function updateMachine(machineId){
@@ -270,37 +357,61 @@ function updateMachine(machineId){
       statusBadge.className =
         "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
 
-      const elPercentTurno = document.getElementById(`percent-turno-${sid}`);
-      const elMetaTurnoUni = document.getElementById(`meta-turno-uni-${sid}`);
-      const elMetaTurnoMl  = document.getElementById(`meta-turno-ml-${sid}`);
-      const elProdTurnoUni = document.getElementById(`prod-turno-uni-${sid}`);
-      const elProdTurnoMl  = document.getElementById(`prod-turno-ml-${sid}`);
+      // Unidades vindas da configuração
+      const u1 = normUnidade(data.unidade_1) || "pcs";   // obrigatória (fallback pcs)
+      const u2 = normUnidade(data.unidade_2);           // opcional
 
-      const elPercentHora = document.getElementById(`percent-hora-${sid}`);
-      const elMetaHoraUni = document.getElementById(`meta-hora-uni-${sid}`);
-      const elMetaHoraMl  = document.getElementById(`meta-hora-ml-${sid}`);
-      const elProdHoraUni = document.getElementById(`prod-hora-uni-${sid}`);
-      const elProdHoraMl  = document.getElementById(`prod-hora-ml-${sid}`);
+      const u1Label = labelUnidade(u1);
+      const u2Label = u2 ? labelUnidade(u2) : null;
 
+      // Percentuais
+      setText(`percent-turno-${sid}`, (data.percentual_turno ?? 0) + "%");
+      setText(`percent-hora-${sid}`,  (data.percentual_hora ?? 0) + "%");
+
+      // TURNO: unidade 1 (em cima)
+      const vTurnoU1 = pickValuesByUnit(u1, data, "turno");
+      setText(`lbl-meta-turno-u1-${sid}`, `Meta (${u1Label})`);
+      setText(`lbl-prod-turno-u1-${sid}`, `Produzido (${u1Label})`);
+      setText(`meta-turno-u1-${sid}`, fmt(vTurnoU1.meta));
+      setText(`prod-turno-u1-${sid}`, fmt(vTurnoU1.prod));
+
+      // TURNO: unidade 2 (embaixo / opcional)
+      const showU2 = !!u2Label;
+      setVisible(`row-meta-turno-u2-${sid}`, showU2);
+      setVisible(`row-prod-turno-u2-${sid}`, showU2);
+      if(showU2){
+        const vTurnoU2 = pickValuesByUnit(u2, data, "turno");
+        setText(`lbl-meta-turno-u2-${sid}`, `Meta (${u2Label})`);
+        setText(`lbl-prod-turno-u2-${sid}`, `Produzido (${u2Label})`);
+        setText(`meta-turno-u2-${sid}`, fmt(vTurnoU2.meta));
+        setText(`prod-turno-u2-${sid}`, fmt(vTurnoU2.prod));
+      }
+
+      // HORA: unidade 1 (em cima)
+      const vHoraU1 = pickValuesByUnit(u1, data, "hora");
+      setText(`lbl-meta-hora-u1-${sid}`, `Meta (${u1Label})`);
+      setText(`lbl-prod-hora-u1-${sid}`, `Produzido (${u1Label})`);
+      setText(`meta-hora-u1-${sid}`, fmt(vHoraU1.meta));
+      setText(`prod-hora-u1-${sid}`, fmt(vHoraU1.prod));
+
+      // HORA: unidade 2 (embaixo / opcional)
+      setVisible(`row-meta-hora-u2-${sid}`, showU2);
+      setVisible(`row-prod-hora-u2-${sid}`, showU2);
+      if(showU2){
+        const vHoraU2 = pickValuesByUnit(u2, data, "hora");
+        setText(`lbl-meta-hora-u2-${sid}`, `Meta (${u2Label})`);
+        setText(`lbl-prod-hora-u2-${sid}`, `Produzido (${u2Label})`);
+        setText(`meta-hora-u2-${sid}`, fmt(vHoraU2.meta));
+        setText(`prod-hora-u2-${sid}`, fmt(vHoraU2.prod));
+      }
+
+      // Ritmo médio
       const elRitmo = document.getElementById(`ritmo-medio-${sid}`);
-
-      if(elPercentTurno) elPercentTurno.textContent = (data.percentual_turno ?? 0) + "%";
-      if(elMetaTurnoUni) elMetaTurnoUni.textContent = fmt(data.meta_turno);
-      if(elMetaTurnoMl)  elMetaTurnoMl.textContent  = fmt(data.meta_turno_ml);
-      if(elProdTurnoUni) elProdTurnoUni.textContent = fmt(data.producao_turno);
-      if(elProdTurnoMl)  elProdTurnoMl.textContent  = fmt(data.producao_turno_ml);
-
-      if(elPercentHora) elPercentHora.textContent = (data.percentual_hora ?? 0) + "%";
-      if(elMetaHoraUni) elMetaHoraUni.textContent = fmt(data.meta_hora_pcs);
-      if(elMetaHoraMl)  elMetaHoraMl.textContent  = fmt(data.meta_hora_ml);
-      if(elProdHoraUni) elProdHoraUni.textContent = fmt(data.producao_hora);
-      if(elProdHoraMl)  elProdHoraMl.textContent = fmt(data.producao_hora_ml);
-
-      const tm = Number(data.tempo_medio_min_por_peca);
+      const tempoMedioTxt = formatTempoMedio(data.tempo_medio_min_por_peca);
       if(elRitmo){
         elRitmo.textContent =
-          Number.isFinite(tm) && tm > 0
-            ? "Ritmo médio: " + tm.toFixed(2).replace(".", ",") + " min/peça"
+          tempoMedioTxt !== "—"
+            ? `Ritmo médio: ${tempoMedioTxt} min/peça`
             : "Ritmo médio: —";
       }
     })
@@ -346,7 +457,6 @@ document.getElementById("btnSave").addEventListener("click", () => {
     current.push(id);
     setMachines(current);
 
-    // ADIÇÃO: vai pra página onde o novo item cairia (última)
     currentPage = Math.floor((current.length - 1) / PAGE_SIZE);
   }
 
