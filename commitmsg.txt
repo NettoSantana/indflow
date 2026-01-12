@@ -1,5 +1,6 @@
-﻿feat: dashboard passa a usar unidades da configuração da máquina
+﻿feat: dashboard usa unidades da configuração (unidade_1 e unidade_2)
 
-- unidade_1 (obrigatória) exibida como linha principal do card
-- unidade_2 (opcional) exibida abaixo quando existir
-- remove unidades fixas (UNI / ML) do dashboard
+- remove hardcoded UNI/ML do card
+- unidade_1 (obrigatória) aparece na linha de cima
+- unidade_2 (opcional) aparece na linha de baixo e some quando vazia
+- valores seguem a unidade (pcs -> base; m -> campos *_ml; m2 -> base)
