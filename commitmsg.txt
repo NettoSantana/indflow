@@ -1,4 +1,6 @@
-﻿ui: turno ativo azul claro com gradiente
+﻿ui: historico didatico por dia (maquina + filtro de data)
 
-- Ajusta destaque do turno ativo para azul claro + branco (gradiente)
-- Mantém hover com azul um pouco mais presente
+- Mostra nome da maquina no topo (via ?machine_id=...)
+- Adiciona busca por data (filtro exato)
+- Lista resumo por dia: data, producao total, pecas boas, refugo
+- Mantem consumo de JSON sem mexer no backend
