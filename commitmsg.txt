@@ -1,6 +1,5 @@
-﻿feat: lançamento de refugo por hora na tabela (somente horas passadas)
+﻿feat: persistência de refugo por hora no SQLite
 
-- coluna Refugo Hora vira input numérico
-- bloqueia edição na hora atual e horas futuras
-- refugo reduz Produzido Hora (clamp >= 0)
-- persistência temporária via localStorage por machine_id + ultimo_dia
+- cria tabela refugo_horaria (machine_id + dia_ref + hora_dia)
+- adiciona endpoint POST /machine/refugo com validação (apenas horas passadas)
+- status passa a devolver refugo_por_hora (24) e producao_hora_liquida
