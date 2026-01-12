@@ -1,5 +1,5 @@
-﻿fix: tabela de horas fixa 24h (00–24) na config_maquina
+﻿fix: remap meta_por_hora do turno para tabela fixa 24h
 
-- tabela deixa de depender de horas_turno e sempre renderiza 24 linhas
-- meta da hora usa meta_por_hora[i] ou 0
-- produzido hora mantém Regra A (não mostra horas futuras) e usa producao_por_hora
+- tabela permanece fixa 00–24 (24 linhas)
+- meta_por_hora agora é deslocada pelo inicio do turno (ex.: 08:00 -> metas aparecem 08–16)
+- produzido hora mantém Regra A (não exibe horas futuras) e usa producao_por_hora
