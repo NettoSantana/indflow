@@ -62,14 +62,32 @@ function calcularIndicador(percentual){
   const p = Number(percentual) || 0;
 
   if(p >= 102){
-    return { icon: "▲", cls: "ind-good" };
+    return { icon: "▲", color: "#16a34a" }; // verde
   }
 
   if(p <= 98){
-    return { icon: "▼", cls: "ind-bad" };
+    return { icon: "▼", color: "#dc2626" }; // vermelho
   }
 
-  return { icon: "—", cls: "ind-normal" };
+  return { icon: "—", color: "#2563eb" }; // azul
+}
+
+function renderPercentWithIndicator(el, percentual){
+  if(!el) return;
+
+  const p = Number(percentual) || 0;
+  const ind = calcularIndicador(p);
+
+  // ✅ símbolo ANTES do número
+  // ✅ símbolo menor (não quebra layout)
+  // ✅ cor no símbolo
+  // ✅ número continua grande (herda o CSS do percent-value)
+  el.innerHTML = `
+    <span style="display:inline-flex; align-items:baseline; gap:10px; white-space:nowrap;">
+      <span style="font-size:26px; font-weight:900; line-height:1; color:${ind.color};">${ind.icon}</span>
+      <span>${p}%</span>
+    </span>
+  `;
 }
 
 /* ===========================
@@ -96,28 +114,16 @@ function updateMachine(machineId){
       const u1Label = labelUnidade(u1);
       const u2Label = u2 ? labelUnidade(u2) : null;
 
-      /* ===== PERCENTUAIS COM SINAL ===== */
+      /* ===== PERCENTUAIS COM SINAL (ANTES DO NÚMERO) ===== */
 
       const pTurno = Number(data.percentual_turno ?? 0);
       const pHora  = Number(data.percentual_hora ?? 0);
 
-      const indTurno = calcularIndicador(pTurno);
-      const indHora  = calcularIndicador(pHora);
-
       const elTurno = document.getElementById(`percent-turno-${sid}`);
       const elHora  = document.getElementById(`percent-hora-${sid}`);
 
-      if(elTurno){
-        elTurno.textContent = `${indTurno.icon} ${pTurno}%`;
-        elTurno.classList.remove("ind-good","ind-normal","ind-bad");
-        elTurno.classList.add(indTurno.cls);
-      }
-
-      if(elHora){
-        elHora.textContent = `${indHora.icon} ${pHora}%`;
-        elHora.classList.remove("ind-good","ind-normal","ind-bad");
-        elHora.classList.add(indHora.cls);
-      }
+      renderPercentWithIndicator(elTurno, pTurno);
+      renderPercentWithIndicator(elHora, pHora);
 
       /* ===== TURNO ===== */
 
