@@ -1,5 +1,5 @@
-﻿fix(indflow-dev): recuperar ultimo_dia do SQLite no boot
+﻿fix(indflow-dev): restaurar ultimo_dia/baseline/esp_last do SQLite no boot
 
-- get_machine agora busca dia_ref mais recente em baseline_diario (ORDER BY updated_at)
-- ultimo_dia passa a ser string YYYY-MM-DD (compatível com verificar_reset_diario)
-- evita perder referência do dia operacional após deploy/restart
+- get_machine carrega baseline_diario (dia_ref, baseline_esp, esp_last) do DB
+- evita ancorar baseline em 0 quando /machine/status roda antes do /machine/update após deploy
+- mantém ultimo_dia como string YYYY-MM-DD
