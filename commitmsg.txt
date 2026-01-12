@@ -1,5 +1,4 @@
-﻿refactor: reduz machine_routes movendo SQL para repos
+﻿ui: turno ativo azul claro com gradiente
 
-- cria repos: machine_config_repo e refugo_repo
-- machine_routes fica fino (request/response + regras)
-- mantém endpoints e comportamento
+- Ajusta destaque do turno ativo para azul claro + branco (gradiente)
+- Mantém hover com azul um pouco mais presente
