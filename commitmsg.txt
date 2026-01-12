@@ -1,5 +1,4 @@
-﻿fix(indflow-dev): persistir producao_horaria por dia operacional (23:59)
+﻿style: aplicar zebra striping na tabela de horas (config_maquina)
 
-- producao_horaria agora usa data_ref = dia operacional (mesmo dia_ref do baseline_diario)
-- evita sumir/zerar 'Produzido Hora' quando vira a hora/referência
-- mantém UPSERT em tempo real da hora atual (parcial persistida)
+- adiciona linhas alternadas em cinza claro na tabela #tabela-horas
+- melhora leitura visual sem alterar lógica/JS
