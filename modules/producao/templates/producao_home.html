@@ -61,12 +61,27 @@
         background: #dc2626;
     }
 
+    .machine-value-row {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 10px;
+    }
+
+    .machine-indicator {
+        font-size: 26px;
+        font-weight: 900;
+    }
+
+    .ind-good { color: #16a34a; }   /* verde */
+    .ind-normal { color: #2563eb; } /* azul */
+    .ind-bad { color: #dc2626; }    /* vermelho */
+
     .machine-value {
         font-size: 48px;
         font-weight: 700;
         color: #0f172a;
-        margin-top: 10px;
-        text-align: right;
     }
 
     .machine-subtext {
@@ -82,9 +97,7 @@
 
     <h1 class="section-title">Produção</h1>
 
-    <div class="machine-grid" id="machines-area">
-        <!-- Os cards serão carregados dinamicamente -->
-    </div>
+    <div class="machine-grid" id="machines-area"></div>
 
 </div>
 
@@ -103,6 +116,20 @@ function labelUnidade(u){
     return u.toUpperCase();
 }
 
+function calcularIndicador(percentual){
+    const p = Number(percentual) || 0;
+
+    if (p >= 102) {
+        return { icon: "▲", cls: "ind-good" };
+    }
+
+    if (p <= 98) {
+        return { icon: "▼", cls: "ind-bad" };
+    }
+
+    return { icon: "—", cls: "ind-normal" };
+}
+
 function carregarMaquinas() {
     let area = document.getElementById("machines-area");
     area.innerHTML = "";
@@ -118,6 +145,7 @@ function carregarMaquinas() {
                 : "status-manual";
 
             let percent = data.percentual_turno ?? 0;
+            const indicador = calcularIndicador(percent);
             const tempoMedioTxt = formatTempoMedio(data.tempo_medio_min_por_peca);
 
             const unidade1 = data.unidade_1;
@@ -153,7 +181,13 @@ function carregarMaquinas() {
                             ${data.status}
                         </div>
 
-                        <div class="machine-value">${percent}%</div>
+                        <div class="machine-value-row">
+                            <div class="machine-indicator ${indicador.cls}">
+                                ${indicador.icon}
+                            </div>
+                            <div class="machine-value">${percent}%</div>
+                        </div>
+
                         <div class="machine-subtext">Meta do Dia</div>
 
                         ${unidadesHtml}
