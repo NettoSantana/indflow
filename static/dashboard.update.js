@@ -47,11 +47,29 @@ function pickValuesByUnit(u, data, scope){
   };
 }
 
-function formatTempoMedio(v) {
+function formatTempoMedio(v){
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return "—";
   const fixed = n >= 10 ? n.toFixed(1) : n.toFixed(2);
   return fixed.replace(".", ",");
+}
+
+/* ===========================
+   INDICADOR VISUAL
+   =========================== */
+
+function calcularIndicador(percentual){
+  const p = Number(percentual) || 0;
+
+  if(p >= 102){
+    return { icon: "▲", cls: "ind-good" };
+  }
+
+  if(p <= 98){
+    return { icon: "▼", cls: "ind-bad" };
+  }
+
+  return { icon: "—", cls: "ind-normal" };
 }
 
 /* ===========================
@@ -64,6 +82,7 @@ function updateMachine(machineId){
   fetch(`/machine/status?machine_id=${machineId}`)
     .then(r => r.json())
     .then(data => {
+
       const statusBadge = document.getElementById(`status-badge-${sid}`);
       if(!statusBadge) return;
 
@@ -77,8 +96,27 @@ function updateMachine(machineId){
       const u1Label = labelUnidade(u1);
       const u2Label = u2 ? labelUnidade(u2) : null;
 
-      setText(`percent-turno-${sid}`, (data.percentual_turno ?? 0) + "%");
-      setText(`percent-hora-${sid}`,  (data.percentual_hora ?? 0) + "%");
+      /* ===== PERCENTUAIS COM SINAL ===== */
+
+      const pTurno = Number(data.percentual_turno ?? 0);
+      const pHora  = Number(data.percentual_hora ?? 0);
+
+      const indTurno = calcularIndicador(pTurno);
+      const indHora  = calcularIndicador(pHora);
+
+      setText(
+        `percent-turno-${sid}`,
+        `${indTurno.icon} ${pTurno}%`
+      );
+      document.getElementById(`percent-turno-${sid}`)?.classList.add(indTurno.cls);
+
+      setText(
+        `percent-hora-${sid}`,
+        `${indHora.icon} ${pHora}%`
+      );
+      document.getElementById(`percent-hora-${sid}`)?.classList.add(indHora.cls);
+
+      /* ===== TURNO ===== */
 
       const vTurnoU1 = pickValuesByUnit(u1, data, "turno");
       setText(`lbl-meta-turno-u1-${sid}`, `Meta (${u1Label})`);
@@ -98,6 +136,8 @@ function updateMachine(machineId){
         setText(`prod-turno-u2-${sid}`, vTurnoU2.prod);
       }
 
+      /* ===== HORA ===== */
+
       const vHoraU1 = pickValuesByUnit(u1, data, "hora");
       setText(`lbl-meta-hora-u1-${sid}`, `Meta (${u1Label})`);
       setText(`lbl-prod-hora-u1-${sid}`, `Produzido (${u1Label})`);
@@ -114,6 +154,8 @@ function updateMachine(machineId){
         setText(`meta-hora-u2-${sid}`, vHoraU2.meta);
         setText(`prod-hora-u2-${sid}`, vHoraU2.prod);
       }
+
+      /* ===== RITMO ===== */
 
       const elRitmo = document.getElementById(`ritmo-medio-${sid}`);
       const tempoMedioTxt = formatTempoMedio(data.tempo_medio_min_por_peca);
@@ -132,6 +174,6 @@ function updateAll(){
   pageItems.forEach(updateMachine);
 }
 
-/* INIT UPDATE */
+/* INIT */
 updateAll();
 setInterval(updateAll, 1000);
