@@ -1,4 +1,5 @@
-﻿feat: extrai persistencia de producao horaria para producao_horaria_repo
+﻿refactor: reduz machine_calc movendo persistencias para repos
 
-- cria repo com upsert e leitura de producao por hora no SQLite
-- prepara reducao do machine_calc sem mudar comportamento
+- baseline diario: usa modules/repos/baseline_repo.py
+- producao horaria: usa modules/repos/producao_horaria_repo.py
+- mantém mesmas funções públicas para não quebrar imports
