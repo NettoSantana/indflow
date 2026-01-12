@@ -159,7 +159,6 @@ function parseMinFromTimeStr(s){
 }
 
 function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
-  // marca a linha se a HORA (ex.: 8 representa 08:00–09:00) está dentro do turno
   const ini = parseMinFromTimeStr(inicioStr);
   const fim = parseMinFromTimeStr(fimStr);
   if(ini === null || fim === null) return false;
@@ -180,20 +179,28 @@ function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
   return false;
 }
 
-// ✅ CORREÇÃO: remap meta_por_hora (indexado pelo turno)
-// para meta fixa por hora real (0..23)
-function mapMetaTurnoPara24h(meta_por_hora, inicioStr){
-  const meta24 = new Array(24).fill(0);
+// ===============================
+// MAP TURN0 -> 24H (meta e produzido)
+// ===============================
+function mapTurnoListPara24h(lista_turno, inicioStr, fillValue){
+  const out = new Array(24).fill(fillValue);
 
   const inicioHour = parseHourFromTimeStr(inicioStr);
-  if(inicioHour === null) return meta24;
+  if(inicioHour === null) return out;
 
-  const metas = Array.isArray(meta_por_hora) ? meta_por_hora : [];
-  for(let i = 0; i < metas.length; i++){
+  const arr = Array.isArray(lista_turno) ? lista_turno : [];
+  for(let i = 0; i < arr.length; i++){
     const hour = (inicioHour + i) % 24;
-    meta24[hour] = metas[i] ?? 0;
+    out[hour] = arr[i];
   }
-  return meta24;
+  return out;
+}
+
+function turnoIdxParaHoraDoDia(turnoIdx, inicioStr){
+  const inicioHour = parseHourFromTimeStr(inicioStr);
+  if(inicioHour === null) return null;
+  if(typeof turnoIdx !== "number" || !Number.isFinite(turnoIdx)) return null;
+  return (inicioHour + turnoIdx) % 24;
 }
 
 // ===============================
@@ -280,18 +287,29 @@ function carregarTabela(){
       // carrega conversão salva
       document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      // início/fim do turno (para destacar linhas)
-      const inicioTurnoStr = (data.inicio ?? document.getElementById("inicio").value);
-      const fimTurnoStr = (data.fim ?? document.getElementById("fim").value);
+      // ✅ preencher inputs de turno para não ficar vazio (e ajudar fallback)
+      if(data.turno_inicio) document.getElementById("inicio").value = data.turno_inicio;
+      if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
+      if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
+      if(data.rampa_percentual !== undefined && data.rampa_percentual !== null) document.getElementById("rampa").value = data.rampa_percentual;
+
+      // ✅ início/fim do turno (nome correto vindo do backend)
+      const inicioTurnoStr = (data.turno_inicio ?? document.getElementById("inicio").value);
+      const fimTurnoStr = (data.turno_fim ?? document.getElementById("fim").value);
 
       // metas: vem indexado pelo turno -> remapeia pra 0..23
-      const meta24 = mapMetaTurnoPara24h(data.meta_por_hora, inicioTurnoStr);
+      const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
 
-      // produzido por hora (persistido pelo backend)
-      const produzidosPorHora = Array.isArray(data.producao_por_hora) ? data.producao_por_hora : [];
+      // produzido por hora: também vem indexado pelo turno -> remapeia
+      const produzido24 = mapTurnoListPara24h(data.producao_por_hora, inicioTurnoStr, null);
 
-      // regra A (não mostrar horas futuras)
-      const idxHoraAtual = (typeof data.ultima_hora === "number") ? data.ultima_hora : new Date().getHours();
+      // regra A (não mostrar horas futuras) usando hora do dia
+      const horaDiaAtual =
+        (typeof data.ultima_hora === "number")
+          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
+          : new Date().getHours();
+
+      // parcial da hora atual (backend) deve cair na hora do dia correspondente
       const produzidoHoraAtual = data.producao_hora ?? 0;
 
       const tbody = document.querySelector("#tabela-horas tbody");
@@ -300,7 +318,7 @@ function carregarTabela(){
       for(let i = 0; i < 24; i++){
         const tr = document.createElement("tr");
 
-        // ✅ destaque do turno ativo
+        // destaque do turno ativo
         if(horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr)){
           tr.classList.add("turno-ativo");
         }
@@ -312,13 +330,16 @@ function carregarTabela(){
         tdMeta.textContent = meta24[i] ?? 0;
 
         const tdProduzidoHora = document.createElement("td");
-        const v = produzidosPorHora[i];
+        const v = produzido24[i];
 
-        if (typeof idxHoraAtual === "number" && i > idxHoraAtual) {
+        // Regra A:
+        // - hora futura => "—"
+        // - não futura => usa persistido; se não tiver e for hora atual => parcial; senão "—"
+        if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
           tdProduzidoHora.textContent = "—";
         } else if (v !== null && v !== undefined && v !== "") {
           tdProduzidoHora.textContent = v;
-        } else if (i === idxHoraAtual) {
+        } else if (i === horaDiaAtual) {
           tdProduzidoHora.textContent = produzidoHoraAtual;
         } else {
           tdProduzidoHora.textContent = "—";
