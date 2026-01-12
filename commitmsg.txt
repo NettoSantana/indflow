@@ -1,4 +1,4 @@
-﻿feat: separa historico em tela (HTML) e api (JSON)
+﻿feat: endpoint admin hard-reset para limpar SQLite sem shell
 
-- /producao/historico agora renderiza historico.html
-- /api/producao/historico retorna JSON do historico
+- POST /admin/hard-reset (protegido por INDFLOW_ADMIN_TOKEN + header X-Admin-Token)
+- limpa tabelas principais (producao/refugo/baseline/config)
