@@ -270,7 +270,7 @@ def dia_operacional_atual():
 
 
 # ============================================================
-# PERSISTÊNCIA POR HORA (SQLITE)  (mantém como você já tinha)
+# PERSISTÊNCIA POR HORA (SQLITE)
 # ============================================================
 
 def _get_machine_id_from_m(m):
@@ -286,8 +286,8 @@ def _ensure_producao_horaria(conn):
         CREATE TABLE IF NOT EXISTS producao_horaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
-            data_ref TEXT NOT NULL,         -- data do início do turno (YYYY-MM-DD)
-            hora_idx INTEGER NOT NULL,      -- índice da hora dentro do turno (0..n-1)
+            data_ref TEXT NOT NULL,         -- agora usamos: dia operacional (YYYY-MM-DD)
+            hora_idx INTEGER NOT NULL,      -- índice da hora dentro da grade (0..n-1)
             baseline_esp INTEGER NOT NULL,  -- esp_absoluto no início da hora
             esp_last INTEGER NOT NULL,
             produzido INTEGER NOT NULL,
@@ -401,7 +401,9 @@ def atualizar_producao_hora(m):
 
     machine_id = _get_machine_id_from_m(m)
     agora = now_bahia()
-    data_ref = _turno_data_ref(m, agora)
+
+    # ✅ CHAVE CERTA: dia operacional (vira 23:59) — mantém parciais e não “zera” ao virar a hora
+    data_ref = _dia_operacional_ref(agora)
 
     horas = m.get("horas_turno") or []
     horas_len = len(horas)
