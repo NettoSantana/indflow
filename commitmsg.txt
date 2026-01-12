@@ -1,5 +1,6 @@
-﻿ui: historico por dia usando max(produzido) em vez de soma
+﻿ui: historico por dia com producao diaria (max-min) ignorando zeros
 
-- Corrige resumo diario: produzido e snapshot/acumulado => usa MAX por data
-- Mantem filtro por data (exato) e nome da maquina
-- Refugo fica 0 ate existir no payload (ja preparado p/ campos comuns)
+- produzido no JSON e snapshot/acumulado, entao nao soma
+- producao do dia = max_nonzero - min_nonzero por data
+- mantem filtro por data e nome da maquina
+- refugo permanece 0 ate vir no payload (ja preparado)
