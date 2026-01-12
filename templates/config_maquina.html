@@ -16,6 +16,27 @@
   #tabela-horas tbody tr.turno-ativo:hover {
     background-color: #ffedd5; /* hover do turno */
   }
+
+  /* REFUGO EDITÁVEL */
+  .refugo-input{
+    width: 90px;
+    padding: 6px 8px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 14px;
+    text-align: center;
+    background: #ffffff;
+  }
+  .refugo-input:focus{
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.20);
+  }
+  .refugo-input:disabled{
+    background: #e5e7eb;
+    color: #64748b;
+    cursor: not-allowed;
+  }
 </style>
 
 <div class="container">
@@ -204,6 +225,39 @@ function turnoIdxParaHoraDoDia(turnoIdx, inicioStr){
 }
 
 // ===============================
+// REFUGO (LOCALSTORAGE) - por máquina + dia operacional
+// ===============================
+function getRefugoKey(machineId, diaRef){
+  const m = (machineId || "").toLowerCase();
+  const d = (diaRef || "sem_dia");
+  return `indflow_refugo_v1:${m}:${d}`;
+}
+
+function loadRefugo(machineId, diaRef){
+  const key = getRefugoKey(machineId, diaRef);
+  try{
+    const raw = localStorage.getItem(key);
+    if(!raw) return {};
+    const obj = JSON.parse(raw);
+    if(obj && typeof obj === "object") return obj;
+  }catch(e){}
+  return {};
+}
+
+function saveRefugo(machineId, diaRef, refObj){
+  const key = getRefugoKey(machineId, diaRef);
+  try{
+    localStorage.setItem(key, JSON.stringify(refObj || {}));
+  }catch(e){}
+}
+
+function toNonNegInt(v){
+  const n = Number(v);
+  if(!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
+// ===============================
 // RESET MANUAL
 // ===============================
 document.getElementById("btn-reset").addEventListener("click", function(){
@@ -287,20 +341,16 @@ function carregarTabela(){
       // carrega conversão salva
       document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      // ✅ preencher inputs de turno para não ficar vazio (e ajudar fallback)
+      // preencher inputs (evita fallback vazio)
       if(data.turno_inicio) document.getElementById("inicio").value = data.turno_inicio;
       if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
       if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
       if(data.rampa_percentual !== undefined && data.rampa_percentual !== null) document.getElementById("rampa").value = data.rampa_percentual;
 
-      // ✅ início/fim do turno (nome correto vindo do backend)
       const inicioTurnoStr = (data.turno_inicio ?? document.getElementById("inicio").value);
       const fimTurnoStr = (data.turno_fim ?? document.getElementById("fim").value);
 
-      // metas: vem indexado pelo turno -> remapeia pra 0..23
       const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
-
-      // produzido por hora: também vem indexado pelo turno -> remapeia
       const produzido24 = mapTurnoListPara24h(data.producao_por_hora, inicioTurnoStr, null);
 
       // regra A (não mostrar horas futuras) usando hora do dia
@@ -309,8 +359,11 @@ function carregarTabela(){
           ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
           : new Date().getHours();
 
-      // parcial da hora atual (backend) deve cair na hora do dia correspondente
       const produzidoHoraAtual = data.producao_hora ?? 0;
+
+      // refugo por dia operacional (frontend, por enquanto)
+      const diaRef = data.ultimo_dia ?? "sem_dia";
+      const refugoObj = loadRefugo(machine_id, diaRef);
 
       const tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
@@ -329,24 +382,72 @@ function carregarTabela(){
         const tdMeta = document.createElement("td");
         tdMeta.textContent = meta24[i] ?? 0;
 
-        const tdProduzidoHora = document.createElement("td");
+        // PRODUZIDO BASE (sem refugo)
+        let baseVal = null;
         const v = produzido24[i];
 
-        // Regra A:
-        // - hora futura => "—"
-        // - não futura => usa persistido; se não tiver e for hora atual => parcial; senão "—"
         if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
-          tdProduzidoHora.textContent = "—";
+          baseVal = null; // futuro
         } else if (v !== null && v !== undefined && v !== "") {
-          tdProduzidoHora.textContent = v;
+          baseVal = Number(v);
+          if(!Number.isFinite(baseVal)) baseVal = null;
         } else if (i === horaDiaAtual) {
-          tdProduzidoHora.textContent = produzidoHoraAtual;
+          baseVal = Number(produzidoHoraAtual);
+          if(!Number.isFinite(baseVal)) baseVal = 0;
         } else {
-          tdProduzidoHora.textContent = "—";
+          baseVal = null;
         }
 
+        // REFUGO (somente passado é editável; mas podemos exibir valor sempre)
+        const ref = toNonNegInt(refugoObj[String(i)] ?? 0);
+
+        // PRODUZIDO FINAL (base - refugo)
+        const tdProduzidoHora = document.createElement("td");
+        if(baseVal === null){
+          tdProduzidoHora.textContent = "—";
+        }else{
+          tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - ref);
+        }
+
+        // REFUGO INPUT
         const tdRefugoHora = document.createElement("td");
-        tdRefugoHora.textContent = 0;
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.step = "1";
+        input.className = "refugo-input";
+        input.value = ref;
+
+        // REGRA: só horas passadas (i < horaDiaAtual)
+        const podeEditar = (typeof horaDiaAtual === "number") ? (i < horaDiaAtual) : false;
+        input.disabled = !podeEditar;
+
+        input.addEventListener("blur", () => {
+          if(!podeEditar){
+            // garante que não mudou via hack de devtools
+            input.value = toNonNegInt(refugoObj[String(i)] ?? 0);
+            return;
+          }
+
+          const novo = toNonNegInt(input.value);
+
+          // salva
+          refugoObj[String(i)] = novo;
+          saveRefugo(machine_id, diaRef, refugoObj);
+
+          // atualiza produzido na hora (produção diminui)
+          if(baseVal === null){
+            tdProduzidoHora.textContent = "—";
+          }else{
+            tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - novo);
+          }
+
+          // normaliza valor no input
+          input.value = novo;
+        });
+
+        tdRefugoHora.appendChild(input);
 
         tr.appendChild(tdHora);
         tr.appendChild(tdMeta);
