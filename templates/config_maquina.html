@@ -253,11 +253,15 @@ function carregarTabela(){
         let tdMeta = document.createElement("td");
         tdMeta.textContent = metas[i];
 
-        // ✅ Produzido Hora: primeiro tenta o persistido; se não tiver, usa o parcial da hora atual.
+        // ✅ Regra A:
+        // - se for hora FUTURA (i > idxHoraAtual) => sempre "—"
+        // - se não for futura => usa persistido; se não tiver e for hora atual => usa parcial; senão "—"
         let tdProduzidoHora = document.createElement("td");
         const v = produzidosPorHora[i];
 
-        if (v !== null && v !== undefined && v !== "") {
+        if (typeof idxHoraAtual === "number" && i > idxHoraAtual) {
+          tdProduzidoHora.textContent = "—";
+        } else if (v !== null && v !== undefined && v !== "") {
           tdProduzidoHora.textContent = v;
         } else if (i === idxHoraAtual) {
           tdProduzidoHora.textContent = produzidoHoraAtual;
