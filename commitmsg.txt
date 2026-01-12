@@ -1,5 +1,5 @@
-﻿refactor: reduz machine_calc movendo persistencias para repos
+﻿refactor: reduz machine_routes movendo SQL para repos
 
-- baseline diario: usa modules/repos/baseline_repo.py
-- producao horaria: usa modules/repos/producao_horaria_repo.py
-- mantém mesmas funções públicas para não quebrar imports
+- cria repos: machine_config_repo e refugo_repo
+- machine_routes fica fino (request/response + regras)
+- mantém endpoints e comportamento
