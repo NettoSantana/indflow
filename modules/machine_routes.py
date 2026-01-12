@@ -1,4 +1,5 @@
 # modules/machine_routes.py
+import os
 from flask import Blueprint, request, jsonify, render_template
 from datetime import datetime, timedelta
 
@@ -44,6 +45,75 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
         return sum(_safe_int(x, 0) for x in arr)
     except Exception:
         return 0
+
+
+def _admin_token_ok() -> bool:
+    """
+    Proteção simples:
+      - Configure no Railway/ENV: INDFLOW_ADMIN_TOKEN=<seu_token>
+      - Envie no header: X-Admin-Token: <seu_token>
+    """
+    expected = (os.getenv("INDFLOW_ADMIN_TOKEN") or "").strip()
+    if not expected:
+        return False
+    received = (request.headers.get("X-Admin-Token") or "").strip()
+    return received == expected
+
+
+# ============================================================
+# ADMIN - HARD RESET (LIMPA BANCO)
+# ============================================================
+@machine_bp.route("/admin/hard-reset", methods=["POST"])
+def admin_hard_reset():
+    """
+    HARD RESET: apaga TODOS os dados do SQLite (tabelas principais).
+    Não depende de shell do Railway.
+    """
+    if not _admin_token_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    # Lista de tabelas a limpar (tolerante a tabela inexistente)
+    tables = [
+        "producao_diaria",
+        "producao_horaria",
+        "baseline_diario",
+        "refugo_horaria",
+        "machine_config",
+    ]
+
+    deleted = {}
+    for t in tables:
+        try:
+            cur.execute(f"SELECT COUNT(1) FROM {t}")
+            before = cur.fetchone()[0]
+        except Exception:
+            before = None
+
+        try:
+            cur.execute(f"DELETE FROM {t}")
+            deleted[t] = before
+        except Exception:
+            deleted[t] = "skipped"
+
+    # tenta resetar autoincrement (se existir)
+    try:
+        cur.execute("DELETE FROM sqlite_sequence")
+    except Exception:
+        pass
+
+    conn.commit()
+    conn.close()
+
+    # Nota: machine_state é memória; não limpamos aqui para evitar efeitos colaterais.
+    # Após limpar banco, as telas vão repovoar conforme novos dados entrarem.
+    return jsonify({
+        "ok": True,
+        "deleted_tables": deleted,
+        "note": "Banco limpo. Recomece a contagem a partir do próximo envio do ESP."
+    })
 
 
 # ============================================================
