@@ -1,5 +1,4 @@
-﻿feat: historico diario com refugo_total e pecas_boas
+﻿feat: historico retorna refugo_total e pecas_boas
 
-- /producao/historico agora retorna resumo final do dia
-- refugo_total somado das 24h
-- pecas_boas calculadas no backend
+- /producao/historico agora inclui refugo_total (soma 24h) e pecas_boas
+- sem mudar regras de producao; apenas enriquece o JSON
