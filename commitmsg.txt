@@ -1,5 +1,5 @@
-﻿fix(indflow-dev): restaurar ultimo_dia/baseline/esp_last do SQLite no boot
+﻿fix(indflow-dev): persistir producao_horaria por dia operacional (23:59)
 
-- get_machine carrega baseline_diario (dia_ref, baseline_esp, esp_last) do DB
-- evita ancorar baseline em 0 quando /machine/status roda antes do /machine/update após deploy
-- mantém ultimo_dia como string YYYY-MM-DD
+- producao_horaria agora usa data_ref = dia operacional (mesmo dia_ref do baseline_diario)
+- evita sumir/zerar 'Produzido Hora' quando vira a hora/referência
+- mantém UPSERT em tempo real da hora atual (parcial persistida)
