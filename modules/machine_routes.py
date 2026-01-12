@@ -14,7 +14,9 @@ from modules.machine_calc import (
     calcular_ultima_hora_idx,
     calcular_tempo_medio,
     aplicar_derivados_ml,
-    carregar_baseline_diario,  # ✅ correto para o seu machine_calc.py
+    carregar_baseline_diario,
+    now_bahia,
+    dia_operacional_ref_str,
 )
 
 machine_bp = Blueprint("machine_bp", __name__)
@@ -42,6 +44,82 @@ def _ensure_machine_config_table():
     """)
     conn.commit()
     conn.close()
+
+
+# ============================================================
+# REFUGO (PERSISTENTE) - SQLITE
+# ============================================================
+def _ensure_refugo_table():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS refugo_horaria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            dia_ref TEXT NOT NULL,          -- dia operacional (vira 23:59)
+            hora_dia INTEGER NOT NULL,      -- 0..23 (hora do dia)
+            refugo INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_refugo_horaria
+        ON refugo_horaria(machine_id, dia_ref, hora_dia)
+    """)
+    conn.commit()
+    conn.close()
+
+
+def _load_refugo_24(machine_id: str, dia_ref: str):
+    out = [0] * 24
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT hora_dia, refugo
+            FROM refugo_horaria
+            WHERE machine_id=? AND dia_ref=?
+        """, (machine_id, dia_ref))
+        rows = cur.fetchall() or []
+        conn.close()
+
+        for r in rows:
+            try:
+                h = int(r[0])
+                v = int(r[1])
+                if 0 <= h < 24:
+                    out[h] = max(0, v)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _upsert_refugo(machine_id: str, dia_ref: str, hora_dia: int, refugo: int):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO refugo_horaria (machine_id, dia_ref, hora_dia, refugo, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(machine_id, dia_ref, hora_dia)
+            DO UPDATE SET
+                refugo=excluded.refugo,
+                updated_at=excluded.updated_at
+        """, (machine_id, dia_ref, int(hora_dia), int(refugo), now_bahia().isoformat()))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+def _safe_int(v, default=0):
+    try:
+        return int(v)
+    except Exception:
+        return default
 
 
 # ============================================================
@@ -123,7 +201,7 @@ def configurar_maquina():
                 meta_por_hora_json=excluded.meta_por_hora_json,
                 updated_at=excluded.updated_at
         """, (
-            machine_id,  # ✅ normalizado
+            machine_id,
             int(m.get("meta_turno") or 0),
             m.get("turno_inicio"),
             m.get("turno_fim"),
@@ -191,6 +269,70 @@ def reset_manual():
 
 
 # ============================================================
+# REFUGO: SALVAR (PERSISTENTE)
+# ============================================================
+@machine_bp.route("/machine/refugo", methods=["POST"])
+def salvar_refugo():
+    """
+    Payload:
+      {
+        "machine_id": "maquina01",
+        "dia_ref": "YYYY-MM-DD" (opcional),
+        "hora_dia": 0..23,
+        "refugo": 0..N
+      }
+
+    Regras:
+      - dia_ref futuro: bloqueia
+      - se dia_ref == dia operacional atual:
+          só aceita hora_dia < hora_atual (passado). Hora atual e futuro bloqueado.
+      - dia_ref passado: aceita (todas as horas são passadas)
+    """
+    _ensure_refugo_table()
+
+    data = request.get_json() or {}
+    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
+
+    agora = now_bahia()
+    dia_atual = dia_operacional_ref_str(agora)
+
+    dia_ref = (data.get("dia_ref") or "").strip()
+    if not dia_ref:
+        dia_ref = dia_atual
+
+    hora_dia = _safe_int(data.get("hora_dia"), -1)
+    refugo = _safe_int(data.get("refugo"), 0)
+
+    if hora_dia < 0 or hora_dia > 23:
+        return jsonify({"ok": False, "error": "hora_dia inválida (0..23)"}), 400
+
+    if refugo < 0:
+        refugo = 0
+
+    # bloqueia dia futuro
+    if dia_ref > dia_atual:
+        return jsonify({"ok": False, "error": "dia_ref futuro não permitido"}), 400
+
+    # se for o dia atual, só aceita passado (hora_dia < hora atual)
+    if dia_ref == dia_atual:
+        hora_atual = int(agora.hour)
+        if hora_dia >= hora_atual:
+            return jsonify({"ok": False, "error": "Só é permitido lançar refugo em horas passadas"}), 400
+
+    ok = _upsert_refugo(machine_id, dia_ref, hora_dia, refugo)
+    if not ok:
+        return jsonify({"ok": False, "error": "Falha ao salvar no banco"}), 500
+
+    return jsonify({
+        "ok": True,
+        "machine_id": machine_id,
+        "dia_ref": dia_ref,
+        "hora_dia": hora_dia,
+        "refugo": refugo
+    })
+
+
+# ============================================================
 # STATUS
 # ============================================================
 @machine_bp.route("/machine/status", methods=["GET"])
@@ -204,6 +346,53 @@ def machine_status():
     atualizar_producao_hora(m)
     calcular_tempo_medio(m)
     aplicar_derivados_ml(m)
+
+    # refugo do dia operacional atual (lista 24 por hora do dia)
+    try:
+        _ensure_refugo_table()
+        dia_ref = dia_operacional_ref_str(now_bahia())
+        ref24 = _load_refugo_24(machine_id, dia_ref)
+    except Exception:
+        dia_ref = dia_operacional_ref_str(now_bahia())
+        ref24 = [0] * 24
+
+    m["refugo_por_hora"] = ref24
+
+    # produzido líquido por hora (se UI quiser usar direto)
+    prod_list = m.get("producao_por_hora")
+    if isinstance(prod_list, list):
+        liquid = []
+        for idx, val in enumerate(prod_list):
+            try:
+                p = int(val) if val is not None else None
+            except Exception:
+                p = None
+
+            # aqui "idx" é índice do TURNO; a UI remapeia p/ hora do dia.
+            # Ainda assim, damos um helper líquido por idx do turno (mesmo tamanho).
+            # Como refugo é por hora do dia, não dá pra subtrair aqui com precisão
+            # sem saber o mapeamento (turno_inicio). Então só expomos lista bruta
+            # e a UI subtrai corretamente depois.
+            liquid.append(p)
+        m["producao_por_hora_liquida"] = liquid
+    else:
+        m["producao_por_hora_liquida"] = []
+
+    # produzido líquido da hora atual (não deve ter refugo editável agora, mas expomos)
+    try:
+        hora_atual = int(now_bahia().hour)
+    except Exception:
+        hora_atual = None
+
+    try:
+        ph = int(m.get("producao_hora", 0) or 0)
+    except Exception:
+        ph = 0
+
+    if isinstance(hora_atual, int) and 0 <= hora_atual < 24:
+        m["producao_hora_liquida"] = max(0, ph - int(ref24[hora_atual] or 0))
+    else:
+        m["producao_hora_liquida"] = ph
 
     return jsonify(m)
 
