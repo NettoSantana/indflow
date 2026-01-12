@@ -72,22 +72,51 @@ function calcularIndicador(percentual){
   return { icon: "—", color: "#2563eb" }; // azul
 }
 
-function renderPercentWithIndicator(el, percentual){
+function renderPercentWithIndicator(el, percentual, indicadorOverride){
   if(!el) return;
 
   const p = Number(percentual) || 0;
-  const ind = calcularIndicador(p);
+  const ind = indicadorOverride ? indicadorOverride : calcularIndicador(p);
 
-  // ✅ símbolo ANTES do número
-  // ✅ símbolo menor (não quebra layout)
-  // ✅ cor no símbolo
-  // ✅ número continua grande (herda o CSS do percent-value)
   el.innerHTML = `
     <span style="display:inline-flex; align-items:baseline; gap:10px; white-space:nowrap;">
       <span style="font-size:26px; font-weight:900; line-height:1; color:${ind.color};">${ind.icon}</span>
       <span>${p}%</span>
     </span>
   `;
+}
+
+/* ===========================
+   HORA: RITMO DENTRO DA HORA
+   =========================== */
+
+function getFracHoraAtual(){
+  const now = new Date();
+  const m = now.getMinutes();
+  const s = now.getSeconds();
+  const frac = (m * 60 + s) / 3600;
+  return Math.min(1, Math.max(0, frac));
+}
+
+function indicadorPorRitmoDaHora(metaHora, produzidoHora){
+  const meta = Number(metaHora) || 0;
+  const prod = Number(produzidoHora) || 0;
+
+  // Se não tem meta, não julga (normal)
+  if(meta <= 0){
+    return { icon: "—", color: "#2563eb" };
+  }
+
+  const frac = getFracHoraAtual();
+  const esperadoAgora = meta * frac;
+
+  // muito no começo da hora (ex: 1% da hora) evita ruído
+  if(esperadoAgora <= 0.5){
+    return { icon: "—", color: "#2563eb" };
+  }
+
+  const pctVsEsperado = (prod / esperadoAgora) * 100;
+  return calcularIndicador(pctVsEsperado);
 }
 
 /* ===========================
@@ -116,14 +145,23 @@ function updateMachine(machineId){
 
       /* ===== PERCENTUAIS COM SINAL (ANTES DO NÚMERO) ===== */
 
+      // Dia: mantém sinal baseado no percentual_turno (como está hoje)
       const pTurno = Number(data.percentual_turno ?? 0);
+
+      // Hora: número continua sendo percentual_hora (exibe 78%),
+      // mas o sinal/cor é por ritmo dentro da hora (ex: 19:45 = 75%)
       const pHora  = Number(data.percentual_hora ?? 0);
 
       const elTurno = document.getElementById(`percent-turno-${sid}`);
       const elHora  = document.getElementById(`percent-hora-${sid}`);
 
       renderPercentWithIndicator(elTurno, pTurno);
-      renderPercentWithIndicator(elHora, pHora);
+
+      const metaHora = Number(data.meta_hora_pcs ?? 0);
+      const prodHora = Number(data.producao_hora ?? 0);
+      const indHoraRitmo = indicadorPorRitmoDaHora(metaHora, prodHora);
+
+      renderPercentWithIndicator(elHora, pHora, indHoraRitmo);
 
       /* ===== TURNO ===== */
 
