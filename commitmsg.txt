@@ -1,5 +1,5 @@
-﻿feat: destacar linhas do turno ativo na tabela fixa 24h
+﻿feat: dashboard passa a usar unidades da configuração da máquina
 
-- adiciona estilo e classe 'turno-ativo' nas horas dentro do intervalo inicio->fim
-- suporta turno normal (08:00–16:00) e turno cruzando meia-noite (22:00–06:00)
-- mantém tabela fixa 24h, meta remapeada e Regra A do produzido hora
+- unidade_1 (obrigatória) exibida como linha principal do card
+- unidade_2 (opcional) exibida abaixo quando existir
+- remove unidades fixas (UNI / ML) do dashboard
