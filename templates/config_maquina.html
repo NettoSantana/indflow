@@ -3,6 +3,23 @@
 
 {% block content %}
 
+<style>
+  /* ============================================================
+     TABELA ZEBRADA (linha sim, linha não) - cinza claro
+     ============================================================ */
+  #tabela-horas tbody tr:nth-child(even) {
+    background-color: #f3f4f6; /* cinza claro */
+  }
+
+  #tabela-horas tbody tr:nth-child(odd) {
+    background-color: #ffffff;
+  }
+
+  #tabela-horas tbody tr:hover {
+    background-color: #e5e7eb; /* hover */
+  }
+</style>
+
 <div class="container">
 
   <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
@@ -10,6 +27,9 @@
 
     <div style="display:flex; gap:10px;">
       <!-- BOTÃO HISTÓRICO -->
+
+
+
       <a id="btn-historico"
          href="#"
          class="btn btn-secondary">
