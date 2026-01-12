@@ -160,7 +160,6 @@ const HORAS_FIXAS_24 = buildFaixas24();
 // TIME HELPERS
 // ===============================
 function parseHourFromTimeStr(s){
-  // "08:00" -> 8
   if(!s || typeof s !== "string") return null;
   const parts = s.split(":");
   const h = Number(parts[0]);
@@ -169,7 +168,6 @@ function parseHourFromTimeStr(s){
 }
 
 function parseMinFromTimeStr(s){
-  // "08:30" -> 510
   if(!s || typeof s !== "string") return null;
   const parts = s.split(":");
   const h = Number(parts[0]);
@@ -186,17 +184,14 @@ function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
 
   const t = horaIndex * 60;
 
-  // turno "normal" (08:00–16:00)
   if(ini < fim){
     return (t >= ini) && (t < fim);
   }
 
-  // turno cruzando meia-noite (22:00–06:00)
   if(ini > fim){
     return (t >= ini) || (t < fim);
   }
 
-  // ini == fim -> considerado "sem turno"
   return false;
 }
 
@@ -224,37 +219,35 @@ function turnoIdxParaHoraDoDia(turnoIdx, inicioStr){
   return (inicioHour + turnoIdx) % 24;
 }
 
-// ===============================
-// REFUGO (LOCALSTORAGE) - por máquina + dia operacional
-// ===============================
-function getRefugoKey(machineId, diaRef){
-  const m = (machineId || "").toLowerCase();
-  const d = (diaRef || "sem_dia");
-  return `indflow_refugo_v1:${m}:${d}`;
-}
-
-function loadRefugo(machineId, diaRef){
-  const key = getRefugoKey(machineId, diaRef);
-  try{
-    const raw = localStorage.getItem(key);
-    if(!raw) return {};
-    const obj = JSON.parse(raw);
-    if(obj && typeof obj === "object") return obj;
-  }catch(e){}
-  return {};
-}
-
-function saveRefugo(machineId, diaRef, refObj){
-  const key = getRefugoKey(machineId, diaRef);
-  try{
-    localStorage.setItem(key, JSON.stringify(refObj || {}));
-  }catch(e){}
-}
-
 function toNonNegInt(v){
   const n = Number(v);
   if(!Number.isFinite(n) || n < 0) return 0;
   return Math.floor(n);
+}
+
+// ===============================
+// API: SALVAR REFUGO (SQLITE)
+// ===============================
+function salvarRefugoAPI(machineId, diaRef, horaDia, refugo){
+  return fetch("/machine/refugo", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      machine_id: machineId,
+      dia_ref: diaRef,      // usa o dia operacional do status (bate com o backend)
+      hora_dia: horaDia,    // 0..23 (hora do dia)
+      refugo: refugo
+    })
+  })
+  .then(async (r) => {
+    let payload = null;
+    try{ payload = await r.json(); }catch(e){}
+    if(!r.ok){
+      const msg = (payload && payload.error) ? payload.error : "Erro ao salvar refugo";
+      throw new Error(msg);
+    }
+    return payload;
+  });
 }
 
 // ===============================
@@ -341,7 +334,7 @@ function carregarTabela(){
       // carrega conversão salva
       document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      // preencher inputs (evita fallback vazio)
+      // preencher inputs
       if(data.turno_inicio) document.getElementById("inicio").value = data.turno_inicio;
       if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
       if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
@@ -361,9 +354,9 @@ function carregarTabela(){
 
       const produzidoHoraAtual = data.producao_hora ?? 0;
 
-      // refugo por dia operacional (frontend, por enquanto)
-      const diaRef = data.ultimo_dia ?? "sem_dia";
-      const refugoObj = loadRefugo(machine_id, diaRef);
+      // ✅ REFUGO AGORA VEM DO BACKEND (24 posições, hora do dia)
+      const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
+      const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
 
       const tbody = document.querySelector("#tabela-horas tbody");
       tbody.innerHTML = "";
@@ -371,7 +364,6 @@ function carregarTabela(){
       for(let i = 0; i < 24; i++){
         const tr = document.createElement("tr");
 
-        // destaque do turno ativo
         if(horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr)){
           tr.classList.add("turno-ativo");
         }
@@ -398,8 +390,7 @@ function carregarTabela(){
           baseVal = null;
         }
 
-        // REFUGO (somente passado é editável; mas podemos exibir valor sempre)
-        const ref = toNonNegInt(refugoObj[String(i)] ?? 0);
+        const ref = toNonNegInt(refugo24[i] ?? 0);
 
         // PRODUZIDO FINAL (base - refugo)
         const tdProduzidoHora = document.createElement("td");
@@ -423,28 +414,45 @@ function carregarTabela(){
         const podeEditar = (typeof horaDiaAtual === "number") ? (i < horaDiaAtual) : false;
         input.disabled = !podeEditar;
 
-        input.addEventListener("blur", () => {
+        input.addEventListener("blur", async () => {
           if(!podeEditar){
-            // garante que não mudou via hack de devtools
-            input.value = toNonNegInt(refugoObj[String(i)] ?? 0);
+            input.value = toNonNegInt(refugo24[i] ?? 0);
             return;
           }
 
+          const anterior = toNonNegInt(refugo24[i] ?? 0);
           const novo = toNonNegInt(input.value);
 
-          // salva
-          refugoObj[String(i)] = novo;
-          saveRefugo(machine_id, diaRef, refugoObj);
-
-          // atualiza produzido na hora (produção diminui)
-          if(baseVal === null){
-            tdProduzidoHora.textContent = "—";
-          }else{
-            tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - novo);
+          // otimização: se não mudou, não chama backend
+          if(novo === anterior){
+            input.value = novo;
+            return;
           }
 
-          // normaliza valor no input
-          input.value = novo;
+          try{
+            await salvarRefugoAPI(machine_id, diaRef, i, novo);
+
+            // atualiza cache local (somente pra UI imediata)
+            refugo24[i] = novo;
+
+            if(baseVal === null){
+              tdProduzidoHora.textContent = "—";
+            }else{
+              tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - novo);
+            }
+
+            input.value = novo;
+          }catch(err){
+            alert(String(err && err.message ? err.message : err));
+
+            // reverte
+            input.value = anterior;
+            if(baseVal === null){
+              tdProduzidoHora.textContent = "—";
+            }else{
+              tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - anterior);
+            }
+          }
         });
 
         tdRefugoHora.appendChild(input);
