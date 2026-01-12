@@ -1,17 +1,3 @@
-<div class="percent-label">Meta do Turno</div>
-``` :contentReference[oaicite:0]{index=0}
-
-Então é **aqui** que a gente altera.
-
-Abaixo vai o **ARQUIVO COMPLETO** `static/dashboard.js` com **uma única mudança**:  
-✅ `"Meta do Turno"` → `"Meta do Dia"`  
-(não mexi em mais nada)
-
----
-
-## ✅ `static/dashboard.js` (ARQUIVO COMPLETO)
-
-```javascript
 // static/dashboard.js
 const LS_KEY = "indflow_machines_v1";
 
