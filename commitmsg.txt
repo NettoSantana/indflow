@@ -1,4 +1,6 @@
-﻿fix: fechamento diario idempotente (1 linha por dia)
+﻿ui: historico com layout do producao_home + lista por dia
 
-- reset_contexto agora apaga registro anterior do dia e grava novamente
-- evita duplicacao em producao_diaria em caso de restart/deploy/multi-worker
+- Layout alinhado ao producao_home (page, card, tabela)
+- Topo com Maquina + busca por data
+- Tabela por dia: Data, Producao Total, Pecas Boas, Refugo
+- Remove heuristicas antigas do odometro; usa JSON pronto do backend
