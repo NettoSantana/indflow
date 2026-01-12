@@ -1,4 +1,5 @@
-﻿feat: endpoint admin hard-reset para limpar SQLite sem shell
+﻿fix: nao perder producao quando wifi cai (backfill simples)
 
-- POST /admin/hard-reset (protegido por INDFLOW_ADMIN_TOKEN + header X-Admin-Token)
-- limpa tabelas principais (producao/refugo/baseline/config)
+- detecta pulo de hora (idx salta >=2)
+- preenche horas intermediarias com 0 e joga delta acumulado na hora atual
+- evita horas zeradas/nao contabilizadas apos retorno do ESP
