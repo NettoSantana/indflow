@@ -1,6 +1,6 @@
-﻿ui: historico por dia com contador absoluto do ESP (opcao A)
+﻿ui: historico diario robusto (odometro ESP com filtro de ruido)
 
-- Calcula producao diaria a partir do contador absoluto: soma de deltas
-- Ignora leituras 0 e trata quedas como ruido ou reset (heuristica)
-- Mantem filtro por data e nome da maquina
-- Refugo segue 0 ate vir no payload
+- produzido e contador absoluto (odometro)
+- remove leituras pequenas (ruido) usando cutoff = 50% do max do dia
+- calcula producao do dia por segmentos (deltas) apos filtro
+- mantem filtro por data e nome da maquina
