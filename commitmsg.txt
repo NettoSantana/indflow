@@ -1,4 +1,5 @@
-﻿ui: preencher 'Produzido Hora' com valores persistidos (producao_por_hora)
+﻿ui: ocultar valores futuros na tabela de produzido por hora (regra A)
 
-- tabela config_maquina passa a usar data.producao_por_hora para mostrar horas anteriores
-- mantém fallback para parcial da hora atual (data.producao_hora)
+- 'Produzido Hora' mostra apenas ate a hora atual (inclui parcial da hora atual)
+- linhas futuras (i > ultima_hora) ficam sempre com '—'
+- evita exibir dados antigos como se fossem horarios futuros
