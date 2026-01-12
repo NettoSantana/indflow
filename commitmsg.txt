@@ -1,6 +1,6 @@
-﻿fix: meta da hora na tabela 24h usando turno_inicio/turno_fim e remapeando arrays do turno
+﻿feat: lançamento de refugo por hora na tabela (somente horas passadas)
 
-- usa data.turno_inicio/turno_fim (campos corretos do /machine/status)
-- preenche inputs de inicio/fim/meta/rampa a partir do status
-- remapeia meta_por_hora e producao_por_hora (indexados pelo turno) para a grade fixa 00-24
-- Regra A passa a usar hora do dia (inclui parcial da hora atual na hora correta)
+- coluna Refugo Hora vira input numérico
+- bloqueia edição na hora atual e horas futuras
+- refugo reduz Produzido Hora (clamp >= 0)
+- persistência temporária via localStorage por machine_id + ultimo_dia
