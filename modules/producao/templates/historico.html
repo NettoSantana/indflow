@@ -204,9 +204,12 @@
   document.getElementById("machine-name").textContent =
     `Máquina: ${machineId ? machineId.toUpperCase() : "—"}`;
 
+  // ✅ IMPORTANTE:
+  // A tela (HTML) é /producao/historico
+  // O JSON deve vir da API /api/producao/historico
   const url = machineId
-    ? `/producao/historico?machine_id=${encodeURIComponent(machineId)}`
-    : "/producao/historico";
+    ? `/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`
+    : "/api/producao/historico";
 
   let cache = [];
 
