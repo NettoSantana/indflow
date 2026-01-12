@@ -365,18 +365,34 @@ def reset_contexto(m, machine_id):
 
     from modules.db_indflow import get_db  # import local (só aqui)
 
+    # ✅ FIX: FECHAMENTO DIÁRIO IDEMPOTENTE
+    # Garante 1 linha por máquina por dia mesmo com:
+    # - deploy/restart
+    # - múltiplos workers
+    # - chamadas repetidas do reset
+    dia_ref = str(m.get("ultimo_dia") or "").strip()
+
     conn = get_db()
     cur = conn.cursor()
+
+    # remove qualquer registro anterior desse dia (se existir)
+    try:
+        cur.execute("""
+            DELETE FROM producao_diaria
+            WHERE machine_id = ? AND data = ?
+        """, (machine_id, dia_ref))
+    except Exception:
+        pass
 
     cur.execute("""
         INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual)
         VALUES (?, ?, ?, ?, ?)
     """, (
         machine_id,
-        m["ultimo_dia"],
-        m["producao_turno"],
-        m["meta_turno"],
-        m["percentual_turno"]
+        dia_ref,
+        int(m.get("producao_turno", 0) or 0),
+        int(m.get("meta_turno", 0) or 0),
+        int(m.get("percentual_turno", 0) or 0)
     ))
 
     conn.commit()
