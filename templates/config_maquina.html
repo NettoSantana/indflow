@@ -240,7 +240,7 @@ function salvarRefugoAPI(machineId, diaRef, horaDia, refugo){
     body: JSON.stringify({
       machine_id: machineId,
       dia_ref: diaRef,
-      hora_dia: horaDia, // 0..23 (hora do dia)
+      hora_dia: horaDia,
       refugo: refugo
     })
   })
@@ -331,15 +331,12 @@ function carregarTabela(){
     .then(r => r.json())
     .then(data => {
 
-      // carrega unidades salvas
       document.getElementById("unidade_1").value = data.unidade_1 ?? "";
       document.getElementById("unidade_2").value = data.unidade_2 ?? "";
       garantirSemDuplicar();
 
-      // carrega conversão salva
       document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
 
-      // preencher inputs
       if(data.turno_inicio) document.getElementById("inicio").value = data.turno_inicio;
       if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
       if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
@@ -349,9 +346,12 @@ function carregarTabela(){
       const fimTurnoStr = (data.turno_fim ?? document.getElementById("fim").value);
 
       const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
+
+      // ⚠️ PRODUÇÃO: ainda vem do backend como lista do TURNO.
+      // Para não "sumir" hora extra/fora do turno na tabela, a UI passa a mostrar 0
+      // (horas passadas sem dado) e mantém "—" apenas para horas futuras.
       const produzido24 = mapTurnoListPara24h(data.producao_por_hora, inicioTurnoStr, null);
 
-      // regra A (não mostrar horas futuras) usando hora do dia
       const horaDiaAtual =
         (typeof data.ultima_hora === "number")
           ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
@@ -359,7 +359,6 @@ function carregarTabela(){
 
       const produzidoHoraAtual = data.producao_hora ?? 0;
 
-      // ✅ REFUGO AGORA VEM DO BACKEND (24 posições, hora do dia)
       const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
       const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
 
@@ -379,12 +378,12 @@ function carregarTabela(){
         const tdMeta = document.createElement("td");
         tdMeta.textContent = meta24[i] ?? 0;
 
-        // PRODUZIDO BASE (sem refugo)
         let baseVal = null;
         const v = produzido24[i];
 
+        // FUTURO: mantém "—"
         if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
-          baseVal = null; // futuro
+          baseVal = null;
         } else if (v !== null && v !== undefined && v !== "") {
           baseVal = Number(v);
           if(!Number.isFinite(baseVal)) baseVal = null;
@@ -392,12 +391,12 @@ function carregarTabela(){
           baseVal = Number(produzidoHoraAtual);
           if(!Number.isFinite(baseVal)) baseVal = 0;
         } else {
-          baseVal = null;
+          // ✅ PASSADO SEM DADO: mostra 0 (não some hora extra na tabela)
+          baseVal = 0;
         }
 
         const ref = toNonNegInt(refugo24[i] ?? 0);
 
-        // PRODUZIDO FINAL (base - refugo)
         const tdProduzidoHora = document.createElement("td");
         if(baseVal === null){
           tdProduzidoHora.textContent = "—";
@@ -405,7 +404,6 @@ function carregarTabela(){
           tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - ref);
         }
 
-        // REFUGO INPUT
         const tdRefugoHora = document.createElement("td");
 
         const input = document.createElement("input");
@@ -415,7 +413,6 @@ function carregarTabela(){
         input.className = "refugo-input";
         input.value = ref;
 
-        // REGRA: só horas passadas (i < horaDiaAtual)
         const podeEditar = (typeof horaDiaAtual === "number") ? (i < horaDiaAtual) : false;
         input.disabled = !podeEditar;
 
@@ -428,7 +425,6 @@ function carregarTabela(){
           const anterior = toNonNegInt(refugo24[i] ?? 0);
           const novo = toNonNegInt(input.value);
 
-          // otimização: se não mudou, não chama backend
           if(novo === anterior){
             input.value = novo;
             return;
@@ -437,7 +433,6 @@ function carregarTabela(){
           try{
             await salvarRefugoAPI(machine_id, diaRef, i, novo);
 
-            // atualiza cache local (somente pra UI imediata)
             refugo24[i] = novo;
 
             if(baseVal === null){
@@ -450,7 +445,6 @@ function carregarTabela(){
           }catch(err){
             alert(String(err && err.message ? err.message : err));
 
-            // reverte
             input.value = anterior;
             if(baseVal === null){
               tdProduzidoHora.textContent = "—";
