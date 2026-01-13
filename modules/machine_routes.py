@@ -61,6 +61,90 @@ def _admin_token_ok() -> bool:
 
 
 # ============================================================
+# DEVICES (ESP) — MAC = CPF
+# ============================================================
+def _norm_device_id(v: str) -> str:
+    s = (v or "").strip().upper()
+    s = s.replace(":", "").replace("-", "")
+    # mantém só hex (tolerante)
+    s = "".join(ch for ch in s if ch.isalnum())
+    return s
+
+
+def _ensure_devices_table(conn):
+    # Segurança extra: mesmo que init_db não tenha rodado ainda
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS devices (
+            device_id TEXT PRIMARY KEY,
+            machine_id TEXT,
+            alias TEXT,
+            created_at TEXT,
+            last_seen TEXT
+        )
+    """)
+    conn.commit()
+
+
+def _touch_device_seen(device_id: str) -> None:
+    if not device_id:
+        return
+
+    conn = get_db()
+    try:
+        _ensure_devices_table(conn)
+
+        now_iso = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
+
+        cur = conn.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,))
+        exists = cur.fetchone() is not None
+
+        if not exists:
+            conn.execute(
+                "INSERT INTO devices (device_id, machine_id, alias, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
+                (device_id, None, None, now_iso, now_iso),
+            )
+        else:
+            conn.execute(
+                "UPDATE devices SET last_seen = ? WHERE device_id = ?",
+                (now_iso, device_id),
+            )
+
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _get_machine_from_device(device_id: str):
+    if not device_id:
+        return None
+
+    conn = get_db()
+    try:
+        _ensure_devices_table(conn)
+        cur = conn.execute(
+            "SELECT machine_id FROM devices WHERE device_id = ?",
+            (device_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            mid = row["machine_id"]
+        except Exception:
+            mid = row[0]
+        mid = (mid or "").strip()
+        return _norm_machine_id(mid) if mid else None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+# ============================================================
 # ADMIN - HARD RESET (LIMPA BANCO)
 # ============================================================
 @machine_bp.route("/admin/hard-reset", methods=["POST"])
@@ -82,6 +166,7 @@ def admin_hard_reset():
         "baseline_diario",
         "refugo_horaria",
         "machine_config",
+        # OBS: não apagamos "devices" aqui por padrão (cadastro do hardware)
     ]
 
     deleted = {}
@@ -199,7 +284,20 @@ def configurar_maquina():
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
     data = request.get_json() or {}
-    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
+
+    # 1) MAC do ESP (CPF)
+    device_id = _norm_device_id(data.get("mac") or data.get("device_id") or "")
+    if device_id:
+        _touch_device_seen(device_id)
+
+    # 2) Resolve machine_id: se device estiver vinculado, ele manda.
+    linked_machine = _get_machine_from_device(device_id) if device_id else None
+    if linked_machine:
+        machine_id = linked_machine
+    else:
+        # fallback: mantém compatibilidade com o payload atual
+        machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
+
     m = get_machine(machine_id)
 
     verificar_reset_diario(m, machine_id)
@@ -219,7 +317,12 @@ def update_machine():
 
     atualizar_producao_hora(m)
 
-    return jsonify({"message": "OK", "machine_id": machine_id})
+    return jsonify({
+        "message": "OK",
+        "machine_id": machine_id,
+        "device_id": device_id or None,
+        "linked_machine": linked_machine or None
+    })
 
 
 # ============================================================
