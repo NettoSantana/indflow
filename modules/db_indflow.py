@@ -40,27 +40,27 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-    # ============================================
-    # 0) DEVICES (ESP) — MAC = CPF
-    # ============================================
+    # ============================================================
+    # 0) DEVICES (ESP) — MAC = CPF (device_id)
+    # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS devices (
             device_id TEXT PRIMARY KEY,      -- MAC normalizado (sem ":" e "-")
             machine_id TEXT,                 -- vínculo atual (opcional)
             alias TEXT,                      -- apelido (opcional)
-            last_seen TEXT,                  -- último contato do ESP
-            created_at TEXT                  -- quando foi visto pela 1a vez
+            created_at TEXT,                 -- primeira vez visto
+            last_seen TEXT                   -- último contato
         )
     """)
 
     cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_devices_machine
+        CREATE INDEX IF NOT EXISTS ix_devices_machine_id
         ON devices(machine_id)
     """)
 
-    # ============================================
+    # ============================================================
     # 1) HISTÓRICO DIÁRIO
-    # ============================================
+    # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_diaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,9 +72,9 @@ def init_db():
         )
     """)
 
-    # ============================================
+    # ============================================================
     # 2) CONFIG DA MÁQUINA (PERSISTENTE)
-    # ============================================
+    # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS machine_config (
             machine_id TEXT PRIMARY KEY,
@@ -88,9 +88,9 @@ def init_db():
         )
     """)
 
-    # ============================================
+    # ============================================================
     # 3) PRODUÇÃO POR HORA (PERSISTENTE)
-    # ============================================
+    # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_horaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,9 +111,9 @@ def init_db():
         ON producao_horaria(machine_id, data_ref, hora_idx)
     """)
 
-    # ============================================
+    # ============================================================
     # 4) BASELINE DIÁRIO (DIA OPERACIONAL 23:59)
-    # ============================================
+    # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS baseline_diario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
