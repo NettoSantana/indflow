@@ -41,6 +41,24 @@ def init_db():
     cur = conn.cursor()
 
     # ============================================
+    # 0) DEVICES (ESP) — MAC = CPF
+    # ============================================
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS devices (
+            device_id TEXT PRIMARY KEY,      -- MAC normalizado (sem ":" e "-")
+            machine_id TEXT,                 -- vínculo atual (opcional)
+            alias TEXT,                      -- apelido (opcional)
+            last_seen TEXT,                  -- último contato do ESP
+            created_at TEXT                  -- quando foi visto pela 1a vez
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS ix_devices_machine
+        ON devices(machine_id)
+    """)
+
+    # ============================================
     # 1) HISTÓRICO DIÁRIO
     # ============================================
     cur.execute("""
