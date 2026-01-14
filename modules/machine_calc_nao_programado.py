@@ -36,14 +36,20 @@ def _delta_non_negative(curr: int, prev: int) -> int:
 def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = None) -> None:
     """
     Acumula produção e tempo "não programados" (fora do turno).
-    Regras:
-      - Fora do turno: se tiver RUN=1 OU delta de esp_absoluto > 0 => conta como atividade.
-      - Tempo: soma minutos entre updates enquanto atividade estiver ativa fora do turno.
-      - Produção: soma delta do esp_absoluto enquanto fora do turno.
-      - Dentro do turno: não acumula, e "fecha" a atividade fora do turno (sem zerar acumulados).
-    Campos salvos em m:
-      - np_producao: int (peças/pulsos fora do turno)
-      - np_minutos: int (minutos ativos fora do turno)
+
+    REGRA (segura):
+      - Fora do turno:
+          * Produção: soma delta do esp_absoluto (se delta>0)
+          * Tempo: soma minutos do intervalo SEMPRE que houve atividade no intervalo:
+              - delta>0 (houve produção) OU
+              - janela estava ativa (was_active=True) OU
+              - run_flag=True (se existir sinal real de RUN)
+      - Dentro do turno:
+          * fecha a janela e atualiza marcadores (sem zerar acumulados)
+
+    Campos em m:
+      - np_producao: int
+      - np_minutos: int
       - _np_last_ts: iso str
       - _np_last_esp: int
       - _np_active: bool
@@ -51,7 +57,7 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
     if agora is None:
         agora = now_bahia()
 
-    # inicializa acumuladores
+    # init acumuladores
     if "np_producao" not in m:
         m["np_producao"] = 0
     if "np_minutos" not in m:
@@ -60,25 +66,30 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
     curr_esp = _safe_int(m.get("esp_absoluto", 0), 0)
     prev_esp = _safe_int(m.get("_np_last_esp", curr_esp), curr_esp)
 
-    # tenta pegar sinal de run/parada da máquina (você disse que existe 1=rodando 0=parada)
-    run_flag = _get_bool(m.get("run")) or _get_bool(m.get("rodando")) or _get_bool(m.get("sinal_run"))
-
     delta = _delta_non_negative(curr_esp, prev_esp)
 
-    # dentro do turno: fecha janela não-programada e atualiza baseline/ts
+    # tenta pegar sinal de run/parada SE existir (não depende de status Auto/Manual)
+    run_flag = (
+        _get_bool(m.get("run"))
+        or _get_bool(m.get("rodando"))
+        or _get_bool(m.get("sinal_run"))
+    )
+
+    # dentro do turno: fecha janela e atualiza baseline/ts
     if dentro_turno:
         m["_np_active"] = False
         m["_np_last_ts"] = agora.isoformat()
         m["_np_last_esp"] = curr_esp
         return
 
-    # fora do turno: atividade se run=1 ou houve produção (delta>0)
-    active_now = bool(run_flag or (delta > 0))
     was_active = _get_bool(m.get("_np_active"))
 
-    # se estava ativo, soma o tempo desde o último update
+    # atividade no intervalo (segura): delta>0 OU já estava ativo OU run_flag
+    activity_this_interval = bool((delta > 0) or was_active or run_flag)
+
+    # soma tempo desde último update se houve atividade no intervalo
     last_ts_raw = m.get("_np_last_ts")
-    if was_active and last_ts_raw:
+    if activity_this_interval and last_ts_raw:
         try:
             last_ts = datetime.fromisoformat(str(last_ts_raw))
             dt_s = (agora - last_ts).total_seconds()
@@ -89,12 +100,14 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
         except Exception:
             pass
 
-    # produção fora do turno: soma delta sempre que fora do turno (se delta>0)
+    # soma produção fora do turno
     if delta > 0:
         m["np_producao"] = _safe_int(m.get("np_producao", 0), 0) + int(delta)
 
-    # atualiza estado
+    # mantém a janela ativa se houve atividade agora (delta>0 ou run_flag)
+    active_now = helps_active = bool((delta > 0) or run_flag)
     m["_np_active"] = bool(active_now)
+
+    # atualiza marcadores
     m["_np_last_ts"] = agora.isoformat()
     m["_np_last_esp"] = curr_esp
-
