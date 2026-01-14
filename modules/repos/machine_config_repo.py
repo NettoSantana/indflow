@@ -5,6 +5,23 @@ from datetime import datetime
 from modules.db_indflow import get_db
 
 
+def _ensure_column(conn, table: str, col: str, ddl: str) -> None:
+    """
+    Garante que a coluna exista. Se não existir, cria via ALTER TABLE.
+    ddl: string do tipo 'TEXT', 'REAL', etc. (sem o nome da coluna)
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(f"PRAGMA table_info({table})")
+        cols = [r[1] for r in cur.fetchall()]  # (cid, name, type, notnull, dflt_value, pk)
+        if col not in cols:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            conn.commit()
+    except Exception:
+        # não derruba o sistema por causa de migração
+        pass
+
+
 def ensure_machine_config_table():
     conn = get_db()
     cur = conn.cursor()
@@ -17,10 +34,22 @@ def ensure_machine_config_table():
             rampa_percentual INTEGER NOT NULL DEFAULT 0,
             horas_turno_json TEXT NOT NULL DEFAULT '[]',
             meta_por_hora_json TEXT NOT NULL DEFAULT '[]',
+
+            -- ✅ NOVO: persistir unidades e conversão
+            unidade_1 TEXT,
+            unidade_2 TEXT,
+            conv_m_por_pcs REAL,
+
             updated_at TEXT NOT NULL
         )
     """)
     conn.commit()
+
+    # ✅ MIGRAÇÃO SEGURA (para bancos já existentes)
+    _ensure_column(conn, "machine_config", "unidade_1", "TEXT")
+    _ensure_column(conn, "machine_config", "unidade_2", "TEXT")
+    _ensure_column(conn, "machine_config", "conv_m_por_pcs", "REAL")
+
     conn.close()
 
 
@@ -33,6 +62,8 @@ def upsert_machine_config(machine_id: str, m: dict):
       - rampa_percentual
       - horas_turno (list)
       - meta_por_hora (list)
+      - unidade_1, unidade_2 (opcional)
+      - conv_m_por_pcs (opcional)
     """
     machine_id = (machine_id or "").strip().lower()
     if not machine_id:
@@ -43,10 +74,30 @@ def upsert_machine_config(machine_id: str, m: dict):
 
         conn = get_db()
         cur = conn.cursor()
+
+        # conversão (REAL) - tenta guardar como float se vier válido
+        conv = m.get("conv_m_por_pcs", None)
+        try:
+            conv = float(conv) if conv not in (None, "", "none") else None
+        except Exception:
+            conv = None
+
         cur.execute("""
             INSERT INTO machine_config
-            (machine_id, meta_turno, turno_inicio, turno_fim, rampa_percentual, horas_turno_json, meta_por_hora_json, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (
+              machine_id,
+              meta_turno,
+              turno_inicio,
+              turno_fim,
+              rampa_percentual,
+              horas_turno_json,
+              meta_por_hora_json,
+              unidade_1,
+              unidade_2,
+              conv_m_por_pcs,
+              updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(machine_id) DO UPDATE SET
                 meta_turno=excluded.meta_turno,
                 turno_inicio=excluded.turno_inicio,
@@ -54,6 +105,9 @@ def upsert_machine_config(machine_id: str, m: dict):
                 rampa_percentual=excluded.rampa_percentual,
                 horas_turno_json=excluded.horas_turno_json,
                 meta_por_hora_json=excluded.meta_por_hora_json,
+                unidade_1=excluded.unidade_1,
+                unidade_2=excluded.unidade_2,
+                conv_m_por_pcs=excluded.conv_m_por_pcs,
                 updated_at=excluded.updated_at
         """, (
             machine_id,
@@ -63,6 +117,9 @@ def upsert_machine_config(machine_id: str, m: dict):
             int(m.get("rampa_percentual") or 0),
             json.dumps(m.get("horas_turno") or []),
             json.dumps(m.get("meta_por_hora") or []),
+            (m.get("unidade_1") or None),
+            (m.get("unidade_2") or None),
+            conv,
             datetime.now().isoformat()
         ))
         conn.commit()
