@@ -265,13 +265,10 @@ def update_machine():
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
 
     # ✅ FIX: persistir RUN (1/0) vindo do ESP no estado da máquina
-    # Isso destrava a contagem de np_minutos fora do turno.
     m["run"] = _safe_int(data.get("run", 0), 0)
 
     # ========================================================
     # ✅ REGRA: PRIMEIRO UPDATE REAL (MÁQUINA NOVA SEM BASELINE)
-    # Ancora baseline no valor atual do contador do ESP e zera produção.
-    # Isso evita "máquina nova nascer com milhões".
     # ========================================================
     baseline_initialized = False
     try:
@@ -283,7 +280,6 @@ def update_machine():
         try:
             _ensure_baseline_table(conn)
 
-            # se ainda não existe baseline para este dia/máquina, ancorar agora
             if not _has_baseline_for_day(conn, machine_id, dia_ref):
                 _insert_baseline_for_day(conn, machine_id, dia_ref, int(m["esp_absoluto"]), updated_at)
                 baseline_initialized = True
@@ -291,10 +287,8 @@ def update_machine():
             conn.close()
 
     except Exception:
-        # se der qualquer problema aqui, segue fluxo normal
         baseline_initialized = False
 
-    # carrega baseline (agora deve existir se inicializamos)
     carregar_baseline_diario(m, machine_id)
 
     producao_atual = max(int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0), 0)
@@ -398,6 +392,29 @@ def machine_status():
     if "run" not in m:
         m["run"] = 0
 
+    # ========================================================
+    # ✅ CARD HORA FORA DO TURNO (visual do card, sem mexer em meta/refugo)
+    # Regra:
+    #   - se estiver fora do turno (ultima_hora is None),
+    #     mostra np_producao no "Produzido da Hora" do card
+    #   - percentual_hora fica 0 (meta da hora é 0)
+    #   - producao_hora_liquida = producao_hora (fora do turno não tem refugo-hora)
+    # ========================================================
+    try:
+        np_prod = int(m.get("np_producao", 0) or 0)
+    except Exception:
+        np_prod = 0
+
+    if m.get("ultima_hora") is None and np_prod > 0:
+        m["producao_hora"] = np_prod
+        m["percentual_hora"] = 0
+        # flag opcional pra UI (não quebra nada se ignorar)
+        m["fora_turno"] = True
+        # fora do turno: líquido = bruto (não aplica refugo hora)
+        m["producao_hora_liquida"] = np_prod
+        return jsonify(m)
+
+    # fluxo normal (dentro do turno): calcula líquido aplicando refugo da hora atual
     try:
         hora_atual = int(now_bahia().hour)
     except Exception:
