@@ -1,5 +1,6 @@
 # modules/machine_routes.py
 import os
+import re
 from flask import Blueprint, request, jsonify, render_template
 from datetime import datetime, timedelta
 
@@ -63,12 +64,25 @@ def _admin_token_ok() -> bool:
 # ============================================================
 # DEVICES (ESP) — MAC = CPF
 # ============================================================
+
 def _norm_device_id(v: str) -> str:
+    """
+    Normaliza MAC de forma ÚNICA no sistema:
+    - extrai exatamente 12 caracteres HEX (0-9A-F)
+    - retorna "" se não achar
+    Aceita formatos: AA:BB:CC:DD:EE:FF, AA-BB-..., AABBCCDDEEFF
+    e também strings “sujas” (a função caça o trecho hex).
+    """
     s = (v or "").strip().upper()
-    s = s.replace(":", "").replace("-", "")
-    # mantém só hex (tolerante)
-    s = "".join(ch for ch in s if ch.isalnum())
-    return s
+    if not s:
+        return ""
+
+    # remove separadores comuns para facilitar
+    s2 = s.replace(":", "").replace("-", "").replace(" ", "")
+
+    # procura um bloco de 12 hex em qualquer lugar
+    m = re.search(r"([0-9A-F]{12})", s2)
+    return m.group(1) if m else ""
 
 
 def _ensure_devices_table(conn):
@@ -86,6 +100,13 @@ def _ensure_devices_table(conn):
 
 
 def _touch_device_seen(device_id: str) -> None:
+    """
+    Registra 'last_seen' do device SEM NUNCA apagar:
+    - machine_id (vínculo)
+    - alias (apelido)
+
+    Usa UPSERT para ser robusto.
+    """
     if not device_id:
         return
 
@@ -95,19 +116,15 @@ def _touch_device_seen(device_id: str) -> None:
 
         now_iso = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
 
-        cur = conn.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,))
-        exists = cur.fetchone() is not None
-
-        if not exists:
-            conn.execute(
-                "INSERT INTO devices (device_id, machine_id, alias, created_at, last_seen) VALUES (?, ?, ?, ?, ?)",
-                (device_id, None, None, now_iso, now_iso),
-            )
-        else:
-            conn.execute(
-                "UPDATE devices SET last_seen = ? WHERE device_id = ?",
-                (now_iso, device_id),
-            )
+        # UPSERT:
+        # - se não existir: cria com machine_id/alias NULL
+        # - se existir: atualiza apenas last_seen (preserva machine_id/alias/created_at)
+        conn.execute("""
+            INSERT INTO devices (device_id, machine_id, alias, created_at, last_seen)
+            VALUES (?, NULL, NULL, ?, ?)
+            ON CONFLICT(device_id) DO UPDATE SET
+              last_seen = excluded.last_seen
+        """, (device_id, now_iso, now_iso))
 
         conn.commit()
     finally:
@@ -159,7 +176,6 @@ def admin_hard_reset():
     conn = get_db()
     cur = conn.cursor()
 
-    # Lista de tabelas a limpar (tolerante a tabela inexistente)
     tables = [
         "producao_diaria",
         "producao_horaria",
@@ -183,7 +199,6 @@ def admin_hard_reset():
         except Exception:
             deleted[t] = "skipped"
 
-    # tenta resetar autoincrement (se existir)
     try:
         cur.execute("DELETE FROM sqlite_sequence")
     except Exception:
@@ -192,8 +207,6 @@ def admin_hard_reset():
     conn.commit()
     conn.close()
 
-    # Nota: machine_state é memória; não limpamos aqui para evitar efeitos colaterais.
-    # Após limpar banco, as telas vão repovoar conforme novos dados entrarem.
     return jsonify({
         "ok": True,
         "deleted_tables": deleted,
@@ -262,7 +275,6 @@ def configurar_maquina():
     m["producao_hora"] = 0
     m["percentual_hora"] = 0
 
-    # ✅ Persistência da config (agora via repo)
     try:
         upsert_machine_config(machine_id, m)
     except Exception:
@@ -295,7 +307,6 @@ def update_machine():
     if linked_machine:
         machine_id = linked_machine
     else:
-        # fallback: mantém compatibilidade com o payload atual
         machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
 
     m = get_machine(machine_id)
@@ -403,7 +414,6 @@ def machine_status():
     dia_ref = dia_operacional_ref_str(now_bahia())
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
 
-    # produzido líquido da hora atual (helper)
     try:
         hora_atual = int(now_bahia().hour)
     except Exception:
@@ -427,7 +437,6 @@ def machine_status():
 # ============================================================
 @machine_bp.route("/producao/historico", methods=["GET"])
 def historico_page():
-    # A tela usa JS para buscar o JSON na rota /api/producao/historico
     return render_template("historico.html")
 
 
