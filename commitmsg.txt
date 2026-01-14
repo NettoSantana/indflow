@@ -1,5 +1,5 @@
-﻿fix(machine): acumular tempo não programado com heartbeat (segundos -> minutos)
+﻿feat(card): mostrar produção da hora mesmo fora do turno (usa np_producao)
 
-- Evita round(dt/60) que zerava np_minutos com heartbeat de 5s
-- Adiciona acumulador m["_np_secs"] e converte para minutos quando >= 60s
-- Usa run=1 como sinal principal de atividade fora do turno
+- Em /machine/status: se ultima_hora is None, exibe np_producao em producao_hora
+- Mantém meta da hora = 0 e percentual_hora = 0
+- Não mistura NP com refugo/meta por hora (somente visual do card)
