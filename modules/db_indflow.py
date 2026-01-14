@@ -40,21 +40,23 @@ def _default_db_path() -> str:
     return "indflow.db"
 
 
-DB_PATH = _default_db_path()
-
-
-def _ensure_db_dir():
-    db_file = Path(DB_PATH)
+def _ensure_db_dir(db_path: str) -> None:
+    db_file = Path(db_path)
     if db_file.parent and str(db_file.parent) not in ("", "."):
         db_file.parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_db():
-    # garante pasta do DB (quando for path tipo /data/indflow.db)
-    _ensure_db_dir()
+    """
+    IMPORTANTÍSSIMO:
+    - NÃO usar DB_PATH global (evita ficar "congelado" num caminho errado)
+    - Resolve o path em runtime, toda vez, garantindo consistência no Railway.
+    """
+    db_path = _default_db_path()
+    _ensure_db_dir(db_path)
 
     # check_same_thread=False ajuda quando Waitress/Flask usa threads
-    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
