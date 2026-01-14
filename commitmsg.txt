@@ -1,5 +1,4 @@
-﻿feat(machine): contabiliza produção/tempo fora do turno e corrige ritmo médio
+﻿fix(machine): contar minutos não programados por atividade no intervalo (sem depender de RUN)
 
-- Chama update_nao_programado() em atualizar_producao_hora()
-- Mantém hora programada zerada fora do turno, mas acumula np_producao/np_minutos
-- Ritmo médio (min/peça) agora considera programado + não programado
+- Auto/Manual não é RUN: tempo fora do turno passa a somar quando delta>0 no intervalo
+- Mantém produção np_producao por delta do esp_absoluto
