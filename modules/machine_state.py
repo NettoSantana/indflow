@@ -20,10 +20,33 @@ def _ensure_machine_config_table():
             rampa_percentual INTEGER NOT NULL DEFAULT 0,
             horas_turno_json TEXT NOT NULL DEFAULT '[]',
             meta_por_hora_json TEXT NOT NULL DEFAULT '[]',
+
+            -- ✅ manter compatível com machine_config_repo.py
+            unidade_1 TEXT,
+            unidade_2 TEXT,
+            conv_m_por_pcs REAL,
+
             updated_at TEXT NOT NULL
         )
     """)
     conn.commit()
+
+    # ✅ MIGRAÇÃO SEGURA (bancos antigos)
+    try:
+        cur.execute("PRAGMA table_info(machine_config)")
+        cols = [r[1] for r in cur.fetchall()]
+
+        if "unidade_1" not in cols:
+            cur.execute("ALTER TABLE machine_config ADD COLUMN unidade_1 TEXT")
+        if "unidade_2" not in cols:
+            cur.execute("ALTER TABLE machine_config ADD COLUMN unidade_2 TEXT")
+        if "conv_m_por_pcs" not in cols:
+            cur.execute("ALTER TABLE machine_config ADD COLUMN conv_m_por_pcs REAL")
+
+        conn.commit()
+    except Exception:
+        pass
+
     conn.close()
 
 
@@ -36,8 +59,19 @@ def _load_machine_config(machine_id: str):
 
     conn = get_db()
     cur = conn.cursor()
+
+    # ✅ agora lê também unidade_1/unidade_2/conv_m_por_pcs
     cur.execute("""
-        SELECT meta_turno, turno_inicio, turno_fim, rampa_percentual, horas_turno_json, meta_por_hora_json
+        SELECT
+            meta_turno,
+            turno_inicio,
+            turno_fim,
+            rampa_percentual,
+            horas_turno_json,
+            meta_por_hora_json,
+            unidade_1,
+            unidade_2,
+            conv_m_por_pcs
         FROM machine_config
         WHERE machine_id=?
         LIMIT 1
@@ -75,6 +109,17 @@ def _load_machine_config(machine_id: str):
     except Exception:
         meta_por_hora = []
 
+    unidade_1 = row[6] if row[6] not in ("", None) else None
+    unidade_2 = row[7] if row[7] not in ("", None) else None
+
+    # conversão default = 1.0
+    try:
+        conv = float(row[8]) if row[8] is not None else 1.0
+        if conv <= 0:
+            conv = 1.0
+    except Exception:
+        conv = 1.0
+
     return {
         "meta_turno": meta_turno,
         "turno_inicio": turno_inicio,
@@ -82,6 +127,9 @@ def _load_machine_config(machine_id: str):
         "rampa_percentual": rampa,
         "horas_turno": horas_turno,
         "meta_por_hora": meta_por_hora,
+        "unidade_1": unidade_1,
+        "unidade_2": unidade_2,
+        "conv_m_por_pcs": conv,
     }
 
 
@@ -152,7 +200,6 @@ def get_machine(machine_id: str):
             primeiro_update_pendente = False
         else:
             # 🔒 Máquina recém-criada / sem baseline persistido:
-            # nasce "zerada" e marcada como pendente, para evitar números absurdos
             ultimo_dia = dia_operacional_ref_str(agora)
             baseline_diario = 0
             esp_absoluto = 0
@@ -177,7 +224,6 @@ def get_machine(machine_id: str):
             "baseline_diario": baseline_diario,
             "baseline_hora": 0,
 
-            # 🔒 Enquanto estiver pendente, a tela deve enxergar 0
             "producao_turno": 0,
             "producao_turno_anterior": 0,
 
@@ -193,11 +239,9 @@ def get_machine(machine_id: str):
             "ultimo_dia": ultimo_dia,
             "reset_executado_hoje": False,
 
-            # ✅ cache do baseline diário (machine_calc usa isso)
             "_bd_dia_ref": bd_dia_ref,
             "_bd_esp_last": bd_esp_last,
 
-            # ✅ novo: trava visual até receber 1º update válido
             "_primeiro_update_pendente": primeiro_update_pendente,
         }
 
@@ -210,5 +254,10 @@ def get_machine(machine_id: str):
             machine_data[machine_id]["rampa_percentual"] = cfg.get("rampa_percentual", 0) or 0
             machine_data[machine_id]["horas_turno"] = cfg.get("horas_turno") or []
             machine_data[machine_id]["meta_por_hora"] = cfg.get("meta_por_hora") or []
+
+            # ✅ unidades e conversão persistidas
+            machine_data[machine_id]["unidade_1"] = cfg.get("unidade_1")
+            machine_data[machine_id]["unidade_2"] = cfg.get("unidade_2")
+            machine_data[machine_id]["conv_m_por_pcs"] = cfg.get("conv_m_por_pcs", 1.0) or 1.0
 
     return machine_data[machine_id]
