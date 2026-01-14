@@ -1,10 +1,15 @@
 from flask import Blueprint, render_template, request, redirect, url_for
 from datetime import datetime
+import re
 
 from modules.db_indflow import get_db
 
 devices_bp = Blueprint("devices", __name__, template_folder="templates")
 
+
+# ============================================================
+# HELPERS
+# ============================================================
 
 def _ensure_devices_table(conn):
     # Tabela mínima para cadastro/vínculo de devices (MAC = device_id)
@@ -20,15 +25,30 @@ def _ensure_devices_table(conn):
 
 
 def _norm_device_id(v: str) -> str:
-    # Aceita MAC com ":" e "-" e normaliza (mantém hex + sem separadores)
+    """
+    Normaliza MAC:
+    - remove ':' e '-'
+    - uppercase
+    """
     s = (v or "").strip().upper()
     s = s.replace(":", "").replace("-", "")
     return s
 
 
+def _is_valid_mac(v: str) -> bool:
+    """
+    MAC válido = exatamente 12 caracteres hexadecimais
+    """
+    return bool(re.fullmatch(r"[0-9A-F]{12}", v or ""))
+
+
 def _norm_machine_id(v: str) -> str:
     return (v or "").strip().lower()
 
+
+# ============================================================
+# ROUTES
+# ============================================================
 
 @devices_bp.route("/", methods=["GET"])
 def home():
@@ -44,7 +64,6 @@ def home():
 
     devices = []
     for r in rows:
-        # sqlite3.Row ou tuple
         try:
             device_id = r["device_id"]
             machine_id = r["machine_id"]
@@ -65,11 +84,20 @@ def home():
 
 @devices_bp.route("/link", methods=["POST"])
 def link_device():
-    device_id = _norm_device_id(request.form.get("device_id"))
-    machine_id = _norm_machine_id(request.form.get("machine_id"))
+    raw_device_id = request.form.get("device_id")
+    raw_machine_id = request.form.get("machine_id")
 
-    if not device_id or not machine_id:
-        # sem flash pra não exigir SECRET_KEY; só volta
+    device_id = _norm_device_id(raw_device_id)
+    machine_id = _norm_machine_id(raw_machine_id)
+
+    # ========================================================
+    # REGRA ESTRUTURAL: DEVICE PRECISA SER MAC VÁLIDO
+    # ========================================================
+    if not device_id or not _is_valid_mac(device_id):
+        # Bloqueia qualquer tentativa de usar machine_id como device
+        return redirect(url_for("devices.home"))
+
+    if not machine_id:
         return redirect(url_for("devices.home"))
 
     db = get_db()
@@ -77,19 +105,28 @@ def link_device():
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Upsert simples: cria se não existir, senão atualiza machine_id
-    cur = db.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,))
+    cur = db.execute(
+        "SELECT device_id FROM devices WHERE device_id = ?",
+        (device_id,)
+    )
     exists = cur.fetchone() is not None
 
     if not exists:
         db.execute(
-            "INSERT INTO devices (device_id, machine_id, alias, last_seen) VALUES (?, ?, ?, ?)",
+            """
+            INSERT INTO devices (device_id, machine_id, alias, last_seen)
+            VALUES (?, ?, ?, ?)
+            """,
             (device_id, machine_id, None, now),
         )
     else:
         db.execute(
-            "UPDATE devices SET machine_id = ? WHERE device_id = ?",
-            (machine_id, device_id),
+            """
+            UPDATE devices
+            SET machine_id = ?, last_seen = ?
+            WHERE device_id = ?
+            """,
+            (machine_id, now, device_id),
         )
 
     db.commit()
