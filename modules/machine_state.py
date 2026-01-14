@@ -87,7 +87,6 @@ def _load_machine_config(machine_id: str):
 
 def _load_baseline_diario_state(machine_id: str):
     """
-    ✅ Evita 'ancorar 0' após deploy.
     Carrega do SQLite o último estado conhecido do dia operacional:
       - dia_ref
       - baseline_esp
@@ -143,18 +142,23 @@ def get_machine(machine_id: str):
 
         # ✅ Fonte da verdade pós-deploy: baseline_diario (se existir)
         st = _load_baseline_diario_state(machine_id)
+
         if st:
             ultimo_dia = st["dia_ref"]
             baseline_diario = st["baseline_esp"]
             esp_absoluto = st["esp_last"]
             bd_dia_ref = st["dia_ref"]
             bd_esp_last = st["esp_last"]
+            primeiro_update_pendente = False
         else:
+            # 🔒 Máquina recém-criada / sem baseline persistido:
+            # nasce "zerada" e marcada como pendente, para evitar números absurdos
             ultimo_dia = dia_operacional_ref_str(agora)
             baseline_diario = 0
             esp_absoluto = 0
             bd_dia_ref = None
             bd_esp_last = None
+            primeiro_update_pendente = True
 
         machine_data[machine_id] = {
             "nome": machine_id.upper(),
@@ -169,11 +173,11 @@ def get_machine(machine_id: str):
             "unidade_2": None,
             "conv_m_por_pcs": 1.0,
 
-            # ✅ nasce do DB quando possível (evita ancorar baseline em 0 no status)
             "esp_absoluto": esp_absoluto,
             "baseline_diario": baseline_diario,
             "baseline_hora": 0,
 
+            # 🔒 Enquanto estiver pendente, a tela deve enxergar 0
             "producao_turno": 0,
             "producao_turno_anterior": 0,
 
@@ -186,13 +190,15 @@ def get_machine(machine_id: str):
             "percentual_turno": 0,
             "tempo_medio_min_por_peca": None,
 
-            # ✅ string YYYY-MM-DD
             "ultimo_dia": ultimo_dia,
             "reset_executado_hoje": False,
 
             # ✅ cache do baseline diário (machine_calc usa isso)
             "_bd_dia_ref": bd_dia_ref,
             "_bd_esp_last": bd_esp_last,
+
+            # ✅ novo: trava visual até receber 1º update válido
+            "_primeiro_update_pendente": primeiro_update_pendente,
         }
 
         # Carrega config persistida (se existir) e aplica no estado
