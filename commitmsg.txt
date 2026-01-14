@@ -1,4 +1,5 @@
-﻿feat(machine): adiciona acumulador de produção/tempo fora do turno (não programado)
+﻿feat(machine): contabiliza produção/tempo fora do turno e corrige ritmo médio
 
-- Novo módulo modules/machine_calc_nao_programado.py
-- Guarda np_producao e np_minutos no dict da máquina, com janela ativa fora do turno
+- Chama update_nao_programado() em atualizar_producao_hora()
+- Mantém hora programada zerada fora do turno, mas acumula np_producao/np_minutos
+- Ritmo médio (min/peça) agora considera programado + não programado
