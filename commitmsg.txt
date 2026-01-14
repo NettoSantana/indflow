@@ -1,5 +1,5 @@
-﻿fix: nao perder producao quando wifi cai (backfill simples)
+﻿fix(machine): anchor baseline on first update for new machines and use device_helpers
 
-- detecta pulo de hora (idx salta >=2)
-- preenche horas intermediarias com 0 e joga delta acumulado na hora atual
-- evita horas zeradas/nao contabilizadas apos retorno do ESP
+- Use modules/machine/device_helpers.py for MAC + last_seen + device->machine lookup
+- On first update without baseline for the day, set baseline_esp=esp_absoluto and zero logical production
+- Keep all existing routes intact
