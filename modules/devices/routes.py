@@ -111,19 +111,17 @@ def link_device():
 
     now = _now_str()
 
-    cur = db.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,))
-    exists = cur.fetchone() is not None
-
-    if not exists:
-        db.execute(
-            "INSERT INTO devices (device_id, machine_id, alias, last_seen) VALUES (?, ?, ?, ?)",
-            (device_id, machine_id, None, now),
-        )
-    else:
-        db.execute(
-            "UPDATE devices SET machine_id = ?, last_seen = ? WHERE device_id = ?",
-            (machine_id, now, device_id),
-        )
+    # UPSERT robusto:
+    # - cria se não existir
+    # - atualiza sempre se existir
+    # - preserva alias existente (não sobrescreve)
+    db.execute("""
+        INSERT INTO devices (device_id, machine_id, alias, last_seen)
+        VALUES (?, ?, NULL, ?)
+        ON CONFLICT(device_id) DO UPDATE SET
+          machine_id = excluded.machine_id,
+          last_seen  = excluded.last_seen
+    """, (device_id, machine_id, now))
 
     db.commit()
     return redirect(url_for("devices.home"))
