@@ -1,6 +1,5 @@
 # modules/machine_routes.py
 import os
-import re
 from flask import Blueprint, request, jsonify, render_template
 from datetime import datetime, timedelta
 
@@ -22,6 +21,13 @@ from modules.machine_calc import (
 
 from modules.repos.machine_config_repo import upsert_machine_config
 from modules.repos.refugo_repo import load_refugo_24, upsert_refugo
+
+# ✅ helpers de device (já criado por você)
+from modules.machine.device_helpers import (
+    norm_device_id,
+    touch_device_seen,
+    get_machine_from_device,
+)
 
 machine_bp = Blueprint("machine_bp", __name__)
 
@@ -61,104 +67,46 @@ def _admin_token_ok() -> bool:
     return received == expected
 
 
-# ============================================================
-# DEVICES (ESP) — MAC = CPF
-# ============================================================
-
-def _norm_device_id(v: str) -> str:
-    """
-    Normaliza MAC de forma ÚNICA no sistema:
-    - extrai exatamente 12 caracteres HEX (0-9A-F)
-    - retorna "" se não achar
-    Aceita formatos: AA:BB:CC:DD:EE:FF, AA-BB-..., AABBCCDDEEFF
-    e também strings “sujas” (a função caça o trecho hex).
-    """
-    s = (v or "").strip().upper()
-    if not s:
-        return ""
-
-    # remove separadores comuns para facilitar
-    s2 = s.replace(":", "").replace("-", "").replace(" ", "")
-
-    # procura um bloco de 12 hex em qualquer lugar
-    m = re.search(r"([0-9A-F]{12})", s2)
-    return m.group(1) if m else ""
-
-
-def _ensure_devices_table(conn):
-    # Segurança extra: mesmo que init_db não tenha rodado ainda
+def _ensure_baseline_table(conn):
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS devices (
-            device_id TEXT PRIMARY KEY,
-            machine_id TEXT,
-            alias TEXT,
-            created_at TEXT,
-            last_seen TEXT
+        CREATE TABLE IF NOT EXISTS baseline_diario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            dia_ref TEXT NOT NULL,
+            baseline_esp INTEGER NOT NULL,
+            esp_last INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
         )
+    """)
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
+        ON baseline_diario(machine_id, dia_ref)
     """)
     conn.commit()
 
 
-def _touch_device_seen(device_id: str) -> None:
-    """
-    Registra 'last_seen' do device SEM NUNCA apagar:
-    - machine_id (vínculo)
-    - alias (apelido)
-
-    Usa UPSERT para ser robusto.
-    """
-    if not device_id:
-        return
-
-    conn = get_db()
+def _has_baseline_for_day(conn, machine_id: str, dia_ref: str) -> bool:
     try:
-        _ensure_devices_table(conn)
-
-        now_iso = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
-
-        # UPSERT:
-        # - se não existir: cria com machine_id/alias NULL
-        # - se existir: atualiza apenas last_seen (preserva machine_id/alias/created_at)
-        conn.execute("""
-            INSERT INTO devices (device_id, machine_id, alias, created_at, last_seen)
-            VALUES (?, NULL, NULL, ?, ?)
-            ON CONFLICT(device_id) DO UPDATE SET
-              last_seen = excluded.last_seen
-        """, (device_id, now_iso, now_iso))
-
-        conn.commit()
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-
-def _get_machine_from_device(device_id: str):
-    if not device_id:
-        return None
-
-    conn = get_db()
-    try:
-        _ensure_devices_table(conn)
         cur = conn.execute(
-            "SELECT machine_id FROM devices WHERE device_id = ?",
-            (device_id,),
+            "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? LIMIT 1",
+            (machine_id, dia_ref),
         )
-        row = cur.fetchone()
-        if not row:
-            return None
-        try:
-            mid = row["machine_id"]
-        except Exception:
-            mid = row[0]
-        mid = (mid or "").strip()
-        return _norm_machine_id(mid) if mid else None
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, updated_at: str):
+    """
+    Ancora baseline inicial para máquina nova / primeiro vínculo:
+    baseline_esp = esp_abs atual
+    esp_last     = esp_abs atual
+    """
+    conn.execute("""
+        INSERT OR IGNORE INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
+    conn.commit()
 
 
 # ============================================================
@@ -291,21 +239,21 @@ def configurar_maquina():
 
 
 # ============================================================
-# UPDATE ESP
+# UPDATE ESP  ✅ AQUI ESTÁ A REGRA DO "ZERAR AO VINCULAR"
 # ============================================================
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
     data = request.get_json() or {}
 
     # 1) MAC do ESP (CPF)
-    device_id = _norm_device_id(data.get("mac") or data.get("device_id") or "")
+    device_id = norm_device_id(data.get("mac") or data.get("device_id") or "")
     if device_id:
-        _touch_device_seen(device_id)
+        touch_device_seen(device_id)
 
     # 2) Resolve machine_id: se device estiver vinculado, ele manda.
-    linked_machine = _get_machine_from_device(device_id) if device_id else None
+    linked_machine = get_machine_from_device(device_id) if device_id else None
     if linked_machine:
-        machine_id = linked_machine
+        machine_id = _norm_machine_id(linked_machine)
     else:
         machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
 
@@ -314,8 +262,35 @@ def update_machine():
     verificar_reset_diario(m, machine_id)
 
     m["status"] = data.get("status", "DESCONHECIDO")
-    m["esp_absoluto"] = int(data["producao_turno"])
+    m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
 
+    # ========================================================
+    # ✅ REGRA: PRIMEIRO UPDATE REAL (MÁQUINA NOVA SEM BASELINE)
+    # Ancora baseline no valor atual do contador do ESP e zera produção.
+    # Isso evita "máquina nova nascer com milhões".
+    # ========================================================
+    baseline_initialized = False
+    try:
+        agora = now_bahia()
+        dia_ref = dia_operacional_ref_str(agora)
+        updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = get_db()
+        try:
+            _ensure_baseline_table(conn)
+
+            # se ainda não existe baseline para este dia/máquina, ancorar agora
+            if not _has_baseline_for_day(conn, machine_id, dia_ref):
+                _insert_baseline_for_day(conn, machine_id, dia_ref, int(m["esp_absoluto"]), updated_at)
+                baseline_initialized = True
+        finally:
+            conn.close()
+
+    except Exception:
+        # se der qualquer problema aqui, segue fluxo normal
+        baseline_initialized = False
+
+    # carrega baseline (agora deve existir se inicializamos)
     carregar_baseline_diario(m, machine_id)
 
     producao_atual = max(int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0), 0)
@@ -332,7 +307,8 @@ def update_machine():
         "message": "OK",
         "machine_id": machine_id,
         "device_id": device_id or None,
-        "linked_machine": linked_machine or None
+        "linked_machine": linked_machine or None,
+        "baseline_initialized": bool(baseline_initialized),
     })
 
 
