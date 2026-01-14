@@ -1,5 +1,5 @@
-﻿fix(config): persistir unidade_2 e conversão no SQLite (machine_config)
+﻿fix(config): carregar unidade_1/unidade_2/conv_m_por_pcs do SQLite no boot
 
-- Adiciona colunas unidade_1, unidade_2, conv_m_por_pcs na tabela machine_config
-- Migração segura via PRAGMA table_info + ALTER TABLE
-- Upsert agora grava/atualiza esses campos
+- machine_state garante schema compatível com machine_config_repo
+- _load_machine_config passa a selecionar unidade_1/unidade_2/conv_m_por_pcs
+- get_machine aplica esses campos ao estado em memória
