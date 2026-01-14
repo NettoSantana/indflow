@@ -1,5 +1,5 @@
-﻿fix(machine): salvar campo run vindo do ESP e expor no /machine/status
+﻿fix(machine): acumular tempo não programado com heartbeat (segundos -> minutos)
 
-- Persiste m["run"] no /machine/update (payload do ESP)
-- Garante run no JSON de /machine/status (evita undefined)
-- Destrava contagem de np_minutos fora do turno
+- Evita round(dt/60) que zerava np_minutos com heartbeat de 5s
+- Adiciona acumulador m["_np_secs"] e converte para minutos quando >= 60s
+- Usa run=1 como sinal principal de atividade fora do turno
