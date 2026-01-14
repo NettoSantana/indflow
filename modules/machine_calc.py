@@ -210,8 +210,22 @@ def atualizar_producao_hora(m):
         upsert_hora,
     )
 
+    # ============================================================
+    # ✅ NOVO: acumular "não programado" (fora do turno)
+    # ============================================================
+    agora = now_bahia()
     idx = calcular_ultima_hora_idx(m)
+    dentro_turno = idx is not None
 
+    try:
+        from modules.machine_calc_nao_programado import update_nao_programado
+        update_nao_programado(m, dentro_turno=dentro_turno, agora=agora)
+    except Exception:
+        # não quebra o fluxo principal se o módulo novo não estiver disponível por algum motivo
+        pass
+
+    # Fora do turno: continua zerando a HORA (programada), mas NÃO ignora mais:
+    # porque o update_nao_programado acima já acumulou o que tiver de produção/tempo fora do turno.
     if idx is None:
         m["ultima_hora"] = None
         m["producao_hora"] = 0
@@ -219,7 +233,6 @@ def atualizar_producao_hora(m):
         return
 
     machine_id = _get_machine_id_from_m(m)
-    agora = now_bahia()
 
     # ✅ CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
@@ -482,6 +495,13 @@ def reset_contexto(m, machine_id):
     m["_bd_dia_ref"] = None
     m["_bd_esp_last"] = None
 
+    # ✅ NOVO: reset também das métricas não programadas (mantém simples e previsível)
+    m["np_producao"] = 0
+    m["np_minutos"] = 0
+    m["_np_active"] = False
+    m["_np_last_ts"] = None
+    m["_np_last_esp"] = int(m.get("esp_absoluto", 0) or 0)
+
     # ✅ persistir baseline do dia operacional no reset manual
     _persistir_baseline_diario(machine_id, int(m.get("esp_absoluto", 0) or 0))
 
@@ -503,29 +523,48 @@ def verificar_reset_diario(m, machine_id):
 
 
 def calcular_tempo_medio(m):
+    """
+    Ritmo médio (min/peça) do card.
+    ✅ Agora considera:
+      - produção programada (producao_turno)
+      - + produção não programada (np_producao)
+      - minutos desde início do turno (quando houver turno_inicio)
+      - + minutos não programados (np_minutos)
+    """
     try:
-        produzido = int(m.get("producao_turno", 0) or 0)
+        prod_turno = int(m.get("producao_turno", 0) or 0)
+        prod_np = int(m.get("np_producao", 0) or 0)
+        produzido_total = prod_turno + prod_np
+
         inicio_str = m.get("turno_inicio")
+        minutos_np = int(m.get("np_minutos", 0) or 0)
 
-        if produzido > 0 and inicio_str:
-            agora = now_bahia()
-            inicio_dt = datetime.strptime(inicio_str, "%H:%M")
-
-            inicio_dt = inicio_dt.replace(
-                year=agora.year,
-                month=agora.month,
-                day=agora.day,
-                tzinfo=TZ_BAHIA
-            )
-
-            if agora < inicio_dt:
-                inicio_dt -= timedelta(days=1)
-
-            minutos = (agora - inicio_dt).total_seconds() / 60
-            minutos = max(minutos, 1)
-            m["tempo_medio_min_por_peca"] = round(minutos / produzido, 2)
-        else:
+        if produzido_total <= 0:
             m["tempo_medio_min_por_peca"] = None
+            return
+
+        agora = now_bahia()
+
+        # minutos programados: só se tiver turno_inicio configurado
+        minutos_prog = 0
+        if inicio_str:
+            try:
+                inicio_dt = datetime.strptime(inicio_str, "%H:%M")
+                inicio_dt = inicio_dt.replace(
+                    year=agora.year,
+                    month=agora.month,
+                    day=agora.day,
+                    tzinfo=TZ_BAHIA
+                )
+                if agora < inicio_dt:
+                    inicio_dt -= timedelta(days=1)
+
+                minutos_prog = int(max((agora - inicio_dt).total_seconds() / 60, 0))
+            except Exception:
+                minutos_prog = 0
+
+        minutos_total = max(minutos_prog + minutos_np, 1)
+        m["tempo_medio_min_por_peca"] = round(minutos_total / produzido_total, 2)
     except Exception:
         m["tempo_medio_min_por_peca"] = None
 
