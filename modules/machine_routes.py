@@ -264,6 +264,10 @@ def update_machine():
     m["status"] = data.get("status", "DESCONHECIDO")
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
 
+    # ✅ FIX: persistir RUN (1/0) vindo do ESP no estado da máquina
+    # Isso destrava a contagem de np_minutos fora do turno.
+    m["run"] = _safe_int(data.get("run", 0), 0)
+
     # ========================================================
     # ✅ REGRA: PRIMEIRO UPDATE REAL (MÁQUINA NOVA SEM BASELINE)
     # Ancora baseline no valor atual do contador do ESP e zera produção.
@@ -389,6 +393,10 @@ def machine_status():
 
     dia_ref = dia_operacional_ref_str(now_bahia())
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
+
+    # ✅ garantir run no JSON (evita undefined no frontend)
+    if "run" not in m:
+        m["run"] = 0
 
     try:
         hora_atual = int(now_bahia().hour)
