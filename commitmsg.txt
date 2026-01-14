@@ -1,4 +1,5 @@
-﻿fix(machine): contar minutos não programados por atividade no intervalo (sem depender de RUN)
+﻿fix(machine): salvar campo run vindo do ESP e expor no /machine/status
 
-- Auto/Manual não é RUN: tempo fora do turno passa a somar quando delta>0 no intervalo
-- Mantém produção np_producao por delta do esp_absoluto
+- Persiste m["run"] no /machine/update (payload do ESP)
+- Garante run no JSON de /machine/status (evita undefined)
+- Destrava contagem de np_minutos fora do turno
