@@ -1,5 +1,5 @@
-﻿feat(card): mostrar produção da hora mesmo fora do turno (usa np_producao)
+﻿fix(config): persistir unidade_2 e conversão no SQLite (machine_config)
 
-- Em /machine/status: se ultima_hora is None, exibe np_producao em producao_hora
-- Mantém meta da hora = 0 e percentual_hora = 0
-- Não mistura NP com refugo/meta por hora (somente visual do card)
+- Adiciona colunas unidade_1, unidade_2, conv_m_por_pcs na tabela machine_config
+- Migração segura via PRAGMA table_info + ALTER TABLE
+- Upsert agora grava/atualiza esses campos
