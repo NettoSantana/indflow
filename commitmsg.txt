@@ -1,5 +1,4 @@
-﻿fix(machine): anchor baseline on first update for new machines and use device_helpers
+﻿feat(machine): adiciona acumulador de produção/tempo fora do turno (não programado)
 
-- Use modules/machine/device_helpers.py for MAC + last_seen + device->machine lookup
-- On first update without baseline for the day, set baseline_esp=esp_absoluto and zero logical production
-- Keep all existing routes intact
+- Novo módulo modules/machine_calc_nao_programado.py
+- Guarda np_producao e np_minutos no dict da máquina, com janela ativa fora do turno
