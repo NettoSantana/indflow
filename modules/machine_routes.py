@@ -350,6 +350,70 @@ def update_machine():
 
 
 # ============================================================
+# ADMIN - RESET SOMENTE DA HORA (REANCORA BASELINE_HORA)
+#   ✅ não apaga dia / histórico
+#   ✅ evita "explodir" peça da hora sem hard-reset
+# ============================================================
+@machine_bp.route("/admin/reset-hour", methods=["POST"])
+def admin_reset_hour():
+    if not _admin_token_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    data = request.get_json() or {}
+    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
+    m = get_machine(machine_id)
+
+    # tenta garantir baseline diário carregado (não quebra se falhar)
+    try:
+        carregar_baseline_diario(m, machine_id)
+    except Exception:
+        pass
+
+    # calcula producao_turno atual (relativo) para ancorar baseline_hora
+    try:
+        prod_turno = int(m.get("producao_turno", 0) or 0)
+    except Exception:
+        prod_turno = 0
+
+    if prod_turno <= 0:
+        try:
+            esp_abs = int(m.get("esp_absoluto", 0) or 0)
+        except Exception:
+            esp_abs = 0
+        try:
+            base_d = int(m.get("baseline_diario", 0) or 0)
+        except Exception:
+            base_d = 0
+        prod_turno = max(0, esp_abs - base_d)
+
+    # reancora a hora atual
+    idx = calcular_ultima_hora_idx(m)
+    m["ultima_hora"] = idx
+    m["baseline_hora"] = int(prod_turno)
+    m["producao_hora"] = 0
+    m["percentual_hora"] = 0
+
+    # limpa hora atual no vetor (se existir)
+    try:
+        if isinstance(idx, int) and "producao_por_hora" in m and isinstance(m.get("producao_por_hora"), list):
+            if 0 <= idx < len(m["producao_por_hora"]):
+                m["producao_por_hora"][idx] = 0
+    except Exception:
+        pass
+
+    # força recarregar/reescrever hora no próximo ciclo
+    m["_ph_loaded"] = False
+
+    return jsonify({
+        "ok": True,
+        "machine_id": machine_id,
+        "hora_idx": idx,
+        "baseline_hora": int(m.get("baseline_hora", 0) or 0),
+        "note": "Hora resetada. Produção da hora volta a contar a partir de agora.",
+    })
+
+
+# ============================================================
 # RESET MANUAL
 # ============================================================
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
@@ -433,6 +497,11 @@ def machine_status():
 
     # ========================================================
     # ✅ CARD HORA FORA DO TURNO (visual do card, sem mexer em meta/refugo)
+    # Regra:
+    #   - se estiver fora do turno (ultima_hora is None),
+    #     mostra np_producao no "Produzido da Hora" do card
+    #   - percentual_hora fica 0 (meta da hora é 0)
+    #   - producao_hora_liquida = producao_hora (fora do turno não tem refugo-hora)
     # ========================================================
     try:
         np_prod = int(m.get("np_producao", 0) or 0)
@@ -442,10 +511,13 @@ def machine_status():
     if m.get("ultima_hora") is None and np_prod > 0:
         m["producao_hora"] = np_prod
         m["percentual_hora"] = 0
+        # flag opcional pra UI (não quebra nada se ignorar)
         m["fora_turno"] = True
+        # fora do turno: líquido = bruto (não aplica refugo hora)
         m["producao_hora_liquida"] = np_prod
         return jsonify(m)
 
+    # fluxo normal (dentro do turno): calcula líquido aplicando refugo da hora atual
     try:
         hora_atual = int(now_bahia().hour)
     except Exception:
