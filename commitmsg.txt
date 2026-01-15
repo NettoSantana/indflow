@@ -1,5 +1,6 @@
-﻿feat(admin): endpoint bootstrap para criar cliente, usuario admin e api key
+﻿feat(auth): protege /machine/update com X-API-Key (cliente por api_key_hash)
 
-- cria cliente com api_key_hash
-- cria usuario admin (email/senha)
-- retorna api_key apenas uma vez
+- exige header X-API-Key no /machine/update
+- valida SHA256(api_key) contra clientes.api_key_hash
+- retorna 401 se inválida/inativa
+- inclui cliente_id na resposta
