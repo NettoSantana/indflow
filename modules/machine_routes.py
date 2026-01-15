@@ -98,6 +98,140 @@ def _get_cliente_from_api_key() -> dict | None:
         conn.close()
 
 
+# ============================================================
+# MULTI-TENANT (DEVICES) — helpers locais
+# ============================================================
+def _ensure_devices_table_min(conn):
+    """
+    Segurança: garante tabela devices e colunas cliente_id/created_at.
+    (No ideal, isso fica em init_db; aqui é só para não quebrar ambientes antigos.)
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS devices (
+            device_id TEXT PRIMARY KEY,
+            machine_id TEXT,
+            alias TEXT,
+            last_seen TEXT
+        )
+    """)
+
+    # tenta adicionar colunas (não quebra se já existirem)
+    try:
+        conn.execute("ALTER TABLE devices ADD COLUMN cliente_id TEXT")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE devices ADD COLUMN created_at TEXT")
+    except Exception:
+        pass
+
+    # índices (não quebra se já existir)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_devices_cliente_id ON devices(cliente_id)")
+    except Exception:
+        pass
+
+    conn.commit()
+
+
+def _device_owner_cliente_id(conn, device_id: str) -> str | None:
+    try:
+        cur = conn.execute("SELECT cliente_id FROM devices WHERE device_id = ? LIMIT 1", (device_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return (row["cliente_id"] if isinstance(row, sqlite3.Row) else row[0])  # type: ignore
+    except Exception:
+        # fallback seguro
+        try:
+            cur = conn.execute("SELECT cliente_id FROM devices WHERE device_id = ? LIMIT 1", (device_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            try:
+                return row["cliente_id"]
+            except Exception:
+                return row[0]
+        except Exception:
+            return None
+
+
+def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str) -> bool:
+    """
+    Garante que o device (MAC) fique amarrado ao cliente.
+    Regra:
+      - se device já pertence a outro cliente -> bloqueia (False)
+      - se não existe -> cria com cliente_id + created_at + last_seen
+      - se existe sem cliente_id -> seta cliente_id
+      - sempre atualiza last_seen
+    """
+    conn = get_db()
+    try:
+        _ensure_devices_table_min(conn)
+
+        cur = conn.execute("SELECT device_id, cliente_id FROM devices WHERE device_id = ? LIMIT 1", (device_id,))
+        row = cur.fetchone()
+
+        if row is None:
+            conn.execute("""
+                INSERT INTO devices (device_id, cliente_id, machine_id, alias, created_at, last_seen)
+                VALUES (?, ?, NULL, NULL, ?, ?)
+            """, (device_id, cliente_id, now_str, now_str))
+            conn.commit()
+            return True
+
+        try:
+            owner = row["cliente_id"]
+        except Exception:
+            owner = row[1] if len(row) > 1 else None
+
+        # se já tem dono e é diferente => bloqueia
+        if owner and owner != cliente_id:
+            return False
+
+        # atualiza last_seen e seta cliente_id se estiver vazio
+        conn.execute("""
+            UPDATE devices
+               SET last_seen = ?,
+                   cliente_id = COALESCE(cliente_id, ?)
+             WHERE device_id = ?
+        """, (now_str, cliente_id, device_id))
+        conn.commit()
+        return True
+
+    finally:
+        conn.close()
+
+
+def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | None:
+    """
+    Resolve machine_id vinculado ao device, mas garantindo o tenant.
+    """
+    conn = get_db()
+    try:
+        _ensure_devices_table_min(conn)
+        cur = conn.execute("""
+            SELECT machine_id
+              FROM devices
+             WHERE device_id = ?
+               AND cliente_id = ?
+             LIMIT 1
+        """, (device_id, cliente_id))
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            return (row["machine_id"] or None)
+        except Exception:
+            return (row[0] or None)
+    finally:
+        conn.close()
+
+
+# ============================================================
+# BASELINE (agora com suporte a cliente_id quando existir)
+# ============================================================
 def _ensure_baseline_table(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS baseline_diario (
@@ -109,34 +243,63 @@ def _ensure_baseline_table(conn):
             updated_at TEXT NOT NULL
         )
     """)
+
+    # tenta adicionar cliente_id (migração leve)
+    try:
+        conn.execute("ALTER TABLE baseline_diario ADD COLUMN cliente_id TEXT")
+    except Exception:
+        pass
+
+    # índices (mantém o antigo e tenta criar o novo por cliente)
     conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
         ON baseline_diario(machine_id, dia_ref)
     """)
+    try:
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
+            ON baseline_diario(cliente_id, machine_id, dia_ref)
+        """)
+    except Exception:
+        pass
+
     conn.commit()
 
 
-def _has_baseline_for_day(conn, machine_id: str, dia_ref: str) -> bool:
+def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str | None) -> bool:
     try:
-        cur = conn.execute(
-            "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? LIMIT 1",
-            (machine_id, dia_ref),
-        )
+        # se tiver cliente_id, filtra
+        if cliente_id:
+            cur = conn.execute(
+                "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? AND cliente_id=? LIMIT 1",
+                (machine_id, dia_ref, cliente_id),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? LIMIT 1",
+                (machine_id, dia_ref),
+            )
         return cur.fetchone() is not None
     except Exception:
         return False
 
 
-def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, updated_at: str):
+def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, updated_at: str, cliente_id: str | None):
     """
     Ancora baseline inicial para máquina nova / primeiro vínculo:
     baseline_esp = esp_abs atual
     esp_last     = esp_abs atual
     """
-    conn.execute("""
-        INSERT OR IGNORE INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-    """, (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
+    if cliente_id:
+        conn.execute("""
+            INSERT OR IGNORE INTO baseline_diario (cliente_id, machine_id, dia_ref, baseline_esp, esp_last, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (cliente_id, machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
+    else:
+        conn.execute("""
+            INSERT OR IGNORE INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
     conn.commit()
 
 
@@ -286,10 +449,22 @@ def update_machine():
     # 1) MAC do ESP (CPF)
     device_id = norm_device_id(data.get("mac") or data.get("device_id") or "")
     if device_id:
-        touch_device_seen(device_id)
+        # atualiza last_seen (compat) — e amarra ao cliente (multi-tenant)
+        agora = now_bahia()
+        now_str = agora.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 2) Resolve machine_id: se device estiver vinculado, ele manda.
-    linked_machine = get_machine_from_device(device_id) if device_id else None
+        ok_owner = _upsert_device_for_cliente(device_id=device_id, cliente_id=cliente_id, now_str=now_str)
+        if not ok_owner:
+            return jsonify({"error": "device pertence a outro cliente"}), 403
+
+        # mantém o helper legado (não quebra)
+        try:
+            touch_device_seen(device_id)
+        except Exception:
+            pass
+
+    # 2) Resolve machine_id com filtro por cliente_id (evita “vazamento”)
+    linked_machine = _get_linked_machine_for_cliente(device_id, cliente_id) if device_id else None
     if linked_machine:
         machine_id = _norm_machine_id(linked_machine)
     else:
@@ -318,8 +493,8 @@ def update_machine():
         try:
             _ensure_baseline_table(conn)
 
-            if not _has_baseline_for_day(conn, machine_id, dia_ref):
-                _insert_baseline_for_day(conn, machine_id, dia_ref, int(m["esp_absoluto"]), updated_at)
+            if not _has_baseline_for_day(conn, machine_id, dia_ref, cliente_id):
+                _insert_baseline_for_day(conn, machine_id, dia_ref, int(m["esp_absoluto"]), updated_at, cliente_id)
                 baseline_initialized = True
         finally:
             conn.close()
@@ -351,8 +526,6 @@ def update_machine():
 
 # ============================================================
 # ADMIN - RESET SOMENTE DA HORA (REANCORA BASELINE_HORA)
-#   ✅ não apaga dia / histórico
-#   ✅ evita "explodir" peça da hora sem hard-reset
 # ============================================================
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
@@ -363,13 +536,11 @@ def admin_reset_hour():
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
-    # tenta garantir baseline diário carregado (não quebra se falhar)
     try:
         carregar_baseline_diario(m, machine_id)
     except Exception:
         pass
 
-    # calcula producao_turno atual (relativo) para ancorar baseline_hora
     try:
         prod_turno = int(m.get("producao_turno", 0) or 0)
     except Exception:
@@ -386,14 +557,12 @@ def admin_reset_hour():
             base_d = 0
         prod_turno = max(0, esp_abs - base_d)
 
-    # reancora a hora atual
     idx = calcular_ultima_hora_idx(m)
     m["ultima_hora"] = idx
     m["baseline_hora"] = int(prod_turno)
     m["producao_hora"] = 0
     m["percentual_hora"] = 0
 
-    # limpa hora atual no vetor (se existir)
     try:
         if isinstance(idx, int) and "producao_por_hora" in m and isinstance(m.get("producao_por_hora"), list):
             if 0 <= idx < len(m["producao_por_hora"]):
@@ -401,7 +570,6 @@ def admin_reset_hour():
     except Exception:
         pass
 
-    # força recarregar/reescrever hora no próximo ciclo
     m["_ph_loaded"] = False
 
     return jsonify({
@@ -491,18 +659,9 @@ def machine_status():
     dia_ref = dia_operacional_ref_str(now_bahia())
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
 
-    # ✅ garantir run no JSON (evita undefined no frontend)
     if "run" not in m:
         m["run"] = 0
 
-    # ========================================================
-    # ✅ CARD HORA FORA DO TURNO (visual do card, sem mexer em meta/refugo)
-    # Regra:
-    #   - se estiver fora do turno (ultima_hora is None),
-    #     mostra np_producao no "Produzido da Hora" do card
-    #   - percentual_hora fica 0 (meta da hora é 0)
-    #   - producao_hora_liquida = producao_hora (fora do turno não tem refugo-hora)
-    # ========================================================
     try:
         np_prod = int(m.get("np_producao", 0) or 0)
     except Exception:
@@ -511,13 +670,10 @@ def machine_status():
     if m.get("ultima_hora") is None and np_prod > 0:
         m["producao_hora"] = np_prod
         m["percentual_hora"] = 0
-        # flag opcional pra UI (não quebra nada se ignorar)
         m["fora_turno"] = True
-        # fora do turno: líquido = bruto (não aplica refugo hora)
         m["producao_hora_liquida"] = np_prod
         return jsonify(m)
 
-    # fluxo normal (dentro do turno): calcula líquido aplicando refugo da hora atual
     try:
         hora_atual = int(now_bahia().hour)
     except Exception:
