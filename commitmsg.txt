@@ -1,6 +1,5 @@
-﻿feat(auth): adicionar login web por sessão e proteger rotas do admin
+﻿feat(auth): proteger rotas de producao com login_required
 
-- cria /admin/login (form inline) e /admin/logout
-- adiciona decorator login_required e protege /admin/
-- /admin/bootstrap fica livre só no primeiro uso; depois exige admin logado
-- mantém token do ESP (API key) intacto
+- adiciona login_required em todas as rotas web de producao
+- nenhuma alteracao em calculos, memoria ou API
+- producao passa a exigir sessao valida
