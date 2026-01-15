@@ -1,5 +1,5 @@
-﻿fix(config): carregar unidade_1/unidade_2/conv_m_por_pcs do SQLite no boot
+﻿feat(auth): cria tabelas clientes e usuarios no indflow.db
 
-- machine_state garante schema compatível com machine_config_repo
-- _load_machine_config passa a selecionar unidade_1/unidade_2/conv_m_por_pcs
-- get_machine aplica esses campos ao estado em memória
+- adiciona clientes (api_key_hash, status, created_at)
+- adiciona usuarios (email unico, senha_hash, cliente_id, role)
+- inclui indexes para email e cliente_id
