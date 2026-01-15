@@ -66,6 +66,42 @@ def init_db():
     cur = conn.cursor()
 
     # ============================================================
+    # AUTH (V1) — CLIENTES + USUÁRIOS (1 cliente = 1 usuário por enquanto)
+    # ============================================================
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS clientes (
+            id TEXT PRIMARY KEY,                 -- UUID/slug interno
+            nome TEXT NOT NULL,
+            api_key_hash TEXT NOT NULL,          -- NUNCA salvar a api_key em texto puro
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id TEXT PRIMARY KEY,                 -- UUID interno
+            email TEXT NOT NULL,
+            senha_hash TEXT NOT NULL,            -- hash da senha (ex.: pbkdf2/bcrypt)
+            cliente_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'admin',
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_usuarios_email
+        ON usuarios(email)
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS ix_usuarios_cliente_id
+        ON usuarios(cliente_id)
+    """)
+
+    # ============================================================
     # 0) DEVICES (ESP) — MAC = CPF (device_id)
     # ============================================================
     cur.execute("""
