@@ -1,5 +1,3 @@
-﻿feat(auth): proteger modulo devices com login_required (mudanca minima)
+﻿feat(auth): proteger modulo ativos com login_required
 
-- adiciona import de login_required
-- aplica @login_required em todas as rotas do blueprint devices
-- nenhuma alteracao de logica, comentarios ou estrutura existente
+- adiciona @login_required na rota /ativos/
