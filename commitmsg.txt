@@ -1,3 +1,5 @@
-﻿feat(auth): proteger rotas de manutencao com login_required
+﻿feat(auth): proteger modulo devices com login_required (mudanca minima)
 
-- manutencao agora exige sessao valida
+- adiciona import de login_required
+- aplica @login_required em todas as rotas do blueprint devices
+- nenhuma alteracao de logica, comentarios ou estrutura existente
