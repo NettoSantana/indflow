@@ -1,6 +1,5 @@
-﻿feat(multitenant): amarrar ESP ao cliente via X-API-Key e proteger device por tenant
+﻿feat(multitenant): isolar calculos por cliente usando namespace cliente_id::machine_id
 
-- /machine/update resolve cliente pelo X-API-Key e grava device com cliente_id
-- bloqueia MAC que já pertence a outro cliente (403)
-- resolve vínculo device->machine filtrando por cliente_id
-- baseline inicial tenta usar cliente_id quando coluna existir (migração leve)
+- adiciona helper _scoped_machine_id
+- baseline/producao_horaria/producao_diaria passam a usar machine_id escopado
+- mantem contratos externos (machine_id visivel nao muda)
