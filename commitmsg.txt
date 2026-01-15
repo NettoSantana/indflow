@@ -1,4 +1,5 @@
-﻿feat(ui): esconder menu sem login e adicionar link de sair
+﻿feat(auth): login padrao admin e tela de login no layout IndFlow
 
-- base.html mostra apenas Login quando nao houver sessao
-- quando logado, exibe menus e link /admin/logout
+- adiciona admin@admin / Admin123 como admin inicial (uma unica vez)
+- cria usuario automaticamente se banco estiver vazio
+- nova tela de login com logo e visual alinhado ao IndFlow
