@@ -2,7 +2,7 @@
 import os
 import hashlib
 from flask import Blueprint, request, jsonify, render_template
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from modules.db_indflow import get_db
 from modules.machine_state import get_machine
@@ -15,8 +15,6 @@ from modules.machine_calc import (
     calcular_ultima_hora_idx,
     calcular_tempo_medio,
     aplicar_derivados_ml,
-    carregar_baseline_diario,
-    calcular_dia_ref_operacional,
     load_refugo_24,
     save_refugo_24,
     validar_horas_turno_config,
@@ -97,6 +95,22 @@ def _get_cliente_from_api_key() -> dict | None:
         return {"id": row["id"], "nome": row["nome"], "status": row["status"]}
     finally:
         conn.close()
+
+
+def _calcular_dia_ref_operacional() -> str:
+    """
+    Dia operacional com virada às 23:59 (regra simples e estável).
+    Retorna string YYYY-MM-DD.
+
+    Lógica:
+      - Considera hora UTC (Railway). Se você quiser Bahia (-03), ajustamos depois.
+      - Se agora >= 23:59, o dia_ref é o dia atual.
+      - Se agora < 23:59, o dia_ref é o dia atual também.
+    Observação: como "23:59" é praticamente no fim do dia, na prática o dia_ref
+    acaba sendo o mesmo dia. Mantemos essa função aqui pra não depender do machine_calc.
+    """
+    now = datetime.utcnow()
+    return now.strftime("%Y-%m-%d")
 
 
 def _ensure_baseline_table(conn):
@@ -278,7 +292,7 @@ def machine_status():
 
 
 # ============================================================
-# UPDATE ESP  ✅ AQUI ESTÁ A REGRA DO "ZERAR AO VINCULAR"
+# UPDATE ESP
 # ============================================================
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
@@ -306,7 +320,6 @@ def update_machine():
     m = get_machine(machine_id)
 
     # 3) Atualiza valores vindos do ESP
-    # (mantém seu comportamento atual)
     esp_absoluto = _safe_int(data.get("esp_absoluto"), None)
     if esp_absoluto is None:
         esp_absoluto = _safe_int(data.get("pulsos"), 0)
@@ -319,8 +332,8 @@ def update_machine():
     if estado is not None:
         m["rodando"] = 1 if str(estado).strip() in ("1", "true", "True", "rodando", "on") else 0
 
-    # 4) Dia ref operacional (23:59)
-    dia_ref = calcular_dia_ref_operacional()
+    # 4) Dia ref operacional
+    dia_ref = _calcular_dia_ref_operacional()
 
     # 5) Reset diário se necessário
     verificar_reset_diario(m)
@@ -331,7 +344,6 @@ def update_machine():
     try:
         _ensure_baseline_table(conn)
         if not _has_baseline_for_day(conn, machine_id, dia_ref):
-            # baseline do dia = esp_absoluto atual
             conn.execute("""
                 INSERT INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
                 VALUES (?, ?, ?, ?, ?)
@@ -342,7 +354,6 @@ def update_machine():
         conn.close()
 
     # 7) Atualiza no contexto da máquina
-    # (mantém seu comportamento atual)
     m["esp_absoluto"] = esp_absoluto
     m["updated_at"] = _now_iso()
 
@@ -404,7 +415,6 @@ def set_config():
     if meta_por_hora_json is None:
         meta_por_hora_json = "[]"
 
-    # validação leve
     try:
         validar_horas_turno_config(horas_turno_json)
     except Exception as e:
@@ -467,7 +477,7 @@ def get_config():
 @machine_bp.route("/machine/refugo24/get", methods=["GET"])
 def refugo24_get():
     machine_id = _norm_machine_id(request.args.get("machine_id") or "maquina01")
-    dia_ref = calcular_dia_ref_operacional()
+    dia_ref = _calcular_dia_ref_operacional()
     arr = load_refugo_24(machine_id, dia_ref)
     return jsonify({
         "machine_id": machine_id,
@@ -487,7 +497,7 @@ def refugo24_set():
     if not isinstance(items, list):
         return jsonify({"error": "items deve ser uma lista"}), 400
 
-    dia_ref = calcular_dia_ref_operacional()
+    dia_ref = _calcular_dia_ref_operacional()
     save_refugo_24(machine_id, dia_ref, items)
 
     total = _sum_refugo_24(machine_id, dia_ref)
