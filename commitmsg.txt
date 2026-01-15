@@ -1,5 +1,6 @@
-﻿feat(multitenant): isolar calculos por cliente usando namespace cliente_id::machine_id
+﻿feat(multitenant): baseline_repo com cliente_id nativo + migracao segura
 
-- adiciona helper _scoped_machine_id
-- baseline/producao_horaria/producao_diaria passam a usar machine_id escopado
-- mantem contratos externos (machine_id visivel nao muda)
+- adiciona cliente_id na tabela baseline_diario (ALTER TABLE se faltar)
+- cria unique index multi-tenant (cliente_id,machine_id,dia_ref)
+- cria unique index legado (machine_id,dia_ref) apenas quando cliente_id IS NULL
+- suporta compatibilidade com machine_id no formato cliente::maquina
