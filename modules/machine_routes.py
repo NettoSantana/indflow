@@ -16,7 +16,6 @@ from modules.machine_calc import (
     calcular_tempo_medio,
     aplicar_derivados_ml,
     carregar_baseline_diario,
-    normalizar_horas_turno,
     calcular_dia_ref_operacional,
     load_refugo_24,
     save_refugo_24,
