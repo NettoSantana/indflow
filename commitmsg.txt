@@ -1,4 +1,6 @@
-﻿chore(auth): adicionar SECRET_KEY via env para habilitar sessão
+﻿feat(auth): adicionar login web por sessão e proteger rotas do admin
 
-- adiciona app.config["SECRET_KEY"] lendo FLASK_SECRET_KEY
-- mantém fallback apenas para dev (inseguro)
+- cria /admin/login (form inline) e /admin/logout
+- adiciona decorator login_required e protege /admin/
+- /admin/bootstrap fica livre só no primeiro uso; depois exige admin logado
+- mantém token do ESP (API key) intacto
