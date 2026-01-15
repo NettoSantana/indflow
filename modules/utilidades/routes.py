@@ -2,10 +2,13 @@ from flask import Blueprint, render_template, request, jsonify
 from datetime import datetime
 from .data import utilidades_data
 
+from modules.admin.routes import login_required
+
 utilidades_bp = Blueprint("utilidades", __name__, template_folder="templates")
 
 # HOME — Lista de equipamentos
 @utilidades_bp.route("/")
+@login_required
 def home():
     return render_template("utilidades_home.html")
 
@@ -21,6 +24,7 @@ def status_utilidade():
 
 # TELA DE CONFIGURAÇÃO
 @utilidades_bp.route("/config/<machine_id>")
+@login_required
 def config(machine_id):
     return render_template("utilidades_config.html", machine_id=machine_id)
 
