@@ -1,5 +1,4 @@
-﻿feat(admin): adiciona reset leve da hora (/admin/reset-hour)
+﻿chore(auth): adicionar SECRET_KEY via env para habilitar sessão
 
-- novo endpoint POST /admin/reset-hour (X-Admin-Token)
-- reancora baseline_hora usando producao_turno atual
-- zera producao_hora e percentual_hora sem apagar dia/historico
+- adiciona app.config["SECRET_KEY"] lendo FLASK_SECRET_KEY
+- mantém fallback apenas para dev (inseguro)
