@@ -1,3 +1,4 @@
-﻿fix(import): remove normalizar_horas_turno do machine_routes (ImportError no Railway)
+﻿fix(import): remove calcular_dia_ref_operacional do import e implementa dia_ref local
 
-- remove import inexistente de modules.machine_calc
+- evita ImportError no Railway (machine_calc sem a func)
+- adiciona _calcular_dia_ref_operacional() no machine_routes
