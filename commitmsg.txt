@@ -1,3 +1,5 @@
-﻿fix(encoding): corrigir admin_home.html para UTF-8 e remover bytes invalidos
+﻿feat(multitenant): adicionar cliente_id nas tabelas de dados
 
-- regrava template admin_home.html em UTF-8 para evitar UnicodeDecodeError no Railway
+- inclui cliente_id em devices, producao, config e baseline
+- cria indices por cliente
+- prepara isolamento total por tenant
