@@ -1,4 +1,5 @@
 from flask import Flask, render_template
+import os
 
 # ============================================================
 # BLUEPRINTS (já existentes)
@@ -18,6 +19,13 @@ from modules.db_indflow import init_db
 from modules.machine_routes import machine_bp
 
 app = Flask(__name__)
+
+# ============================================================
+# SESSÃO / LOGIN (base)
+# ============================================================
+# Necessário para session/cookies (login web).
+# Configure a env var FLASK_SECRET_KEY (string longa e secreta).
+app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-inseguro-trocar")
 
 # ============================================================
 # BANCO SQLITE
