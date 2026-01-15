@@ -2,6 +2,11 @@ from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
 
 # =====================================================
+# AUTH
+# =====================================================
+from modules.admin.routes import login_required
+
+# =====================================================
 # BLUEPRINT
 # =====================================================
 producao_bp = Blueprint("producao", __name__, template_folder="templates")
@@ -28,6 +33,7 @@ def get_machine(machine_id: str):
 # REDIRECIONAR /producao PARA /
 # =====================================================
 @producao_bp.route("/")
+@login_required
 def home():
     return redirect("/")
 
@@ -35,6 +41,7 @@ def home():
 # PÁGINA DE CONFIGURAÇÃO
 # =====================================================
 @producao_bp.route("/config/<machine_id>")
+@login_required
 def config_machine(machine_id):
     return render_template("config_maquina.html", machine_id=machine_id)
 
@@ -42,6 +49,7 @@ def config_machine(machine_id):
 # SALVAR CONFIGURAÇÃO DA MÁQUINA
 # =====================================================
 @producao_bp.route("/config/<machine_id>", methods=["POST"])
+@login_required
 def salvar_config(machine_id):
 
     data = request.get_json()
@@ -83,7 +91,6 @@ def salvar_config(machine_id):
         horas_turno.append(hora_atual.strftime("%H:%M"))
 
         if i == 0 and rampa > 0:
-            # RAMPA APENAS NA PRIMEIRA HORA
             meta_hora = round(meta_base * (rampa / 100))
         else:
             meta_hora = round(meta_base)
