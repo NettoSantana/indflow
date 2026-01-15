@@ -10,7 +10,13 @@ from modules.db_indflow import get_db
 admin_bp = Blueprint("admin", __name__, template_folder="templates")
 
 # ============================================================
-# AUTH (V1 simples) — sessão + sha256
+# CREDENCIAIS PADRÃO (APENAS PRIMEIRO ACESSO)
+# ============================================================
+DEFAULT_ADMIN_EMAIL = "admin@admin"
+DEFAULT_ADMIN_PASSWORD = "Admin123"
+
+# ============================================================
+# LOGIN TEMPLATE (PADRÃO INDFLOW)
 # ============================================================
 LOGIN_FORM_HTML = """
 <!doctype html>
@@ -19,58 +25,116 @@ LOGIN_FORM_HTML = """
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>IndFlow — Login</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
   <style>
-    body { font-family: Arial, sans-serif; background:#0b1220; color:#e5e7eb; margin:0; }
-    .wrap { max-width: 420px; margin: 70px auto; padding: 22px; background:#111827; border:1px solid #1f2937; border-radius:12px; }
-    h1 { font-size: 20px; margin:0 0 14px 0; }
-    label { display:block; font-size: 13px; margin:10px 0 6px; color:#cbd5e1; }
-    input { width:100%; padding:10px 12px; border-radius:10px; border:1px solid #334155; background:#0b1220; color:#e5e7eb; }
-    button { width:100%; margin-top:14px; padding:10px 12px; border-radius:10px; border:0; background:#2563eb; color:white; font-weight:700; cursor:pointer; }
-    .err { margin-top: 10px; color:#fca5a5; font-size: 13px; }
-    .hint { margin-top: 10px; color:#94a3b8; font-size: 12px; }
+    body {
+      margin:0;
+      background:#f8fafc;
+      font-family: Arial, sans-serif;
+    }
+    .login-wrap {
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .login-card {
+      width:380px;
+      background:#ffffff;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:32px;
+      box-shadow:0 10px 25px rgba(0,0,0,.06);
+    }
+    .logo {
+      display:flex;
+      justify-content:center;
+      margin-bottom:18px;
+    }
+    .logo img {
+      height:60px;
+    }
+    h1 {
+      text-align:center;
+      font-size:20px;
+      margin-bottom:20px;
+      color:#0f172a;
+    }
+    label {
+      font-size:13px;
+      color:#334155;
+      display:block;
+      margin-top:12px;
+      margin-bottom:4px;
+    }
+    input {
+      width:100%;
+      padding:10px 12px;
+      border-radius:8px;
+      border:1px solid #cbd5e1;
+      font-size:14px;
+    }
+    button {
+      margin-top:20px;
+      width:100%;
+      padding:10px;
+      border-radius:8px;
+      border:none;
+      background:#2563eb;
+      color:white;
+      font-weight:600;
+      font-size:15px;
+      cursor:pointer;
+    }
+    .err {
+      margin-top:14px;
+      font-size:13px;
+      color:#dc2626;
+      text-align:center;
+    }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Login — IndFlow</h1>
-    <form method="post">
-      <label>Email</label>
-      <input name="email" type="email" autocomplete="username" required />
-      <label>Senha</label>
-      <input name="senha" type="password" autocomplete="current-password" required />
-      <button type="submit">Entrar</button>
-      {% if error %}<div class="err">{{ error }}</div>{% endif %}
-      <div class="hint">Se for o primeiro acesso, rode o bootstrap (uma única vez) para criar o admin.</div>
-    </form>
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="logo">
+        <img src="/static/img/logo.png" alt="IndFlow">
+      </div>
+      <h1>IndFlow</h1>
+      <form method="post">
+        <label>Email</label>
+        <input name="email" type="email" required>
+        <label>Senha</label>
+        <input name="senha" type="password" required>
+        <button type="submit">Entrar</button>
+        {% if error %}<div class="err">{{ error }}</div>{% endif %}
+      </form>
+    </div>
   </div>
 </body>
 </html>
 """
 
-
+# ============================================================
+# HELPERS
+# ============================================================
 def _sha256(s: str) -> str:
     return hashlib.sha256((s or "").encode()).hexdigest()
-
 
 def _exists_any_user() -> bool:
     conn = get_db()
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT 1 FROM usuarios LIMIT 1")
+        cur = conn.execute("SELECT 1 FROM usuarios LIMIT 1")
         return cur.fetchone() is not None
     finally:
         conn.close()
 
-
 def _get_user_by_email(email: str):
     conn = get_db()
     try:
-        cur = conn.cursor()
-        cur.execute("""
+        cur = conn.execute("""
             SELECT id, email, senha_hash, cliente_id, role, status
-            FROM usuarios
-            WHERE email = ?
-            LIMIT 1
+            FROM usuarios WHERE email = ? LIMIT 1
         """, (email,))
         row = cur.fetchone()
         if not row:
@@ -86,46 +150,59 @@ def _get_user_by_email(email: str):
     finally:
         conn.close()
 
+def _auto_create_default_admin():
+    conn = get_db()
+    try:
+        cliente_id = str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
+        now = datetime.utcnow().isoformat()
 
-def _is_logged_in() -> bool:
-    return bool(session.get("user_id"))
+        senha_hash = _sha256(DEFAULT_ADMIN_PASSWORD)
 
+        conn.execute("""
+            INSERT INTO clientes (id, nome, api_key_hash, status, created_at)
+            VALUES (?, 'DEFAULT', 'INIT', 'active', ?)
+        """, (cliente_id, now))
 
-def _is_admin() -> bool:
-    return session.get("role") == "admin"
+        conn.execute("""
+            INSERT INTO usuarios (id, email, senha_hash, cliente_id, role, status, created_at)
+            VALUES (?, ?, ?, ?, 'admin', 'active', ?)
+        """, (user_id, DEFAULT_ADMIN_EMAIL, senha_hash, cliente_id, now))
 
+        conn.commit()
+    finally:
+        conn.close()
 
 def login_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not _is_logged_in():
+        if not session.get("user_id"):
             return redirect(url_for("admin.login"))
         return fn(*args, **kwargs)
     return wrapper
 
-
+# ============================================================
+# ROTAS
+# ============================================================
 @admin_bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
-        if _is_logged_in():
-            return redirect(url_for("admin.home"))
         return render_template_string(LOGIN_FORM_HTML, error=None)
 
-    # POST
     email = (request.form.get("email") or "").strip().lower()
     senha = request.form.get("senha") or ""
 
-    if not email or not senha:
-        return render_template_string(LOGIN_FORM_HTML, error="Informe email e senha.")
+    # AUTO BOOTSTRAP
+    if not _exists_any_user():
+        if email == DEFAULT_ADMIN_EMAIL and senha == DEFAULT_ADMIN_PASSWORD:
+            _auto_create_default_admin()
+        else:
+            return render_template_string(LOGIN_FORM_HTML, error="Credenciais inválidas.")
 
     user = _get_user_by_email(email)
-    if not user or user.get("status") != "active":
-        return render_template_string(LOGIN_FORM_HTML, error="Usuário inválido ou inativo.")
+    if not user or _sha256(senha) != user["senha_hash"]:
+        return render_template_string(LOGIN_FORM_HTML, error="Email ou senha inválidos.")
 
-    if _sha256(senha) != (user.get("senha_hash") or ""):
-        return render_template_string(LOGIN_FORM_HTML, error="Senha incorreta.")
-
-    # OK: cria sessão
     session["user_id"] = user["id"]
     session["email"] = user["email"]
     session["cliente_id"] = user["cliente_id"]
@@ -133,90 +210,12 @@ def login():
 
     return redirect(url_for("admin.home"))
 
-
 @admin_bp.route("/logout")
 def logout():
     session.clear()
     return redirect(url_for("admin.login"))
 
-
 @admin_bp.route("/")
 @login_required
 def home():
     return render_template("admin_home.html")
-
-
-# ============================================================
-# ADMIN BOOTSTRAP
-# Cria cliente + usuário admin + API Key (mostrada 1x)
-# Regra:
-#   - Se NÃO existir nenhum usuário ainda -> bootstrap liberado (primeira vez)
-#   - Se já existir -> exige login e role admin
-# ============================================================
-@admin_bp.route("/bootstrap", methods=["POST"])
-def bootstrap_cliente():
-    if _exists_any_user():
-        # Já tem sistema bootstrapado: só admin logado pode usar
-        if not _is_logged_in():
-            return jsonify({"error": "Login obrigatório"}), 401
-        if not _is_admin():
-            return jsonify({"error": "Apenas admin pode executar bootstrap"}), 403
-
-    data = request.get_json(silent=True) or {}
-
-    nome_cliente = data.get("nome_cliente")
-    email = data.get("email")
-    senha = data.get("senha")
-
-    if not nome_cliente or not email or not senha:
-        return jsonify({
-            "error": "Campos obrigatórios: nome_cliente, email, senha"
-        }), 400
-
-    # IDs
-    cliente_id = str(uuid.uuid4())
-    usuario_id = str(uuid.uuid4())
-
-    # Geração da API KEY (mostrada uma única vez)
-    api_key_plain = secrets.token_urlsafe(32)
-    api_key_hash = hashlib.sha256(api_key_plain.encode()).hexdigest()
-
-    # Hash da senha (simples e seguro para v1)
-    senha_hash = hashlib.sha256(senha.encode()).hexdigest()
-
-    now = datetime.utcnow().isoformat()
-
-    conn = get_db()
-    cur = conn.cursor()
-
-    try:
-        # Cliente
-        cur.execute("""
-            INSERT INTO clientes (id, nome, api_key_hash, status, created_at)
-            VALUES (?, ?, ?, 'active', ?)
-        """, (cliente_id, nome_cliente, api_key_hash, now))
-
-        # Usuário admin
-        cur.execute("""
-            INSERT INTO usuarios (id, email, senha_hash, cliente_id, role, status, created_at)
-            VALUES (?, ?, ?, ?, 'admin', 'active', ?)
-        """, (usuario_id, email, senha_hash, cliente_id, now))
-
-        conn.commit()
-
-    except Exception as e:
-        conn.rollback()
-        return jsonify({
-            "error": "Falha ao criar cliente",
-            "details": str(e)
-        }), 500
-
-    finally:
-        conn.close()
-
-    return jsonify({
-        "cliente_id": cliente_id,
-        "usuario_admin": email,
-        "api_key": api_key_plain,
-        "warning": "Guarde esta API Key. Ela NÃO será exibida novamente."
-    }), 201
