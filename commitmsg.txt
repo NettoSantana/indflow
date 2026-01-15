@@ -1,5 +1,5 @@
-﻿feat(auth): login padrao admin e tela de login no layout IndFlow
+﻿feat(auth): adicionar endpoint DEV para resetar admin no banco do Railway
 
-- adiciona admin@admin / Admin123 como admin inicial (uma unica vez)
-- cria usuario automaticamente se banco estiver vazio
-- nova tela de login com logo e visual alinhado ao IndFlow
+- cria POST /admin/dev-reset-admin com ADMIN_RESET_TOKEN
+- upsert do usuario admin (cria ou atualiza senha)
+- corrige login para mensagem unica de invalido
