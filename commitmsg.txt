@@ -1,4 +1,4 @@
-﻿fix(import): remove calcular_dia_ref_operacional do import e implementa dia_ref local
+﻿fix(import): remove refugo24 e imports inexistentes (load_refugo_24/save_refugo_24)
 
-- evita ImportError no Railway (machine_calc sem a func)
-- adiciona _calcular_dia_ref_operacional() no machine_routes
+- evita ImportError no Railway (machine_calc sem essas funcoes)
+- mantém /machine/update protegido com X-API-Key
