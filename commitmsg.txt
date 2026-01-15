@@ -1,5 +1,5 @@
-﻿feat(auth): exige X-API-Key no /machine/update usando clientes.api_key_hash
+﻿feat(auth): protege /machine/update com X-API-Key (clientes.api_key_hash)
 
-- adiciona validação por header X-API-Key (SHA256)
-- retorna 401 se inválida
-- inclui cliente_id na resposta
+- adiciona validacao de X-API-Key (SHA256) no /machine/update
+- retorna 401 se chave invalida/inativa
+- inclui cliente_id no response
