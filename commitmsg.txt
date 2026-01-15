@@ -1,5 +1,3 @@
-﻿feat(auth): adicionar endpoint DEV para resetar admin no banco do Railway
+﻿fix(encoding): corrigir admin_home.html para UTF-8 e remover bytes invalidos
 
-- cria POST /admin/dev-reset-admin com ADMIN_RESET_TOKEN
-- upsert do usuario admin (cria ou atualiza senha)
-- corrige login para mensagem unica de invalido
+- regrava template admin_home.html em UTF-8 para evitar UnicodeDecodeError no Railway
