@@ -1,5 +1,5 @@
-﻿feat(auth): cria tabelas clientes e usuarios no indflow.db
+﻿feat(admin): endpoint bootstrap para criar cliente, usuario admin e api key
 
-- adiciona clientes (api_key_hash, status, created_at)
-- adiciona usuarios (email unico, senha_hash, cliente_id, role)
-- inclui indexes para email e cliente_id
+- cria cliente com api_key_hash
+- cria usuario admin (email/senha)
+- retorna api_key apenas uma vez
