@@ -1,5 +1,6 @@
-﻿fix(db): migracao leve para adicionar cliente_id sem quebrar db existente
+﻿feat(multitenant): amarrar ESP ao cliente via X-API-Key e proteger device por tenant
 
-- adiciona ALTER TABLE para colunas faltantes (cliente_id/created_at)
-- cria indices somente apos garantir colunas
-- evita erro no Railway: no such column cliente_id
+- /machine/update resolve cliente pelo X-API-Key e grava device com cliente_id
+- bloqueia MAC que já pertence a outro cliente (403)
+- resolve vínculo device->machine filtrando por cliente_id
+- baseline inicial tenta usar cliente_id quando coluna existir (migração leve)
