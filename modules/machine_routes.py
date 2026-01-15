@@ -2,7 +2,7 @@
 import os
 import hashlib
 from flask import Blueprint, request, jsonify, render_template
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from modules.db_indflow import get_db
 from modules.machine_state import get_machine
@@ -15,8 +15,6 @@ from modules.machine_calc import (
     calcular_ultima_hora_idx,
     calcular_tempo_medio,
     aplicar_derivados_ml,
-    load_refugo_24,
-    save_refugo_24,
     validar_horas_turno_config,
 )
 
@@ -42,16 +40,6 @@ def _safe_int(v, default=0) -> int:
         return int(v)
     except Exception:
         return default
-
-
-def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
-    try:
-        arr = load_refugo_24(_norm_machine_id(machine_id), (dia_ref or "").strip())
-        if not isinstance(arr, list):
-            return 0
-        return sum(_safe_int(x, 0) for x in arr)
-    except Exception:
-        return 0
 
 
 def _admin_token_ok() -> bool:
@@ -99,15 +87,8 @@ def _get_cliente_from_api_key() -> dict | None:
 
 def _calcular_dia_ref_operacional() -> str:
     """
-    Dia operacional com virada às 23:59 (regra simples e estável).
-    Retorna string YYYY-MM-DD.
-
-    Lógica:
-      - Considera hora UTC (Railway). Se você quiser Bahia (-03), ajustamos depois.
-      - Se agora >= 23:59, o dia_ref é o dia atual.
-      - Se agora < 23:59, o dia_ref é o dia atual também.
-    Observação: como "23:59" é praticamente no fim do dia, na prática o dia_ref
-    acaba sendo o mesmo dia. Mantemos essa função aqui pra não depender do machine_calc.
+    Implementação local (evita dependência de machine_calc).
+    Retorna YYYY-MM-DD (UTC).
     """
     now = datetime.utcnow()
     return now.strftime("%Y-%m-%d")
@@ -221,10 +202,8 @@ def link_device():
     if not device_id or not machine_id:
         return jsonify({"error": "device_id e machine_id são obrigatórios"}), 400
 
-    # Vincula
     link_device_to_machine(device_id, machine_id, alias=alias)
 
-    # REGRA: ao vincular, zera contexto da máquina vinculada (baseline/last/contadores)
     m = get_machine(machine_id)
     reset_contexto(m)
 
@@ -298,19 +277,16 @@ def machine_status():
 def update_machine():
     data = request.get_json() or {}
 
-    # 0) AUTH (ESP): exige X-API-Key e resolve o cliente
     cliente = _get_cliente_from_api_key()
     if not cliente:
         return jsonify({"error": "unauthorized"}), 401
 
     cliente_id = cliente["id"]
 
-    # 1) MAC do ESP (CPF)
     device_id = norm_device_id(data.get("mac") or data.get("device_id") or "")
     if device_id:
         touch_device_seen(device_id)
 
-    # 2) Resolve machine_id: se device estiver vinculado, ele manda.
     linked_machine = get_machine_from_device(device_id) if device_id else None
     if linked_machine:
         machine_id = _norm_machine_id(linked_machine)
@@ -319,7 +295,6 @@ def update_machine():
 
     m = get_machine(machine_id)
 
-    # 3) Atualiza valores vindos do ESP
     esp_absoluto = _safe_int(data.get("esp_absoluto"), None)
     if esp_absoluto is None:
         esp_absoluto = _safe_int(data.get("pulsos"), 0)
@@ -332,13 +307,10 @@ def update_machine():
     if estado is not None:
         m["rodando"] = 1 if str(estado).strip() in ("1", "true", "True", "rodando", "on") else 0
 
-    # 4) Dia ref operacional
     dia_ref = _calcular_dia_ref_operacional()
 
-    # 5) Reset diário se necessário
     verificar_reset_diario(m)
 
-    # 6) Persistência baseline diário (se ainda não existir)
     conn = get_db()
     baseline_initialized = False
     try:
@@ -353,17 +325,14 @@ def update_machine():
     finally:
         conn.close()
 
-    # 7) Atualiza no contexto da máquina
     m["esp_absoluto"] = esp_absoluto
     m["updated_at"] = _now_iso()
 
-    # 8) Aplicar unidades / derivados / cálculo
     aplicar_unidades(m)
     salvar_conversao(m)
     aplicar_derivados_ml(m)
     calcular_tempo_medio(m)
 
-    # 9) Atualiza produção por hora + rampa + etc
     atualizar_producao_hora(m)
 
     return jsonify({
@@ -469,44 +438,6 @@ def get_config():
         return jsonify({"machine_id": machine_id, "config": dict(row)})
     finally:
         conn.close()
-
-
-# ============================================================
-# REFUGO 24H (exemplo)
-# ============================================================
-@machine_bp.route("/machine/refugo24/get", methods=["GET"])
-def refugo24_get():
-    machine_id = _norm_machine_id(request.args.get("machine_id") or "maquina01")
-    dia_ref = _calcular_dia_ref_operacional()
-    arr = load_refugo_24(machine_id, dia_ref)
-    return jsonify({
-        "machine_id": machine_id,
-        "dia_ref": dia_ref,
-        "items": arr if isinstance(arr, list) else []
-    })
-
-
-@machine_bp.route("/machine/refugo24/set", methods=["POST"])
-def refugo24_set():
-    if not _admin_token_ok():
-        return jsonify({"error": "unauthorized"}), 401
-
-    data = request.get_json() or {}
-    machine_id = _norm_machine_id(data.get("machine_id") or "maquina01")
-    items = data.get("items")
-    if not isinstance(items, list):
-        return jsonify({"error": "items deve ser uma lista"}), 400
-
-    dia_ref = _calcular_dia_ref_operacional()
-    save_refugo_24(machine_id, dia_ref, items)
-
-    total = _sum_refugo_24(machine_id, dia_ref)
-    return jsonify({
-        "message": "OK",
-        "machine_id": machine_id,
-        "dia_ref": dia_ref,
-        "total": total
-    })
 
 
 # ============================================================
