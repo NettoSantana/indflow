@@ -1,6 +1,5 @@
 # modules/machine_routes.py
 import os
-import hashlib
 from flask import Blueprint, request, jsonify, render_template
 from datetime import datetime, timedelta
 
@@ -66,36 +65,6 @@ def _admin_token_ok() -> bool:
         return False
     received = (request.headers.get("X-Admin-Token") or "").strip()
     return received == expected
-
-
-def _get_cliente_from_api_key() -> dict | None:
-    """
-    AUTH do ESP por header X-API-Key:
-      - calcula SHA256(api_key)
-      - compara com clientes.api_key_hash
-      - exige status 'active'
-    Retorna dict {id, nome, status} ou None.
-    """
-    api_key = (request.headers.get("X-API-Key") or "").strip()
-    if not api_key:
-        return None
-
-    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
-
-    conn = get_db()
-    try:
-        cur = conn.execute(
-            "SELECT id, nome, status FROM clientes WHERE api_key_hash = ?",
-            (api_key_hash,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        if (row["status"] or "").strip().lower() != "active":
-            return None
-        return {"id": row["id"], "nome": row["nome"], "status": row["status"]}
-    finally:
-        conn.close()
 
 
 def _ensure_baseline_table(conn):
@@ -276,13 +245,6 @@ def configurar_maquina():
 def update_machine():
     data = request.get_json() or {}
 
-    # ✅ AUTH (ESP): exige X-API-Key e resolve o cliente
-    cliente = _get_cliente_from_api_key()
-    if not cliente:
-        return jsonify({"error": "unauthorized"}), 401
-
-    cliente_id = cliente["id"]
-
     # 1) MAC do ESP (CPF)
     device_id = norm_device_id(data.get("mac") or data.get("device_id") or "")
     if device_id:
@@ -342,7 +304,6 @@ def update_machine():
     return jsonify({
         "message": "OK",
         "machine_id": machine_id,
-        "cliente_id": cliente_id,
         "device_id": device_id or None,
         "linked_machine": linked_machine or None,
         "baseline_initialized": bool(baseline_initialized),
@@ -433,6 +394,11 @@ def machine_status():
 
     # ========================================================
     # ✅ CARD HORA FORA DO TURNO (visual do card, sem mexer em meta/refugo)
+    # Regra:
+    #   - se estiver fora do turno (ultima_hora is None),
+    #     mostra np_producao no "Produzido da Hora" do card
+    #   - percentual_hora fica 0 (meta da hora é 0)
+    #   - producao_hora_liquida = producao_hora (fora do turno não tem refugo-hora)
     # ========================================================
     try:
         np_prod = int(m.get("np_producao", 0) or 0)
@@ -442,10 +408,13 @@ def machine_status():
     if m.get("ultima_hora") is None and np_prod > 0:
         m["producao_hora"] = np_prod
         m["percentual_hora"] = 0
+        # flag opcional pra UI (não quebra nada se ignorar)
         m["fora_turno"] = True
+        # fora do turno: líquido = bruto (não aplica refugo hora)
         m["producao_hora_liquida"] = np_prod
         return jsonify(m)
 
+    # fluxo normal (dentro do turno): calcula líquido aplicando refugo da hora atual
     try:
         hora_atual = int(now_bahia().hour)
     except Exception:
