@@ -1,3 +1,4 @@
-﻿feat(auth): proteger modulo ativos com login_required
+﻿feat(auth): proteger telas do modulo utilidades sem quebrar update do ESP
 
-- adiciona @login_required na rota /ativos/
+- adiciona login_required em /utilidades/ e /utilidades/config/<machine_id>
+- mantem /utilidades/status e /utilidades/update sem login (integracao ESP)
