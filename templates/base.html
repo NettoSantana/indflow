@@ -81,12 +81,17 @@
     </div>
 
     <div class="nav-links">
-      <a href="/producao">Produção</a>
-      <a href="/manutencao">Manutenção</a>
-      <a href="/ativos">Ativos</a>
-      <a href="/devices/">Dispositivos</a>
-      <a href="/utilidades">Utilidades</a>
-      <a href="/admin">Admin</a>
+      {% if session.get("user_id") %}
+        <a href="/producao">Produção</a>
+        <a href="/manutencao">Manutenção</a>
+        <a href="/ativos">Ativos</a>
+        <a href="/devices/">Dispositivos</a>
+        <a href="/utilidades">Utilidades</a>
+        <a href="/admin">Admin</a>
+        <a href="/admin/logout">Sair</a>
+      {% else %}
+        <a href="/admin/login">Login</a>
+      {% endif %}
     </div>
   </nav>
 
