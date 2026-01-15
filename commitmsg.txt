@@ -1,5 +1,3 @@
-﻿feat(auth): proteger rotas de producao com login_required
+﻿feat(auth): proteger rotas de manutencao com login_required
 
-- adiciona login_required em todas as rotas web de producao
-- nenhuma alteracao em calculos, memoria ou API
-- producao passa a exigir sessao valida
+- manutencao agora exige sessao valida

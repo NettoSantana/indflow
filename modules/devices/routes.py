@@ -3,6 +3,7 @@ from datetime import datetime
 import re
 
 from modules.db_indflow import get_db
+from modules.admin.routes import login_required
 
 devices_bp = Blueprint("devices", __name__, template_folder="templates")
 
@@ -62,6 +63,7 @@ def _now_str() -> str:
 # ============================================================
 
 @devices_bp.route("/", methods=["GET"])
+@login_required
 def home():
     db = get_db()
     _ensure_devices_table(db)
@@ -95,6 +97,7 @@ def home():
 
 
 @devices_bp.route("/link", methods=["POST"])
+@login_required
 def link_device():
     device_id = _norm_device_id(request.form.get("device_id"))
     machine_id = _norm_machine_id(request.form.get("machine_id"))
@@ -128,6 +131,7 @@ def link_device():
 
 
 @devices_bp.route("/unlink", methods=["POST"])
+@login_required
 def unlink_device():
     device_id = _norm_device_id(request.form.get("device_id"))
 
@@ -147,6 +151,7 @@ def unlink_device():
 
 
 @devices_bp.route("/delete", methods=["POST"])
+@login_required
 def delete_device():
     """
     Excluir deve permitir remover “fantasmas” também (MAQUINA01, etc),
@@ -171,6 +176,7 @@ def delete_device():
 
 
 @devices_bp.route("/alias", methods=["POST"])
+@login_required
 def set_alias():
     device_id = _norm_device_id(request.form.get("device_id"))
     alias = _norm_alias(request.form.get("alias"))
@@ -196,6 +202,7 @@ def set_alias():
 
 
 @devices_bp.route("/cleanup-invalid", methods=["POST"])
+@login_required
 def cleanup_invalid():
     """
     Remove com segurança qualquer registro cujo device_id NÃO seja MAC válido.
