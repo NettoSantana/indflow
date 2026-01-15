@@ -22,7 +22,7 @@ def _default_db_path() -> str:
     """
     Prioridade:
     1) INDFLOW_DB_PATH (override explícito)
-    2) Railway: /data/indflow.db (volume)
+    2) Railway: /data/indflow.db (volume)  -> força persistência
     3) /data/indflow.db (quando existir /data)
     4) ./indflow.db (local)
     """
@@ -30,6 +30,7 @@ def _default_db_path() -> str:
     if env_path:
         return env_path
 
+    # No Railway, queremos SEMPRE persistir em /data
     if _is_railway():
         return "/data/indflow.db"
 
@@ -47,14 +48,32 @@ def _ensure_db_dir(db_path: str) -> None:
 
 def get_db():
     """
-    Resolve o path em runtime.
+    IMPORTANTÍSSIMO:
+    - NÃO usar DB_PATH global (evita ficar "congelado" num caminho errado)
+    - Resolve o path em runtime, toda vez, garantindo consistência no Railway.
     """
     db_path = _default_db_path()
     _ensure_db_dir(db_path)
 
+    # check_same_thread=False ajuda quando Waitress/Flask usa threads
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    cols = [r[1] for r in cur.fetchall()]  # (cid, name, type, notnull, dflt_value, pk)
+    return column in cols
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, col_ddl: str) -> None:
+    """
+    Migração leve: adiciona coluna se não existir.
+    Ex.: _add_column_if_missing(conn, "devices", "cliente_id", "TEXT")
+    """
+    if not _has_column(conn, table, column):
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_ddl}")
 
 
 def init_db():
@@ -62,7 +81,7 @@ def init_db():
     cur = conn.cursor()
 
     # ============================================================
-    # CLIENTES
+    # AUTH (V1) — CLIENTES + USUÁRIOS
     # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS clientes (
@@ -74,9 +93,6 @@ def init_db():
         )
     """)
 
-    # ============================================================
-    # USUÁRIOS
-    # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id TEXT PRIMARY KEY,
@@ -101,112 +117,122 @@ def init_db():
     """)
 
     # ============================================================
-    # DEVICES (ESP)
+    # 0) DEVICES (ESP) — MAC = CPF (device_id)
+    #   - compatível com tabela antiga (sem cliente_id/created_at)
     # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS devices (
-            device_id TEXT PRIMARY KEY,
-            cliente_id TEXT,
-            machine_id TEXT,
-            alias TEXT,
-            created_at TEXT,
-            last_seen TEXT,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+            device_id TEXT PRIMARY KEY,      -- MAC normalizado (sem ":" e "-")
+            machine_id TEXT,                 -- vínculo atual (opcional)
+            alias TEXT,                      -- apelido (opcional)
+            last_seen TEXT                   -- último contato
         )
     """)
 
+    # MIGRAÇÕES leves
+    _add_column_if_missing(conn, "devices", "cliente_id", "TEXT")
+    _add_column_if_missing(conn, "devices", "created_at", "TEXT")
+
+    # ÍNDICES (só depois de garantir colunas)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS ix_devices_machine_id
+        ON devices(machine_id)
+    """)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS ix_devices_cliente_id
         ON devices(cliente_id)
     """)
 
     # ============================================================
-    # PRODUÇÃO DIÁRIA
+    # 1) HISTÓRICO DIÁRIO
     # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_diaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id TEXT,
             machine_id TEXT,
             data TEXT,
             produzido INTEGER,
             meta INTEGER,
-            percentual INTEGER,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+            percentual INTEGER
         )
     """)
-
+    _add_column_if_missing(conn, "producao_diaria", "cliente_id", "TEXT")
     cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_producao_diaria_cliente
+        CREATE INDEX IF NOT EXISTS ix_producao_diaria_cliente_id
         ON producao_diaria(cliente_id)
     """)
 
     # ============================================================
-    # CONFIG DA MÁQUINA
+    # 2) CONFIG DA MÁQUINA (PERSISTENTE)
     # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS machine_config (
             machine_id TEXT PRIMARY KEY,
-            cliente_id TEXT,
             meta_turno INTEGER NOT NULL DEFAULT 0,
             turno_inicio TEXT,
             turno_fim TEXT,
             rampa_percentual INTEGER NOT NULL DEFAULT 0,
             horas_turno_json TEXT NOT NULL DEFAULT '[]',
             meta_por_hora_json TEXT NOT NULL DEFAULT '[]',
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+            updated_at TEXT NOT NULL
         )
     """)
-
+    _add_column_if_missing(conn, "machine_config", "cliente_id", "TEXT")
     cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_machine_config_cliente
+        CREATE INDEX IF NOT EXISTS ix_machine_config_cliente_id
         ON machine_config(cliente_id)
     """)
 
     # ============================================================
-    # PRODUÇÃO HORÁRIA
+    # 3) PRODUÇÃO POR HORA (PERSISTENTE)
     # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_horaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id TEXT,
             machine_id TEXT NOT NULL,
-            data_ref TEXT NOT NULL,
-            hora_idx INTEGER NOT NULL,
+            data_ref TEXT NOT NULL,         -- data do início do turno
+            hora_idx INTEGER NOT NULL,      -- índice da hora no turno
             baseline_esp INTEGER NOT NULL,
             esp_last INTEGER NOT NULL,
             produzido INTEGER NOT NULL,
             meta INTEGER NOT NULL,
             percentual INTEGER NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+            updated_at TEXT NOT NULL
         )
     """)
+    _add_column_if_missing(conn, "producao_horaria", "cliente_id", "TEXT")
 
+    # Mantém índice antigo (se existir) e cria o novo por cliente sem quebrar
     cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria
+        ON producao_horaria(machine_id, data_ref, hora_idx)
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria_cliente
         ON producao_horaria(cliente_id, machine_id, data_ref, hora_idx)
     """)
 
     # ============================================================
-    # BASELINE DIÁRIO
+    # 4) BASELINE DIÁRIO (DIA OPERACIONAL 23:59)
     # ============================================================
     cur.execute("""
         CREATE TABLE IF NOT EXISTS baseline_diario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id TEXT,
             machine_id TEXT NOT NULL,
-            dia_ref TEXT NOT NULL,
-            baseline_esp INTEGER NOT NULL,
+            dia_ref TEXT NOT NULL,            -- dia operacional (vira às 23:59)
+            baseline_esp INTEGER NOT NULL,    -- esp_absoluto no início do dia
             esp_last INTEGER NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+            updated_at TEXT NOT NULL
         )
     """)
+    _add_column_if_missing(conn, "baseline_diario", "cliente_id", "TEXT")
 
     cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
+        ON baseline_diario(machine_id, dia_ref)
+    """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
         ON baseline_diario(cliente_id, machine_id, dia_ref)
     """)
 
