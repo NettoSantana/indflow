@@ -1,3 +1,4 @@
-﻿feat(auth): proteger api/ping com login_required
+﻿feat(ui): esconder menu sem login e adicionar link de sair
 
-- adiciona login_required em /api/ping para exigir sessao
+- base.html mostra apenas Login quando nao houver sessao
+- quando logado, exibe menus e link /admin/logout
