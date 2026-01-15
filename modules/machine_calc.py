@@ -31,6 +31,20 @@ def _dia_operacional_ref(agora: datetime) -> str:
 
 
 # ============================================================
+# ✅ MULTI-TENANT: machine_id interno com namespace
+# ============================================================
+def _scoped_machine_id(m, machine_id: str) -> str:
+    """
+    Isola dados por cliente sem mudar o contrato externo.
+    Internamente usamos: <cliente_id>::<machine_id>
+    """
+    cid = (m.get("cliente_id") or "").strip()
+    if cid:
+        return f"{cid}::{machine_id}"
+    return machine_id
+
+
+# ============================================================
 # ✅ compatibilidade para imports (machine_state)
 # ============================================================
 def dia_operacional_ref_dt(agora: datetime):
@@ -166,7 +180,10 @@ def _persistir_baseline_diario(machine_id: str, esp_abs: int):
 def carregar_baseline_diario(m, machine_id):
     # import local para evitar circular
     from modules.repos.baseline_repo import carregar_baseline_diario as _repo_carregar
-    _repo_carregar(m, machine_id)
+
+    # ✅ multi-tenant: isola baseline por cliente
+    scoped = _scoped_machine_id(m, (machine_id or "").strip().lower() or "maquina01")
+    _repo_carregar(m, scoped)
 
 
 # ============================================================
@@ -232,7 +249,8 @@ def atualizar_producao_hora(m):
         m["percentual_hora"] = 0
         return
 
-    machine_id = _get_machine_id_from_m(m)
+    raw_machine_id = _get_machine_id_from_m(m)
+    machine_id = _scoped_machine_id(m, raw_machine_id) if raw_machine_id else None
 
     # ✅ CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
@@ -448,7 +466,8 @@ def atualizar_producao_hora(m):
 def reset_contexto(m, machine_id):
     # (mantém como estava: escrita em producao_diaria continua onde já existe no projeto)
     # Essa função está aqui só porque o projeto já chamava ela por import.
-    machine_id = (machine_id or "").strip().lower() or "maquina01"
+    raw_machine_id = (machine_id or "").strip().lower() or "maquina01"
+    scoped_machine_id = _scoped_machine_id(m, raw_machine_id)
 
     from modules.db_indflow import get_db  # import local (só aqui)
 
@@ -463,7 +482,7 @@ def reset_contexto(m, machine_id):
         cur.execute("""
             DELETE FROM producao_diaria
             WHERE machine_id = ? AND data = ?
-        """, (machine_id, dia_ref))
+        """, (scoped_machine_id, dia_ref))
     except Exception:
         pass
 
@@ -471,7 +490,7 @@ def reset_contexto(m, machine_id):
         INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual)
         VALUES (?, ?, ?, ?, ?)
     """, (
-        machine_id,
+        scoped_machine_id,
         dia_ref,
         int(m.get("producao_turno", 0) or 0),
         int(m.get("meta_turno", 0) or 0),
@@ -502,8 +521,8 @@ def reset_contexto(m, machine_id):
     m["_np_last_ts"] = None
     m["_np_last_esp"] = int(m.get("esp_absoluto", 0) or 0)
 
-    # ✅ persistir baseline do dia operacional no reset manual
-    _persistir_baseline_diario(machine_id, int(m.get("esp_absoluto", 0) or 0))
+    # ✅ persistir baseline do dia operacional no reset manual (isolado por cliente)
+    _persistir_baseline_diario(scoped_machine_id, int(m.get("esp_absoluto", 0) or 0))
 
     try:
         agora = now_bahia()
