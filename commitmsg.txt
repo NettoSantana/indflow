@@ -1,3 +1,5 @@
-﻿feat(ui): adiciona link Dispositivos no menu (navbar)
+﻿feat(admin): adiciona reset leve da hora (/admin/reset-hour)
 
-- adiciona acesso direto a /devices/ na base.html
+- novo endpoint POST /admin/reset-hour (X-Admin-Token)
+- reancora baseline_hora usando producao_turno atual
+- zera producao_hora e percentual_hora sem apagar dia/historico
