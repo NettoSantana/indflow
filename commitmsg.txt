@@ -1,8 +1,6 @@
-﻿feat(multitenant): refugo por cliente_id com compatibilidade legado
+﻿feat(clientes): criar modulo de clientes (tenant) com geracao de API Key
 
-- adiciona coluna cliente_id em refugo_horaria (ALTER TABLE se faltar)
-- remove indice unico antigo e cria:
-  - unique multi-tenant (cliente_id,machine_id,dia_ref,hora_dia)
-  - unique legado parcial (machine_id,dia_ref,hora_dia) WHERE cliente_id IS NULL
-- suporta machine_id no formato cliente_id::maquina
-- dedup automatico antes de criar indices (evita crash no deploy)
+- cria blueprint /clientes com tela simples (sem template novo)
+- cria cliente com api_key_hash (sha256) e exibe api_key apenas uma vez
+- ativa/desativa cliente
+- acesso restrito a role=admin via session
