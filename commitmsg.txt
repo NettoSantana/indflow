@@ -1,5 +1,6 @@
-﻿feat(producao): adicionar tempo parado oficial no backend (parado_min) e status_ui
+﻿fix(producao-card): corrigir MAQUINA02 e separar Dia/Hora com campos corretos
 
-- Persiste stopped_since_ms por machine_id em sqlite (machine_stop)
-- /machine/update seta/limpa parada conforme status (AUTO vs !=AUTO)
-- /machine/status devolve status_ui=PRODUZINDO|PARADA e parado_min (minutos parado)
+- Card agora busca machine_id=maquina02 (antes estava maquina01)
+- Coluna Dia usa percentual_turno + producao_turno(_ml) e meta_turno(_ml)
+- Coluna Hora usa percentual_hora + producao_hora(_ml) e meta_hora(_ml/_pcs)
+- Status usa status_ui e exibe 'XX min parados' com parado_min
