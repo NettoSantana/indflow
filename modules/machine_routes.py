@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-16 01:30 (America/Bahia)
-# Motivo: Evitar 403 em /machine/update no DEV permitindo takeover controlado de device (MAC) preso a outro cliente via flag de ambiente.
+# Último recode: 2026-01-16 19:05 (America/Bahia)
+# Motivo: Implementar "tempo parado" oficial (parado_min) no backend e status_ui (PRODUZINDO/PARADA) para o card de Produção.
 
 # modules/machine_routes.py
 import os
@@ -254,6 +254,74 @@ def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | No
 
 
 # ============================================================
+# PARADA OFICIAL (BACKEND) — grava stopped_since_ms por máquina
+# ============================================================
+def _ensure_machine_stop_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS machine_stop (
+            machine_id TEXT PRIMARY KEY,
+            stopped_since_ms INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_machine_stop_updated_at ON machine_stop(updated_at)")
+    except Exception:
+        pass
+    conn.commit()
+
+
+def _get_stopped_since_ms(machine_id: str) -> int | None:
+    conn = get_db()
+    try:
+        _ensure_machine_stop_table(conn)
+        cur = conn.execute(
+            "SELECT stopped_since_ms FROM machine_stop WHERE machine_id = ? LIMIT 1",
+            (machine_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            v = row["stopped_since_ms"]
+        except Exception:
+            v = row[0]
+        try:
+            iv = int(v)
+            return iv if iv > 0 else None
+        except Exception:
+            return None
+    finally:
+        conn.close()
+
+
+def _set_stopped_since_ms(machine_id: str, stopped_since_ms: int, updated_at: str):
+    conn = get_db()
+    try:
+        _ensure_machine_stop_table(conn)
+        conn.execute("""
+            INSERT INTO machine_stop (machine_id, stopped_since_ms, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(machine_id) DO UPDATE SET
+                stopped_since_ms=excluded.stopped_since_ms,
+                updated_at=excluded.updated_at
+        """, (machine_id, int(stopped_since_ms), updated_at))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _clear_stopped_since(machine_id: str, updated_at: str):
+    conn = get_db()
+    try:
+        _ensure_machine_stop_table(conn)
+        conn.execute("DELETE FROM machine_stop WHERE machine_id = ?", (machine_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ============================================================
 # BASELINE (agora com suporte a cliente_id quando existir)
 # ============================================================
 def _ensure_baseline_table(conn):
@@ -357,6 +425,7 @@ def admin_hard_reset():
         "baseline_diario",
         "refugo_horaria",
         "machine_config",
+        "machine_stop",
     ]
 
     deleted = {}
@@ -509,9 +578,36 @@ def update_machine():
 
     verificar_reset_diario(m, machine_id)
 
-    m["status"] = data.get("status", "DESCONHECIDO")
+    # --- captura status anterior antes de sobrescrever
+    prev_status = (m.get("status") or "").strip().upper()
+
+    # status novo vindo do ESP
+    new_status = (data.get("status", "DESCONHECIDO") or "DESCONHECIDO").strip().upper()
+
+    m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
     m["run"] = _safe_int(data.get("run", 0), 0)
+
+    # --- parada oficial (backend)
+    try:
+        agora = now_bahia()
+        updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+        now_ms = int(agora.timestamp() * 1000)
+
+        if new_status == "AUTO":
+            # voltou a produzir -> limpa parada
+            _clear_stopped_since(machine_id, updated_at)
+            m["stopped_since_ms"] = None
+        else:
+            # entrou/parado -> seta apenas se ainda não existir
+            existing = _get_stopped_since_ms(machine_id)
+            if existing is None:
+                _set_stopped_since_ms(machine_id, now_ms, updated_at)
+                m["stopped_since_ms"] = now_ms
+            else:
+                m["stopped_since_ms"] = existing
+    except Exception:
+        pass
 
     baseline_initialized = False
     try:
@@ -692,6 +788,29 @@ def machine_status():
 
     if "run" not in m:
         m["run"] = 0
+
+    # --- parada oficial (backend): devolve parado_min e status_ui
+    try:
+        status = (m.get("status") or "").strip().upper()
+        agora = now_bahia()
+        now_ms = int(agora.timestamp() * 1000)
+
+        if status == "AUTO":
+            m["status_ui"] = "PRODUZINDO"
+            m["parado_min"] = None
+        else:
+            m["status_ui"] = "PARADA"
+            ss = _get_stopped_since_ms(machine_id)
+            if ss is None:
+                # fallback: se não existir (ex: primeiro status), ancora agora
+                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+                _set_stopped_since_ms(machine_id, now_ms, updated_at)
+                ss = now_ms
+            diff_ms = max(0, now_ms - int(ss))
+            m["parado_min"] = int(diff_ms // 60000)
+    except Exception:
+        m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
+        m["parado_min"] = None
 
     try:
         np_prod = int(m.get("np_producao", 0) or 0)
