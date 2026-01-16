@@ -1,5 +1,5 @@
-﻿feat(producao-card): trocar AUTO->PRODUZINDO, MANUAL->PARADA e exibir tempo parado no card
+﻿feat(producao-card): status PRODUZINDO/PARADA e contador de minutos parado
 
-- Badge verde agora mostra "PRODUZINDO" quando status=AUTO
-- Quando não AUTO, mostra "PARADA" e linha "XX min parados" abaixo do badge
-- Tempo parado é calculado no navegador e persistido por máquina via localStorage
+- AUTO agora aparece como PRODUZINDO (badge verde)
+- Qualquer status != AUTO aparece como PARADA (badge vermelho)
+- Exibe "XX min parados" abaixo do badge enquanto estiver parado (localStorage por máquina)
