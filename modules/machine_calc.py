@@ -37,11 +37,18 @@ def _scoped_machine_id(m, machine_id: str) -> str:
     """
     Isola dados por cliente sem mudar o contrato externo.
     Internamente usamos: <cliente_id>::<machine_id>
+
+    ✅ FIX: normaliza machine_id (strip/lower) para não gerar chaves diferentes
+    por variação de caixa/espaco, e evita None quebrando.
     """
+    mid = (machine_id or "").strip().lower()
+    if not mid:
+        return ""
+
     cid = (m.get("cliente_id") or "").strip()
     if cid:
-        return f"{cid}::{machine_id}"
-    return machine_id
+        return f"{cid}::{mid}"
+    return mid
 
 
 # ============================================================
