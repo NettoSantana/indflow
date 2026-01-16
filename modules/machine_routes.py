@@ -1,7 +1,7 @@
 # modules/machine_routes.py
 import os
 import hashlib
-from flask import Blueprint, request, jsonify, render_template
+from flask import Blueprint, request, jsonify, render_template, session
 from datetime import datetime, timedelta
 
 from modules.db_indflow import get_db
@@ -23,6 +23,8 @@ from modules.machine_calc import (
 from modules.repos.machine_config_repo import upsert_machine_config
 from modules.repos.refugo_repo import load_refugo_24, upsert_refugo
 
+from modules.admin.routes import login_required
+
 # ✅ helpers de device (já criado por você)
 from modules.machine.device_helpers import (
     norm_device_id,
@@ -38,6 +40,16 @@ def _norm_machine_id(v):
     return v or "maquina01"
 
 
+def _unscope_machine_id(v: str) -> str:
+    """
+    Compat: se vier "cliente_id::maquina01", devolve "maquina01".
+    """
+    s = (v or "").strip().lower()
+    if "::" in s:
+        return (s.split("::", 1)[1] or "").strip() or "maquina01"
+    return s or "maquina01"
+
+
 def _safe_int(v, default=0):
     try:
         return int(v)
@@ -46,8 +58,13 @@ def _safe_int(v, default=0):
 
 
 def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
+    """
+    Refugo ainda está por machine_id (legado). Para não misturar,
+    usamos sempre o machine_id "limpo" (sem cliente_id::).
+    """
     try:
-        arr = load_refugo_24(_norm_machine_id(machine_id), (dia_ref or "").strip())
+        mid = _unscope_machine_id(machine_id)
+        arr = load_refugo_24(_norm_machine_id(mid), (dia_ref or "").strip())
         if not isinstance(arr, list):
             return 0
         return sum(_safe_int(x, 0) for x in arr)
@@ -98,6 +115,20 @@ def _get_cliente_from_api_key() -> dict | None:
         conn.close()
 
 
+def _get_cliente_id_for_request() -> str | None:
+    """
+    Resolve tenant do request:
+      1) se tiver X-API-Key válida -> cliente_id
+      2) senão, se tiver sessão web -> session['cliente_id']
+      3) senão -> None
+    """
+    c = _get_cliente_from_api_key()
+    if c:
+        return c["id"]
+    cid = (session.get("cliente_id") or "").strip()
+    return cid or None
+
+
 # ============================================================
 # MULTI-TENANT (DEVICES) — helpers locais
 # ============================================================
@@ -115,7 +146,6 @@ def _ensure_devices_table_min(conn):
         )
     """)
 
-    # tenta adicionar colunas (não quebra se já existirem)
     try:
         conn.execute("ALTER TABLE devices ADD COLUMN cliente_id TEXT")
     except Exception:
@@ -126,35 +156,12 @@ def _ensure_devices_table_min(conn):
     except Exception:
         pass
 
-    # índices (não quebra se já existir)
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS ix_devices_cliente_id ON devices(cliente_id)")
     except Exception:
         pass
 
     conn.commit()
-
-
-def _device_owner_cliente_id(conn, device_id: str) -> str | None:
-    try:
-        cur = conn.execute("SELECT cliente_id FROM devices WHERE device_id = ? LIMIT 1", (device_id,))
-        row = cur.fetchone()
-        if not row:
-            return None
-        return (row["cliente_id"] if isinstance(row, sqlite3.Row) else row[0])  # type: ignore
-    except Exception:
-        # fallback seguro
-        try:
-            cur = conn.execute("SELECT cliente_id FROM devices WHERE device_id = ? LIMIT 1", (device_id,))
-            row = cur.fetchone()
-            if not row:
-                return None
-            try:
-                return row["cliente_id"]
-            except Exception:
-                return row[0]
-        except Exception:
-            return None
 
 
 def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str) -> bool:
@@ -186,11 +193,9 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str) ->
         except Exception:
             owner = row[1] if len(row) > 1 else None
 
-        # se já tem dono e é diferente => bloqueia
         if owner and owner != cliente_id:
             return False
 
-        # atualiza last_seen e seta cliente_id se estiver vazio
         conn.execute("""
             UPDATE devices
                SET last_seen = ?,
@@ -250,15 +255,29 @@ def _ensure_baseline_table(conn):
     except Exception:
         pass
 
-    # índices (mantém o antigo e tenta criar o novo por cliente)
-    conn.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
-        ON baseline_diario(machine_id, dia_ref)
-    """)
+    # ⚠️ MUITO IMPORTANTE:
+    # NÃO criar mais o UNIQUE antigo (machine_id, dia_ref) porque pode haver duplicados
+    # e isso derruba o deploy/serviço.
+    try:
+        conn.execute("DROP INDEX IF EXISTS ux_baseline_diario")
+    except Exception:
+        pass
+
+    # Índice multi-tenant (principal)
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
             ON baseline_diario(cliente_id, machine_id, dia_ref)
+        """)
+    except Exception:
+        pass
+
+    # Índice legado parcial (somente registros antigos com cliente_id NULL)
+    try:
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_legacy
+            ON baseline_diario(machine_id, dia_ref)
+            WHERE cliente_id IS NULL
         """)
     except Exception:
         pass
@@ -268,7 +287,6 @@ def _ensure_baseline_table(conn):
 
 def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str | None) -> bool:
     try:
-        # se tiver cliente_id, filtra
         if cliente_id:
             cur = conn.execute(
                 "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? AND cliente_id=? LIMIT 1",
@@ -276,7 +294,7 @@ def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str |
             )
         else:
             cur = conn.execute(
-                "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? LIMIT 1",
+                "SELECT 1 FROM baseline_diario WHERE machine_id=? AND dia_ref=? AND cliente_id IS NULL LIMIT 1",
                 (machine_id, dia_ref),
             )
         return cur.fetchone() is not None
@@ -297,8 +315,8 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
         """, (cliente_id, machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
     else:
         conn.execute("""
-            INSERT OR IGNORE INTO baseline_diario (machine_id, dia_ref, baseline_esp, esp_last, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO baseline_diario (cliente_id, machine_id, dia_ref, baseline_esp, esp_last, updated_at)
+            VALUES (NULL, ?, ?, ?, ?, ?)
         """, (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
     conn.commit()
 
@@ -308,10 +326,6 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
 # ============================================================
 @machine_bp.route("/admin/hard-reset", methods=["POST"])
 def admin_hard_reset():
-    """
-    HARD RESET: apaga TODOS os dados do SQLite (tabelas principais).
-    Não depende de shell do Railway.
-    """
     if not _admin_token_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
@@ -324,7 +338,6 @@ def admin_hard_reset():
         "baseline_diario",
         "refugo_horaria",
         "machine_config",
-        # OBS: não apagamos "devices" aqui por padrão (cadastro do hardware)
     ]
 
     deleted = {}
@@ -433,23 +446,20 @@ def configurar_maquina():
 
 
 # ============================================================
-# UPDATE ESP  ✅ AQUI ESTÁ A REGRA DO "ZERAR AO VINCULAR"
+# UPDATE ESP
 # ============================================================
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
     data = request.get_json() or {}
 
-    # ✅ AUTH (ESP): exige X-API-Key e resolve o cliente
     cliente = _get_cliente_from_api_key()
     if not cliente:
         return jsonify({"error": "unauthorized"}), 401
 
     cliente_id = cliente["id"]
 
-    # 1) MAC do ESP (CPF)
     device_id = norm_device_id(data.get("mac") or data.get("device_id") or "")
     if device_id:
-        # atualiza last_seen (compat) — e amarra ao cliente (multi-tenant)
         agora = now_bahia()
         now_str = agora.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -457,13 +467,11 @@ def update_machine():
         if not ok_owner:
             return jsonify({"error": "device pertence a outro cliente"}), 403
 
-        # mantém o helper legado (não quebra)
         try:
             touch_device_seen(device_id)
         except Exception:
             pass
 
-    # 2) Resolve machine_id com filtro por cliente_id (evita “vazamento”)
     linked_machine = _get_linked_machine_for_cliente(device_id, cliente_id) if device_id else None
     if linked_machine:
         machine_id = _norm_machine_id(linked_machine)
@@ -476,13 +484,8 @@ def update_machine():
 
     m["status"] = data.get("status", "DESCONHECIDO")
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
-
-    # ✅ FIX: persistir RUN (1/0) vindo do ESP no estado da máquina
     m["run"] = _safe_int(data.get("run", 0), 0)
 
-    # ========================================================
-    # ✅ REGRA: PRIMEIRO UPDATE REAL (MÁQUINA NOVA SEM BASELINE)
-    # ========================================================
     baseline_initialized = False
     try:
         agora = now_bahia()
@@ -525,7 +528,7 @@ def update_machine():
 
 
 # ============================================================
-# ADMIN - RESET SOMENTE DA HORA (REANCORA BASELINE_HORA)
+# ADMIN - RESET SOMENTE DA HORA
 # ============================================================
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
@@ -696,15 +699,20 @@ def machine_status():
 # HISTÓRICO - TELA (HTML)
 # ============================================================
 @machine_bp.route("/producao/historico", methods=["GET"])
+@login_required
 def historico_page():
     return render_template("historico.html")
 
 
 # ============================================================
-# HISTÓRICO - API (JSON)
+# HISTÓRICO - API (JSON)  ✅ AGORA É MULTI-TENANT
 # ============================================================
 @machine_bp.route("/api/producao/historico", methods=["GET"])
 def historico_producao_api():
+    cliente_id = _get_cliente_id_for_request()
+    if not cliente_id:
+        return jsonify({"error": "unauthorized"}), 401
+
     machine_id = request.args.get("machine_id")
     inicio = request.args.get("inicio")
     fim = request.args.get("fim")
@@ -712,13 +720,15 @@ def historico_producao_api():
     query = """
         SELECT machine_id, data, produzido, meta, percentual
         FROM producao_diaria
-        WHERE 1=1
+        WHERE cliente_id = ?
     """
-    params = []
+    params = [cliente_id]
 
     if machine_id:
-        query += " AND machine_id = ?"
-        params.append(_norm_machine_id(machine_id))
+        raw_mid = _norm_machine_id(machine_id)
+        scoped_mid = f"{cliente_id}::{raw_mid}"
+        query += " AND (machine_id = ? OR machine_id = ?)"
+        params.extend([raw_mid, scoped_mid])
 
     if inicio:
         query += " AND data >= ?"
@@ -743,11 +753,13 @@ def historico_producao_api():
         mid = d.get("machine_id") or "maquina01"
         dia_ref = d.get("data") or ""
 
+        # para refugo, sempre usa máquina "limpa"
         refugo_total = _sum_refugo_24(mid, dia_ref)
 
         produzido = _safe_int(d.get("produzido"), 0)
         pecas_boas = max(0, produzido - refugo_total)
 
+        d["machine_id"] = _unscope_machine_id(mid)
         d["refugo_total"] = refugo_total
         d["pecas_boas"] = pecas_boas
 
