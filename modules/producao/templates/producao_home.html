@@ -1,3 +1,9 @@
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao_home.html
+Último recode: 2026-01-16 18:40 (America/Bahia)
+Motivo: No card de Produção, trocar AUTO->PRODUZINDO e qualquer outro status->PARADA, exibindo "XX min parados" abaixo do badge quando parado.
+-->
+
 {% extends 'base.html' %}
 {% block title %}Produção - IndFlow{% endblock %}
 
@@ -61,7 +67,7 @@
         background: #dc2626;
     }
 
-    /* NOVO: linha "XX min parados" abaixo do badge */
+    /* Linha "XX min parados" abaixo do badge */
     .machine-stopline {
         font-size: 13px;
         font-weight: 700;
@@ -124,7 +130,6 @@ function labelUnidade(u){
     return u.toUpperCase();
 }
 
-/* MANTIDA – não removida */
 function calcularIndicador(percentual){
     const p = Number(percentual) || 0;
 
@@ -133,7 +138,6 @@ function calcularIndicador(percentual){
     return { icon: "—", cls: "ind-normal" };
 }
 
-/* NOVA – cálculo por ritmo (sem quebrar nada) */
 function calcularIndicadorPorRitmo(data){
     const meta = Number(data.meta_turno) || 0;
     const produzido = Number(data.produzido_turno) || 0;
@@ -166,13 +170,13 @@ function calcularIndicadorPorRitmo(data){
     return calcularIndicador(percentual);
 }
 
-/* NOVO: controla tempo parado por máquina (persistente no navegador) */
-function getStopKey(machineId){
+/* Controle simples do "tempo parado" no navegador (por máquina) */
+function stopKey(machineId){
     return `indflow_stop_since_${machineId}`;
 }
 
-function calcularMinutosParado(machineId, estaProduzindo){
-    const key = getStopKey(machineId);
+function minutosParados(machineId, estaProduzindo){
+    const key = stopKey(machineId);
     const agoraMs = Date.now();
 
     if (estaProduzindo) {
@@ -187,8 +191,7 @@ function calcularMinutosParado(machineId, estaProduzindo){
     }
 
     const diffMs = Math.max(0, agoraMs - sinceMs);
-    const mins = Math.floor(diffMs / 60000);
-    return mins;
+    return Math.floor(diffMs / 60000);
 }
 
 function carregarMaquinas() {
@@ -201,20 +204,16 @@ function carregarMaquinas() {
         .then(r => r.json())
         .then(data => {
 
-            const isAuto = (data.status === "AUTO");
+            const estaProduzindo = (data.status === "AUTO");
 
-            // Pedido: AUTO -> PRODUZINDO | MANUAL (ou qualquer outro) -> PARADA
-            const statusLabel = isAuto ? "PRODUZINDO" : "PARADA";
+            // Pedido: AUTO -> PRODUZINDO | qualquer outro -> PARADA
+            const statusLabel = estaProduzindo ? "PRODUZINDO" : "PARADA";
+            const statusClass = estaProduzindo ? "status-auto" : "status-manual";
 
-            let statusClass = isAuto
-                ? "status-auto"
-                : "status-manual";
-
-            // tempo parado (só mostra quando PARADA)
-            const minsParado = calcularMinutosParado(id, isAuto);
-            const stopLineHtml = (!isAuto && minsParado !== null)
-                ? `<div class="machine-stopline">${minsParado} min parados</div>`
-                : `<div style="height: 0;"></div>`;
+            const mins = minutosParados(id, estaProduzindo);
+            const stopLineHtml = (!estaProduzindo && mins !== null)
+                ? `<div class="machine-stopline">${mins} min parados</div>`
+                : ``;
 
             let percent = data.percentual_turno ?? 0;
             const indicador = calcularIndicadorPorRitmo(data);
