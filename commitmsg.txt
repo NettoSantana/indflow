@@ -1,5 +1,5 @@
-﻿fix(dev): permitir takeover controlado de device para evitar 403 no /machine/update
+﻿feat(producao-card): trocar AUTO->PRODUZINDO, MANUAL->PARADA e exibir tempo parado no card
 
-- Quando o MAC já estava vinculado a outro cliente no DEV, /machine/update retornava 403.
-- Agora é possível reassociar o device ao cliente atual via ENV INDFLOW_ALLOW_DEVICE_TAKEOVER=1.
-- Sem a flag, mantém o bloqueio padrão (seguro para PROD).
+- Badge verde agora mostra "PRODUZINDO" quando status=AUTO
+- Quando não AUTO, mostra "PARADA" e linha "XX min parados" abaixo do badge
+- Tempo parado é calculado no navegador e persistido por máquina via localStorage
