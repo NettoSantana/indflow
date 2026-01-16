@@ -50,7 +50,7 @@
         font-size: 14px;
         font-weight: 600;
         color: white;
-        margin-bottom: 12px;
+        margin-bottom: 6px;
     }
 
     .status-auto {
@@ -59,6 +59,14 @@
 
     .status-manual {
         background: #dc2626;
+    }
+
+    /* NOVO: linha "XX min parados" abaixo do badge */
+    .machine-stopline {
+        font-size: 13px;
+        font-weight: 700;
+        color: #dc2626;
+        margin-bottom: 10px;
     }
 
     .machine-value-row {
@@ -158,6 +166,31 @@ function calcularIndicadorPorRitmo(data){
     return calcularIndicador(percentual);
 }
 
+/* NOVO: controla tempo parado por máquina (persistente no navegador) */
+function getStopKey(machineId){
+    return `indflow_stop_since_${machineId}`;
+}
+
+function calcularMinutosParado(machineId, estaProduzindo){
+    const key = getStopKey(machineId);
+    const agoraMs = Date.now();
+
+    if (estaProduzindo) {
+        localStorage.removeItem(key);
+        return null;
+    }
+
+    let sinceMs = Number(localStorage.getItem(key));
+    if (!Number.isFinite(sinceMs) || sinceMs <= 0) {
+        sinceMs = agoraMs;
+        localStorage.setItem(key, String(sinceMs));
+    }
+
+    const diffMs = Math.max(0, agoraMs - sinceMs);
+    const mins = Math.floor(diffMs / 60000);
+    return mins;
+}
+
 function carregarMaquinas() {
     let area = document.getElementById("machines-area");
     area.innerHTML = "";
@@ -168,9 +201,20 @@ function carregarMaquinas() {
         .then(r => r.json())
         .then(data => {
 
-            let statusClass = data.status === "AUTO"
+            const isAuto = (data.status === "AUTO");
+
+            // Pedido: AUTO -> PRODUZINDO | MANUAL (ou qualquer outro) -> PARADA
+            const statusLabel = isAuto ? "PRODUZINDO" : "PARADA";
+
+            let statusClass = isAuto
                 ? "status-auto"
                 : "status-manual";
+
+            // tempo parado (só mostra quando PARADA)
+            const minsParado = calcularMinutosParado(id, isAuto);
+            const stopLineHtml = (!isAuto && minsParado !== null)
+                ? `<div class="machine-stopline">${minsParado} min parados</div>`
+                : `<div style="height: 0;"></div>`;
 
             let percent = data.percentual_turno ?? 0;
             const indicador = calcularIndicadorPorRitmo(data);
@@ -206,8 +250,10 @@ function carregarMaquinas() {
                         <div class="machine-name">${id.toUpperCase()}</div>
 
                         <div class="machine-status ${statusClass}">
-                            ${data.status}
+                            ${statusLabel}
                         </div>
+
+                        ${stopLineHtml}
 
                         <div class="machine-value-row">
                             <div class="machine-indicator ${indicador.cls}">

@@ -1,4 +1,5 @@
-﻿chore(clientes): padronizar cabecalho conforme diretrizes
+﻿fix(dev): permitir takeover controlado de device para evitar 403 no /machine/update
 
-- adiciona LAST_RECODE e MOTIVO no topo do arquivo (rastreabilidade)
-- nenhuma mudanca funcional
+- Quando o MAC já estava vinculado a outro cliente no DEV, /machine/update retornava 403.
+- Agora é possível reassociar o device ao cliente atual via ENV INDFLOW_ALLOW_DEVICE_TAKEOVER=1.
+- Sem a flag, mantém o bloqueio padrão (seguro para PROD).
