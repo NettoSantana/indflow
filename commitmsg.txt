@@ -1,6 +1,8 @@
-﻿feat(security): historico diario multi-tenant e baseline index seguro
+﻿feat(multitenant): refugo por cliente_id com compatibilidade legado
 
-- /api/producao/historico exige tenant (api key ou sessao) e filtra por cliente_id
-- compatibilidade com machine_id legado no formato cliente_id::maquina
-- remove criacao do UNIQUE antigo ux_baseline_diario e cria indices (tenant + legado parcial)
-- protege /producao/historico com login_required
+- adiciona coluna cliente_id em refugo_horaria (ALTER TABLE se faltar)
+- remove indice unico antigo e cria:
+  - unique multi-tenant (cliente_id,machine_id,dia_ref,hora_dia)
+  - unique legado parcial (machine_id,dia_ref,hora_dia) WHERE cliente_id IS NULL
+- suporta machine_id no formato cliente_id::maquina
+- dedup automatico antes de criar indices (evita crash no deploy)
