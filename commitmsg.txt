@@ -1,6 +1,3 @@
-﻿feat(clientes): criar modulo de clientes (tenant) com geracao de API Key
+﻿feat(server): registrar blueprint de clientes (/clientes)
 
-- cria blueprint /clientes com tela simples (sem template novo)
-- cria cliente com api_key_hash (sha256) e exibe api_key apenas uma vez
-- ativa/desativa cliente
-- acesso restrito a role=admin via session
+- adiciona import e register do clientes_bp
