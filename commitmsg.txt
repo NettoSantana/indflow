@@ -1,4 +1,5 @@
-﻿fix(multitenant): normalizar machine_id no scoped para evitar chaves inconsistentes
+﻿fix(db): evitar crash no Railway ao criar UNIQUE index do baseline
 
-- _scoped_machine_id agora aplica strip/lower e evita machine_id vazio/None
-- restante do fluxo mantido exatamente como estava
+- remove indice UNIQUE antigo (ux_baseline_diario) que colide com dados legados
+- deduplica baseline_diario e producao_horaria mantendo o registro mais recente
+- cria indices unique multi-tenant + indices legados parciais (cliente_id IS NULL)
