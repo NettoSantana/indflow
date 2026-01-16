@@ -1,5 +1,5 @@
-﻿feat(producao-card): status PRODUZINDO/PARADA e contador de minutos parado
+﻿feat(producao): adicionar tempo parado oficial no backend (parado_min) e status_ui
 
-- AUTO agora aparece como PRODUZINDO (badge verde)
-- Qualquer status != AUTO aparece como PARADA (badge vermelho)
-- Exibe "XX min parados" abaixo do badge enquanto estiver parado (localStorage por máquina)
+- Persiste stopped_since_ms por machine_id em sqlite (machine_stop)
+- /machine/update seta/limpa parada conforme status (AUTO vs !=AUTO)
+- /machine/status devolve status_ui=PRODUZINDO|PARADA e parado_min (minutos parado)
