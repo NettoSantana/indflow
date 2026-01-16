@@ -1,7 +1,4 @@
-﻿feat(multitenant): producao_horaria_repo com cliente_id nativo + migracao segura
+﻿fix(multitenant): normalizar machine_id no scoped para evitar chaves inconsistentes
 
-- adiciona cliente_id na tabela producao_horaria (ALTER TABLE se faltar)
-- remove indice antigo que colidia entre clientes
-- cria unique index multi-tenant (cliente_id,machine_id,data_ref,hora_idx)
-- cria unique index legado (machine_id,data_ref,hora_idx) apenas quando cliente_id IS NULL
-- suporta compatibilidade com machine_id no formato cliente::maquina
+- _scoped_machine_id agora aplica strip/lower e evita machine_id vazio/None
+- restante do fluxo mantido exatamente como estava
