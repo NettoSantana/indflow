@@ -1,5 +1,5 @@
-﻿feat(producao-card): usar status_ui/parado_min do backend e padronizar PRODUZINDO/PARADA
+﻿feat(producao): adicionar tempo parado oficial no backend (parado_min) e status_ui
 
-- Card passa a mostrar PRODUZINDO/PARADA (nunca MANUAL)
-- Exibe 'XX min parados' usando parado_min do /machine/status
-- Mantém fallback compatível com backend antigo (AUTO/MANUAL)
+- Persiste stopped_since_ms por machine_id em sqlite (machine_stop)
+- /machine/update seta/limpa parada conforme status (AUTO vs !=AUTO)
+- /machine/status devolve status_ui=PRODUZINDO|PARADA e parado_min (minutos parado)
