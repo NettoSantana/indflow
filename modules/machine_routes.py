@@ -1,3 +1,7 @@
+# Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
+# Último recode: 2026-01-16 01:30 (America/Bahia)
+# Motivo: Evitar 403 em /machine/update no DEV permitindo takeover controlado de device (MAC) preso a outro cliente via flag de ambiente.
+
 # modules/machine_routes.py
 import os
 import hashlib
@@ -164,7 +168,7 @@ def _ensure_devices_table_min(conn):
     conn.commit()
 
 
-def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str) -> bool:
+def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, allow_takeover: bool = False) -> bool:
     """
     Garante que o device (MAC) fique amarrado ao cliente.
     Regra:
@@ -172,6 +176,9 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str) ->
       - se não existe -> cria com cliente_id + created_at + last_seen
       - se existe sem cliente_id -> seta cliente_id
       - sempre atualiza last_seen
+
+    Observação (DEV):
+      - se allow_takeover=True, permite reassociar device preso a outro cliente.
     """
     conn = get_db()
     try:
@@ -194,6 +201,18 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str) ->
             owner = row[1] if len(row) > 1 else None
 
         if owner and owner != cliente_id:
+            # Se o device já estiver amarrado a outro cliente, por padrão bloqueia (403).
+            # No DEV, você pode permitir "takeover" controlado via ENV:
+            #   INDFLOW_ALLOW_DEVICE_TAKEOVER=1
+            if allow_takeover:
+                conn.execute("""
+                    UPDATE devices
+                       SET cliente_id = ?,
+                           last_seen = ?
+                     WHERE device_id = ?
+                """, (cliente_id, now_str, device_id))
+                conn.commit()
+                return True
             return False
 
         conn.execute("""
@@ -457,15 +476,23 @@ def update_machine():
         return jsonify({"error": "unauthorized"}), 401
 
     cliente_id = cliente["id"]
+    allow_takeover = False
 
     device_id = norm_device_id(data.get("mac") or data.get("device_id") or "")
     if device_id:
         agora = now_bahia()
         now_str = agora.strftime("%Y-%m-%d %H:%M:%S")
 
-        ok_owner = _upsert_device_for_cliente(device_id=device_id, cliente_id=cliente_id, now_str=now_str)
+        allow_takeover = (os.getenv("INDFLOW_ALLOW_DEVICE_TAKEOVER") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+        ok_owner = _upsert_device_for_cliente(
+            device_id=device_id,
+            cliente_id=cliente_id,
+            now_str=now_str,
+            allow_takeover=allow_takeover,
+        )
         if not ok_owner:
-            return jsonify({"error": "device pertence a outro cliente"}), 403
+            return jsonify({"error": "device pertence a outro cliente", "hint": "se for DEV, você pode liberar takeover setando INDFLOW_ALLOW_DEVICE_TAKEOVER=1"}), 403
 
         try:
             touch_device_seen(device_id)
@@ -524,6 +551,7 @@ def update_machine():
         "device_id": device_id or None,
         "linked_machine": linked_machine or None,
         "baseline_initialized": bool(baseline_initialized),
+        "allow_takeover": bool(allow_takeover),
     })
 
 

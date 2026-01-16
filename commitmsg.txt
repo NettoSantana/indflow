@@ -1,4 +1,4 @@
-﻿feat(ui): adicionar módulo Clientes no menu principal
+﻿chore(clientes): padronizar cabecalho conforme diretrizes
 
-- inclui link /clientes na navbar
-- adiciona cabeçalho de rastreabilidade no arquivo
+- adiciona LAST_RECODE e MOTIVO no topo do arquivo (rastreabilidade)
+- nenhuma mudanca funcional
