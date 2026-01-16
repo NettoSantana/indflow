@@ -913,4 +913,3 @@ def historico_producao_api():
         out.append(d)
 
     return jsonify(out)
-#nada
