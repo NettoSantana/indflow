@@ -1,5 +1,6 @@
-﻿fix(db): evitar crash no Railway ao criar UNIQUE index do baseline
+﻿feat(security): historico diario multi-tenant e baseline index seguro
 
-- remove indice UNIQUE antigo (ux_baseline_diario) que colide com dados legados
-- deduplica baseline_diario e producao_horaria mantendo o registro mais recente
-- cria indices unique multi-tenant + indices legados parciais (cliente_id IS NULL)
+- /api/producao/historico exige tenant (api key ou sessao) e filtra por cliente_id
+- compatibilidade com machine_id legado no formato cliente_id::maquina
+- remove criacao do UNIQUE antigo ux_baseline_diario e cria indices (tenant + legado parcial)
+- protege /producao/historico com login_required
