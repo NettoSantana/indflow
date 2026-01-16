@@ -1,3 +1,4 @@
-﻿feat(server): registrar blueprint de clientes (/clientes)
+﻿feat(ui): adicionar módulo Clientes no menu principal
 
-- adiciona import e register do clientes_bp
+- inclui link /clientes na navbar
+- adiciona cabeçalho de rastreabilidade no arquivo

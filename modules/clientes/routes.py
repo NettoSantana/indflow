@@ -1,4 +1,7 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\clientes\routes.py
+# LAST_RECODE: 2026-01-16 14:00 America/Bahia
+# MOTIVO: Padronizar cabeçalho (rastreabilidade por caminho + data/hora + motivo)
+#
 # CODED_AT: 2026-01-15 23:00:54 America/Bahia
 #
 # Objetivo:
@@ -358,3 +361,4 @@ def api_list_clientes():
             "created_at": r["created_at"],
         })
     return jsonify(out)
+
