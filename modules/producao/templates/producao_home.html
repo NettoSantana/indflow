@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao_home.html
-Último recode: 2026-01-16 18:40 (America/Bahia)
-Motivo: No card de Produção, trocar AUTO->PRODUZINDO e qualquer outro status->PARADA, exibindo "XX min parados" abaixo do badge quando parado.
+Último recode: 2026-01-16 19:55 (America/Bahia)
+Motivo: Finalizar card de Produção usando status_ui (PRODUZINDO/PARADA) e parado_min (minutos parado) vindo do backend; manter fallback compatível com status antigo (AUTO/MANUAL).
 -->
 
 {% extends 'base.html' %}
@@ -130,6 +130,7 @@ function labelUnidade(u){
     return u.toUpperCase();
 }
 
+/* MANTIDA – não removida */
 function calcularIndicador(percentual){
     const p = Number(percentual) || 0;
 
@@ -138,6 +139,7 @@ function calcularIndicador(percentual){
     return { icon: "—", cls: "ind-normal" };
 }
 
+/* Cálculo por ritmo (sem quebrar nada) */
 function calcularIndicadorPorRitmo(data){
     const meta = Number(data.meta_turno) || 0;
     const produzido = Number(data.produzido_turno) || 0;
@@ -170,28 +172,25 @@ function calcularIndicadorPorRitmo(data){
     return calcularIndicador(percentual);
 }
 
-/* Controle simples do "tempo parado" no navegador (por máquina) */
-function stopKey(machineId){
-    return `indflow_stop_since_${machineId}`;
+function resolveStatusUI(data){
+    // Preferência: backend novo
+    const ui = (data.status_ui || "").toString().trim().toUpperCase();
+    if (ui === "PRODUZINDO" || ui === "PARADA") return ui;
+
+    // Fallback: backend antigo (AUTO/MANUAL/...)
+    const raw = (data.status || "").toString().trim().toUpperCase();
+    if (raw === "AUTO") return "PRODUZINDO";
+    if (raw) return "PARADA";
+    return "PARADA";
 }
 
-function minutosParados(machineId, estaProduzindo){
-    const key = stopKey(machineId);
-    const agoraMs = Date.now();
+function resolveParadoMin(data){
+    // Preferência: backend novo
+    const v = Number(data.parado_min);
+    if (Number.isFinite(v) && v >= 0) return Math.floor(v);
 
-    if (estaProduzindo) {
-        localStorage.removeItem(key);
-        return null;
-    }
-
-    let sinceMs = Number(localStorage.getItem(key));
-    if (!Number.isFinite(sinceMs) || sinceMs <= 0) {
-        sinceMs = agoraMs;
-        localStorage.setItem(key, String(sinceMs));
-    }
-
-    const diffMs = Math.max(0, agoraMs - sinceMs);
-    return Math.floor(diffMs / 60000);
+    // Fallback: sem dado oficial
+    return null;
 }
 
 function carregarMaquinas() {
@@ -204,15 +203,15 @@ function carregarMaquinas() {
         .then(r => r.json())
         .then(data => {
 
-            const estaProduzindo = (data.status === "AUTO");
+            const statusUI = resolveStatusUI(data);
+            const estaProduzindo = (statusUI === "PRODUZINDO");
 
-            // Pedido: AUTO -> PRODUZINDO | qualquer outro -> PARADA
-            const statusLabel = estaProduzindo ? "PRODUZINDO" : "PARADA";
+            const statusLabel = statusUI; // PRODUZINDO / PARADA
             const statusClass = estaProduzindo ? "status-auto" : "status-manual";
 
-            const mins = minutosParados(id, estaProduzindo);
-            const stopLineHtml = (!estaProduzindo && mins !== null)
-                ? `<div class="machine-stopline">${mins} min parados</div>`
+            const minsParado = resolveParadoMin(data);
+            const stopLineHtml = (!estaProduzindo && minsParado !== null)
+                ? `<div class="machine-stopline">${minsParado} min parados</div>`
                 : ``;
 
             let percent = data.percentual_turno ?? 0;
