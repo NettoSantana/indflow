@@ -5,38 +5,18 @@ from pathlib import Path
 
 
 def _is_railway() -> bool:
-    """
-    Detecta execução no Railway.
-    Basta existir qualquer uma dessas envs.
-    """
-    keys = [
-        "RAILWAY_ENVIRONMENT",
-        "RAILWAY_PROJECT_ID",
-        "RAILWAY_SERVICE_ID",
-        "RAILWAY_STATIC_URL",
-    ]
+    keys = ["RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID", "RAILWAY_STATIC_URL"]
     return any((os.getenv(k) or "").strip() for k in keys)
 
 
 def _default_db_path() -> str:
-    """
-    Prioridade:
-    1) INDFLOW_DB_PATH (override explícito)
-    2) Railway: /data/indflow.db (volume)  -> força persistência
-    3) /data/indflow.db (quando existir /data)
-    4) ./indflow.db (local)
-    """
     env_path = os.getenv("INDFLOW_DB_PATH", "").strip()
     if env_path:
         return env_path
-
-    # No Railway, queremos SEMPRE persistir em /data
     if _is_railway():
         return "/data/indflow.db"
-
     if Path("/data").exists():
         return "/data/indflow.db"
-
     return "indflow.db"
 
 
@@ -47,15 +27,8 @@ def _ensure_db_dir(db_path: str) -> None:
 
 
 def get_db():
-    """
-    IMPORTANTÍSSIMO:
-    - NÃO usar DB_PATH global (evita ficar "congelado" num caminho errado)
-    - Resolve o path em runtime, toda vez, garantindo consistência no Railway.
-    """
     db_path = _default_db_path()
     _ensure_db_dir(db_path)
-
-    # check_same_thread=False ajuda quando Waitress/Flask usa threads
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -63,26 +36,40 @@ def get_db():
 
 def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
     cur = conn.execute(f"PRAGMA table_info({table})")
-    cols = [r[1] for r in cur.fetchall()]  # (cid, name, type, notnull, dflt_value, pk)
+    cols = [r[1] for r in cur.fetchall()]
     return column in cols
 
 
 def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, col_ddl: str) -> None:
-    """
-    Migração leve: adiciona coluna se não existir.
-    Ex.: _add_column_if_missing(conn, "devices", "cliente_id", "TEXT")
-    """
     if not _has_column(conn, table, column):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_ddl}")
+
+
+def _dedupe_keep_latest(conn: sqlite3.Connection, table: str, keys: list[str]) -> None:
+    """
+    Remove duplicados mantendo o maior id (mais recente) por grupo.
+    Requer coluna 'id' INTEGER PRIMARY KEY AUTOINCREMENT no table.
+    Agrupa por keys + COALESCE(cliente_id,'__NULL__') quando cliente_id existir.
+    """
+    cols = keys[:]
+    if _has_column(conn, table, "cliente_id") and "cliente_id" not in cols:
+        cols.append("COALESCE(cliente_id,'__NULL__')")
+
+    group_expr = ", ".join(cols) if cols else "1"
+    conn.execute(f"""
+        DELETE FROM {table}
+        WHERE id NOT IN (
+            SELECT MAX(id) FROM {table}
+            GROUP BY {group_expr}
+        )
+    """)
 
 
 def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-    # ============================================================
-    # AUTH (V1) — CLIENTES + USUÁRIOS
-    # ============================================================
+    # -------------------- auth --------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS clientes (
             id TEXT PRIMARY KEY,
@@ -92,7 +79,6 @@ def init_db():
             created_at TEXT NOT NULL
         )
     """)
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id TEXT PRIMARY KEY,
@@ -105,47 +91,24 @@ def init_db():
             FOREIGN KEY (cliente_id) REFERENCES clientes(id)
         )
     """)
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_usuarios_email ON usuarios(email)")
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_usuarios_cliente_id ON usuarios(cliente_id)")
 
-    cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_usuarios_email
-        ON usuarios(email)
-    """)
-
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_usuarios_cliente_id
-        ON usuarios(cliente_id)
-    """)
-
-    # ============================================================
-    # 0) DEVICES (ESP) — MAC = CPF (device_id)
-    #   - compatível com tabela antiga (sem cliente_id/created_at)
-    # ============================================================
+    # -------------------- devices --------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS devices (
-            device_id TEXT PRIMARY KEY,      -- MAC normalizado (sem ":" e "-")
-            machine_id TEXT,                 -- vínculo atual (opcional)
-            alias TEXT,                      -- apelido (opcional)
-            last_seen TEXT                   -- último contato
+            device_id TEXT PRIMARY KEY,
+            machine_id TEXT,
+            alias TEXT,
+            last_seen TEXT
         )
     """)
-
-    # MIGRAÇÕES leves
     _add_column_if_missing(conn, "devices", "cliente_id", "TEXT")
     _add_column_if_missing(conn, "devices", "created_at", "TEXT")
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_devices_machine_id ON devices(machine_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_devices_cliente_id ON devices(cliente_id)")
 
-    # ÍNDICES (só depois de garantir colunas)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_devices_machine_id
-        ON devices(machine_id)
-    """)
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_devices_cliente_id
-        ON devices(cliente_id)
-    """)
-
-    # ============================================================
-    # 1) HISTÓRICO DIÁRIO
-    # ============================================================
+    # -------------------- producao_diaria --------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_diaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,14 +120,9 @@ def init_db():
         )
     """)
     _add_column_if_missing(conn, "producao_diaria", "cliente_id", "TEXT")
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_producao_diaria_cliente_id
-        ON producao_diaria(cliente_id)
-    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_producao_diaria_cliente_id ON producao_diaria(cliente_id)")
 
-    # ============================================================
-    # 2) CONFIG DA MÁQUINA (PERSISTENTE)
-    # ============================================================
+    # -------------------- machine_config --------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS machine_config (
             machine_id TEXT PRIMARY KEY,
@@ -178,20 +136,15 @@ def init_db():
         )
     """)
     _add_column_if_missing(conn, "machine_config", "cliente_id", "TEXT")
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_machine_config_cliente_id
-        ON machine_config(cliente_id)
-    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_machine_config_cliente_id ON machine_config(cliente_id)")
 
-    # ============================================================
-    # 3) PRODUÇÃO POR HORA (PERSISTENTE)
-    # ============================================================
+    # -------------------- producao_horaria --------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS producao_horaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
-            data_ref TEXT NOT NULL,         -- data do início do turno
-            hora_idx INTEGER NOT NULL,      -- índice da hora no turno
+            data_ref TEXT NOT NULL,
+            hora_idx INTEGER NOT NULL,
             baseline_esp INTEGER NOT NULL,
             esp_last INTEGER NOT NULL,
             produzido INTEGER NOT NULL,
@@ -202,39 +155,59 @@ def init_db():
     """)
     _add_column_if_missing(conn, "producao_horaria", "cliente_id", "TEXT")
 
-    # Mantém índice antigo (se existir) e cria o novo por cliente sem quebrar
-    cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria
-        ON producao_horaria(machine_id, data_ref, hora_idx)
-    """)
+    # limpa duplicados antes de índices unique (evita crash)
+    try:
+        _dedupe_keep_latest(conn, "producao_horaria", ["machine_id", "data_ref", "hora_idx"])
+    except Exception:
+        pass
+
+    # remove índice legado antigo (pode colidir com multi-tenant)
+    cur.execute("DROP INDEX IF EXISTS ux_producao_horaria")
+
+    # unique multi-tenant + legado parcial
     cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria_cliente
         ON producao_horaria(cliente_id, machine_id, data_ref, hora_idx)
     """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria_legacy
+        ON producao_horaria(machine_id, data_ref, hora_idx)
+        WHERE cliente_id IS NULL
+    """)
 
-    # ============================================================
-    # 4) BASELINE DIÁRIO (DIA OPERACIONAL 23:59)
-    # ============================================================
+    # -------------------- baseline_diario --------------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS baseline_diario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
-            dia_ref TEXT NOT NULL,            -- dia operacional (vira às 23:59)
-            baseline_esp INTEGER NOT NULL,    -- esp_absoluto no início do dia
+            dia_ref TEXT NOT NULL,
+            baseline_esp INTEGER NOT NULL,
             esp_last INTEGER NOT NULL,
             updated_at TEXT NOT NULL
         )
     """)
     _add_column_if_missing(conn, "baseline_diario", "cliente_id", "TEXT")
 
-    cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario
-        ON baseline_diario(machine_id, dia_ref)
-    """)
+    # limpa duplicados antes de índices unique (RESOLVE seu erro do Railway)
+    try:
+        _dedupe_keep_latest(conn, "baseline_diario", ["machine_id", "dia_ref"])
+    except Exception:
+        pass
+
+    # remove índice legado antigo que está derrubando o deploy
+    cur.execute("DROP INDEX IF EXISTS ux_baseline_diario")
+
+    # unique multi-tenant + legado parcial
     cur.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
         ON baseline_diario(cliente_id, machine_id, dia_ref)
     """)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_legacy
+        ON baseline_diario(machine_id, dia_ref)
+        WHERE cliente_id IS NULL
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_baseline_diario_cliente_id ON baseline_diario(cliente_id)")
 
     conn.commit()
     conn.close()
