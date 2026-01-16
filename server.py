@@ -13,6 +13,11 @@ from modules.devices.routes import devices_bp
 from modules.utilidades.routes import utilidades_bp
 
 # ============================================================
+# NOVO: CLIENTES (TENANT)
+# ============================================================
+from modules.clientes.routes import clientes_bp
+
+# ============================================================
 # NOVOS MÓDULOS (extraídos do server)
 # ============================================================
 from modules.db_indflow import init_db
@@ -48,6 +53,7 @@ app.register_blueprint(producao_bp, url_prefix="/producao")
 app.register_blueprint(manutencao_bp, url_prefix="/manutencao")
 app.register_blueprint(ativos_bp, url_prefix="/ativos")
 app.register_blueprint(admin_bp, url_prefix="/admin")
+app.register_blueprint(clientes_bp, url_prefix="/clientes")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(devices_bp, url_prefix="/devices")
 app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
