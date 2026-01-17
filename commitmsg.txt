@@ -1,6 +1,5 @@
-﻿fix(producao-card): corrigir MAQUINA02 e separar Dia/Hora com campos corretos
+﻿feat(producao-card): exibir PRODUZINDO/PARADA e 'XX min parados' no dashboard
 
-- Card agora busca machine_id=maquina02 (antes estava maquina01)
-- Coluna Dia usa percentual_turno + producao_turno(_ml) e meta_turno(_ml)
-- Coluna Hora usa percentual_hora + producao_hora(_ml) e meta_hora(_ml/_pcs)
-- Status usa status_ui e exibe 'XX min parados' com parado_min
+- Badge agora usa status_ui (fallback: status AUTO/...)
+- Quando PARADA, mostra parado_min como 'XX min parados' abaixo do badge
+- Implementado somente em static/dashboard.ui.js (sem mexer em percentuais)
