@@ -1,5 +1,6 @@
-﻿refactor(utilidades): delegar regras para services.py sem remover blocos do routes.py
+﻿feat(utilidades-ui): trocar tela de utilidades para cards de sistemas (pai) pre-configurados
 
-- Mantem routes.py completo (sem reduzir linhas) para evitar perda de contexto
-- _calc_system_status e _update_stopped_clock viram wrappers chamando services.py
-- Mantem fallback antigo caso algo falhe
+- Tela agora mostra sistemas (Ar Comprimido, Energia/Gerador) com resumo
+- Integra /utilidades/system/status (quando disponível) para status/pressao/consumo/parado_min
+- Mantém sinais digitais atuais via /utilidades/status (legado) para contagem de equipamentos ativos
+- Clique ainda abre config do primeiro equipamento (placeholder até tela de detalhe do sistema)
