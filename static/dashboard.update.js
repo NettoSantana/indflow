@@ -1,3 +1,9 @@
+/*
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\static\dashboard.update.js
+Último recode: 2026-01-16 21:40 (America/Bahia)
+Motivo: Padronizar status do card para PRODUZINDO/PARADA usando status_ui e exibir "XX min parados" via parado_min, evitando conflito com AUTO/MANUAL.
+*/
+
 // static/dashboard.update.js
 
 /* ===========================
@@ -52,6 +58,27 @@ function formatTempoMedio(v){
   if (!Number.isFinite(n) || n <= 0) return "—";
   const fixed = n >= 10 ? n.toFixed(1) : n.toFixed(2);
   return fixed.replace(".", ",");
+}
+
+/* ===========================
+   STATUS UI (PRODUZINDO / PARADA)
+   =========================== */
+
+function resolveStatusUI(data){
+  const ui = (data?.status_ui || "").toString().trim().toUpperCase();
+  if(ui === "PRODUZINDO" || ui === "PARADA") return ui;
+
+  // fallback: backend antigo
+  const raw = (data?.status || "").toString().trim().toUpperCase();
+  if(raw === "AUTO") return "PRODUZINDO";
+  if(raw) return "PARADA";
+  return "PARADA";
+}
+
+function resolveParadoMin(data){
+  const v = Number(data?.parado_min);
+  if(Number.isFinite(v) && v >= 0) return Math.floor(v);
+  return null;
 }
 
 /* ===========================
@@ -133,9 +160,26 @@ function updateMachine(machineId){
       const statusBadge = document.getElementById(`status-badge-${sid}`);
       if(!statusBadge) return;
 
-      statusBadge.textContent = data.status;
+      // ✅ STATUS: PRODUZINDO / PARADA (padronizado)
+      const statusUI = resolveStatusUI(data);
+      const produzindo = (statusUI === "PRODUZINDO");
+
+      statusBadge.textContent = statusUI;
       statusBadge.className =
-        "machine-status " + (data.status === "AUTO" ? "status-auto" : "status-manual");
+        "machine-status " + (produzindo ? "status-auto" : "status-manual");
+
+      // ✅ Linha "XX min parados" (se existir no card)
+      const stopEl = document.getElementById(`stopline-${sid}`);
+      if(stopEl){
+        const mins = resolveParadoMin(data);
+        if(!produzindo && mins !== null){
+          stopEl.textContent = `${mins} min parados`;
+          stopEl.style.display = "";
+        }else{
+          stopEl.textContent = "";
+          stopEl.style.display = "none";
+        }
+      }
 
       const u1 = normUnidade(data.unidade_1) || "pcs";
       const u2 = normUnidade(data.unidade_2);
