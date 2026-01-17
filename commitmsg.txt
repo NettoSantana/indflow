@@ -1,6 +1,6 @@
-﻿feat(utilidades-backend): endpoints V1 para sistemas (card pai) com status e parado_min
+﻿feat(utilidades-services): centralizar regras de status e tempo parado
 
-- Adiciona POST /utilidades/system/update (payload padrão do ESP)
-- Adiciona GET  /utilidades/system/status (retorno pronto para card pai)
-- Implementa regras de status PRODUZINDO/ATENCAO/PARADA + offline + parado_min
-- Mantém rotas legadas (/update e /status) intactas
+- Implementa regras oficiais PRODUZINDO / ATENCAO / PARADA
+- Detecta sistema OFFLINE
+- Controle único de tempo parado (stopped_since_ms / parado_min)
+- Prepara base para alertas e histórico futuros
