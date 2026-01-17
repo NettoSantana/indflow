@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\utilidades\routes.py
-# Último recode: 2026-01-16 22:35 (America/Bahia)
-# Motivo: Adicionar backend V1 para "sistemas de utilidades" (card pai), com update/status e cálculo de PRODUZINDO/ATENCAO/PARADA + parado_min, mantendo rotas legadas de equipamentos individuais.
+# Último recode: 2026-01-16 23:20 (America/Bahia)
+# Motivo: Integrar services.py como fonte única das regras (status/offline/tempo parado) SEM remover linhas/estruturas existentes do routes.py.
 
 from flask import Blueprint, render_template, request, jsonify
 from datetime import datetime
@@ -14,6 +14,12 @@ from .data import (
 )
 
 from modules.admin.routes import login_required
+
+# ✅ NOVO: regra centralizada (sem remover funções antigas do arquivo)
+from .services import (
+    calc_system_status as _svc_calc_system_status,
+    update_stopped_clock as _svc_update_stopped_clock,
+)
 
 utilidades_bp = Blueprint("utilidades", __name__, template_folder="templates")
 
@@ -81,79 +87,86 @@ def _calc_system_status(system: dict) -> str:
       - ATENCAO (amarelo): system_running=True e pressure_ok=False OU consumo alto (se habilitado)
       - PARADA (vermelho): system_running=False OU offline
       - DESCONHECIDO: sem dados suficientes
+
+    OBS: A regra oficial agora está em services.py.
+    Mantemos esta função aqui para NÃO remover linhas e manter compatibilidade,
+    mas delegando a decisão ao services.
     """
-    # Offline?
-    last_seen = system.get("last_seen")
-    if last_seen:
-        try:
-            last_dt = datetime.fromisoformat(last_seen)
-            now_dt = datetime.now(TZ_BAHIA)
-            if (now_dt - last_dt).total_seconds() > UTILIDADES_OFFLINE_SECONDS:
-                return "PARADA"
-        except Exception:
-            # se não consegue parsear, não marca offline por isso
-            pass
-    else:
+    try:
+        return _svc_calc_system_status(system)
+    except Exception:
+        # --- fallback (mantém seu comportamento anterior caso algo dê errado) ---
+        last_seen = system.get("last_seen")
+        if last_seen:
+            try:
+                last_dt = datetime.fromisoformat(last_seen)
+                now_dt = datetime.now(TZ_BAHIA)
+                if (now_dt - last_dt).total_seconds() > UTILIDADES_OFFLINE_SECONDS:
+                    return "PARADA"
+            except Exception:
+                pass
+        else:
+            return "DESCONHECIDO"
+
+        running = system.get("system_running")
+        pressure_ok = system.get("pressure_ok")
+
+        if running is False:
+            return "PARADA"
+
+        if running is True and pressure_ok is False:
+            return "ATENCAO"
+
+        if running is True and UTILIDADES_POWER_KW_LIMIT > 0:
+            pw = system.get("power_kw")
+            try:
+                if pw is not None and float(pw) > float(UTILIDADES_POWER_KW_LIMIT):
+                    return "ATENCAO"
+            except Exception:
+                pass
+
+        if running is True and pressure_ok is True:
+            return "PRODUZINDO"
+
+        if running is True and pressure_ok is None:
+            return "ATENCAO"
+
         return "DESCONHECIDO"
-
-    running = system.get("system_running")
-    pressure_ok = system.get("pressure_ok")
-
-    # Se o ESP explicitou parada
-    if running is False:
-        return "PARADA"
-
-    # Se está rodando mas pressão fora
-    if running is True and pressure_ok is False:
-        return "ATENCAO"
-
-    # Consumo alto (se configurado)
-    if running is True and UTILIDADES_POWER_KW_LIMIT > 0:
-        pw = system.get("power_kw")
-        try:
-            if pw is not None and float(pw) > float(UTILIDADES_POWER_KW_LIMIT):
-                return "ATENCAO"
-        except Exception:
-            pass
-
-    # Produzindo (condição ideal)
-    if running is True and pressure_ok is True:
-        return "PRODUZINDO"
-
-    # Se está rodando mas não temos pressão_ok ainda
-    if running is True and pressure_ok is None:
-        return "ATENCAO"
-
-    return "DESCONHECIDO"
 
 
 def _update_stopped_clock(system: dict, status: str):
     """
     Controle de tempo parado oficial (backend).
-    - Se status == PRODUZINDO -> limpa stopped_since_ms / parado_min
-    - Se status == PARADA -> ancora stopped_since_ms se vazio
-    - ATENCAO/ DESCONHECIDO -> não mexe no relógio (por enquanto)
+
+    OBS: A regra oficial agora está em services.py.
+    Mantemos esta função aqui para NÃO remover linhas e manter compatibilidade,
+    mas delegando a atualização ao services.
     """
-    now_ms = _now_ms_bahia()
-
-    if status == "PRODUZINDO":
-        system["stopped_since_ms"] = None
-        system["parado_min"] = None
+    try:
+        _svc_update_stopped_clock(system, status)
         return
+    except Exception:
+        # --- fallback (mantém seu comportamento anterior caso algo dê errado) ---
+        now_ms = _now_ms_bahia()
 
-    if status == "PARADA":
-        if system.get("stopped_since_ms") is None:
-            system["stopped_since_ms"] = now_ms
-
-        ss = system.get("stopped_since_ms")
-        try:
-            diff_ms = max(0, now_ms - int(ss))
-            system["parado_min"] = int(diff_ms // 60000)
-        except Exception:
+        if status == "PRODUZINDO":
+            system["stopped_since_ms"] = None
             system["parado_min"] = None
-        return
+            return
 
-    # ATENCAO / DESCONHECIDO: deixa como está
+        if status == "PARADA":
+            if system.get("stopped_since_ms") is None:
+                system["stopped_since_ms"] = now_ms
+
+            ss = system.get("stopped_since_ms")
+            try:
+                diff_ms = max(0, now_ms - int(ss))
+                system["parado_min"] = int(diff_ms // 60000)
+            except Exception:
+                system["parado_min"] = None
+            return
+
+        # ATENCAO / DESCONHECIDO: deixa como está
 
 
 def _equip_summary(system: dict) -> dict:
@@ -286,11 +299,11 @@ def system_update():
     # controle
     system["last_seen"] = now_bahia_iso()
 
-    # calcula status
+    # calcula status (agora delega para services.py via wrapper)
     status = _calc_system_status(system)
     system["status"] = status
 
-    # controla tempo parado
+    # controla tempo parado (agora delega para services.py via wrapper)
     _update_stopped_clock(system, status)
 
     return jsonify({
