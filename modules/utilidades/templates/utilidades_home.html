@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\utilidades_home.html
-Último recode: 2026-01-17 08:25 (America/Bahia)
-Motivo: Transformar tela de Utilidades em cards de SISTEMAS (Ar Comprimido, Energia/Gerador) com pré-configuração e resumo; mantém uso dos sinais digitais atuais (compressor/gerador) e integra status do sistema via /utilidades/system/status quando disponível.
+Último recode: 2026-01-17 08:55 (America/Bahia)
+Motivo: Melhorar visual dos cards de Utilidades com cores fracas por tipo (AR/VAPOR/AGUA/etc), ícones e menos informação exibida (sem poluir).
 -->
 
 {% extends "base.html" %}
@@ -26,18 +26,75 @@ Motivo: Transformar tela de Utilidades em cards de SISTEMAS (Ar Comprimido, Ener
 
   .card{
     background:#fff;
-    width: 520px;
-    border-radius:20px;
-    padding:28px;
-    box-shadow:0 4px 14px rgba(0,0,0,0.12);
+    width: 560px;
+    border-radius:22px;
+    padding:24px 26px;
+    box-shadow:0 4px 14px rgba(0,0,0,0.10);
     border:1px solid #e5e7eb;
     transition:0.2s;
     position: relative;
+    overflow:hidden;
   }
 
   .card:hover{
     transform:translateY(-3px);
-    box-shadow:0 6px 20px rgba(0,0,0,0.20);
+    box-shadow:0 8px 22px rgba(0,0,0,0.16);
+  }
+
+  /* ===== TINTS (cores fracas por tipo) ===== */
+  .tint-air{
+    background: linear-gradient(180deg, rgba(59,130,246,0.10), rgba(255,255,255,0.85));
+    border-color: rgba(59,130,246,0.18);
+  }
+  .tint-water{
+    background: linear-gradient(180deg, rgba(2,132,199,0.14), rgba(255,255,255,0.85));
+    border-color: rgba(2,132,199,0.22);
+  }
+  .tint-steam{
+    background: linear-gradient(180deg, rgba(249,115,22,0.12), rgba(255,255,255,0.85));
+    border-color: rgba(249,115,22,0.22);
+  }
+  .tint-energy{
+    background: linear-gradient(180deg, rgba(239,68,68,0.10), rgba(255,255,255,0.85));
+    border-color: rgba(239,68,68,0.18);
+  }
+  .tint-cooling{
+    background: linear-gradient(180deg, rgba(14,165,233,0.10), rgba(255,255,255,0.85));
+    border-color: rgba(14,165,233,0.18);
+  }
+  .tint-tank{
+    background: linear-gradient(180deg, rgba(148,163,184,0.14), rgba(255,255,255,0.85));
+    border-color: rgba(148,163,184,0.28);
+  }
+
+  /* ===== LAYOUT DO CARD ===== */
+  .card-row{
+    display:flex;
+    gap:18px;
+    align-items:flex-start;
+  }
+
+  .icon-wrap{
+    width:64px;
+    height:64px;
+    border-radius:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background: rgba(255,255,255,0.70);
+    border:1px solid rgba(15,23,42,0.06);
+    flex: 0 0 64px;
+  }
+
+  .icon-wrap svg{
+    width:38px;
+    height:38px;
+    opacity:0.95;
+  }
+
+  .card-main{
+    flex:1;
+    min-width: 0;
   }
 
   .card-head{
@@ -45,23 +102,27 @@ Motivo: Transformar tela de Utilidades em cards de SISTEMAS (Ar Comprimido, Ener
     align-items:center;
     justify-content:space-between;
     gap:12px;
-    margin-bottom: 10px;
+    margin-top: 2px;
   }
 
   .card-title{
-    font-size:24px;
-    font-weight:800;
+    font-size:22px;
+    font-weight:900;
     color:#0f172a;
+    letter-spacing:0.2px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
   }
 
   .badge{
     display:inline-block;
     padding:6px 12px;
-    border-radius:8px;
-    font-size:13px;
+    border-radius:10px;
+    font-size:12px;
     font-weight:900;
     color:#fff;
-    min-width: 120px;
+    min-width: 118px;
     text-align:center;
   }
 
@@ -70,35 +131,43 @@ Motivo: Transformar tela de Utilidades em cards de SISTEMAS (Ar Comprimido, Ener
   .badge-stop{ background:#dc2626; }
   .badge-unk{ background:#6b7280; }
 
-  .subline{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    margin-top: 10px;
-    font-size:16px;
-    color:#0f172a;
+  .mini{
+    margin-top: 12px;
+    display:grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 14px;
+    font-size:15px;
   }
 
-  .k{ color:#334155; font-weight:700; }
+  .k{ color:#334155; font-weight:800; }
   .v{ font-weight:900; color:#0f172a; }
 
-  .muted{ color:#64748b; font-weight:700; }
-
   .stopline{
-    margin-top: 8px;
-    font-size:14px;
-    font-weight:900;
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 900;
     color:#dc2626;
     display:none;
   }
 
   .footer-note{
     margin-top: 14px;
-    font-size: 13px;
-    font-weight: 800;
+    font-size: 12px;
+    font-weight: 900;
     color:#64748b;
     text-align:right;
+    letter-spacing:0.2px;
+  }
+
+  .pill-muted{
+    display:inline-block;
+    padding:4px 10px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:900;
+    color:#334155;
+    background: rgba(148,163,184,0.18);
+    border:1px solid rgba(148,163,184,0.30);
   }
 </style>
 
@@ -109,48 +178,48 @@ Motivo: Transformar tela de Utilidades em cards de SISTEMAS (Ar Comprimido, Ener
 
 <script>
 /**
- * CONCEITO (V1):
- * - Tela mostra SISTEMAS (cards PAI), pré-configurados.
- * - Clique abre a configuração do primeiro equipamento do sistema (por enquanto),
- *   até criarmos a página de detalhes do sistema.
- *
- * Backend novo (quando existir/ativo):
- * - GET /utilidades/system/status?system_id=<id>
- *   retorna status, pressure_ok, power_kw, energy_kwh_day, parado_min, etc.
- *
- * Legado (já existe e você usa hoje):
- * - GET /utilidades/status?machine_id=util_comp01 / util_ger01
- *   retorna ligado/falha/horas_vida.
+ * Objetivo visual (V1):
+ * - Cards por SISTEMA (pai), com cor fraca + ícone
+ * - Pouca informação:
+ *    - Pressão (quando fizer sentido)
+ *    - Equipamentos ativos
+ *    - Consumo hoje (kWh)
+ * - Clique para detalhes (por enquanto abre config do primeiro equipamento)
  */
 
-// ✅ Cards PAI pré-configurados (sistemas)
 const sistemas = [
   {
     system_id: "air_01",
+    tipo: "AIR",
     nome: "Ar Comprimido",
-    // por enquanto, clique vai para o primeiro equipamento do sistema:
+    tint: "tint-air",
+    icon: "air",
     config_target: "util_comp01",
-    // equipamentos do legado que representam esse sistema (V1)
     legacy_equip_ids: ["util_comp01"],
-    // busca status do sistema (novo backend)
     use_system_api: true
   },
   {
     system_id: "gen_01",
+    tipo: "ENERGY",
     nome: "Energia / Gerador",
+    tint: "tint-energy",
+    icon: "energy",
     config_target: "util_ger01",
     legacy_equip_ids: ["util_ger01"],
-    // ainda pode não existir no system_api; mantemos via legado
     use_system_api: false
   },
+
+  // Pré-configurados (V1) — ainda não monitorados (mas já aparecem bonitos)
+  { system_id: "water_01", tipo:"WATER", nome:"Água", tint:"tint-water", icon:"water", config_target:"#", legacy_equip_ids:[], use_system_api:false, disabled:true },
+  { system_id: "steam_01", tipo:"STEAM", nome:"Vapor", tint:"tint-steam", icon:"steam", config_target:"#", legacy_equip_ids:[], use_system_api:false, disabled:true },
+  { system_id: "cool_01",  tipo:"COOLING", nome:"Refrigeração", tint:"tint-cooling", icon:"cooling", config_target:"#", legacy_equip_ids:[], use_system_api:false, disabled:true },
+  { system_id: "tank_01",  tipo:"TANK", nome:"Tanque", tint:"tint-tank", icon:"tank", config_target:"#", legacy_equip_ids:[], use_system_api:false, disabled:true },
 ];
 
-// Helpers
-function fmtNum(v, digits=2){
+function fmtNum(v, digits=1){
   const n = Number(v);
   if(!Number.isFinite(n)) return "—";
-  const fixed = n.toFixed(digits);
-  return fixed.replace(".", ",");
+  return n.toFixed(digits).replace(".", ",");
 }
 
 function fmtInt(v){
@@ -180,9 +249,60 @@ function pressureText(pressure_ok){
   return "—";
 }
 
-// ===============================
-// CRIA OS CARDS UMA ÚNICA VEZ
-// ===============================
+/* ===== ÍCONES (SVG simples, sem depender de libs) ===== */
+function iconSvg(name){
+  if(name === "air"){
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12c3-4 6 4 9 0s6 4 9 0"/>
+        <path d="M3 7c3-4 6 4 9 0s6 4 9 0"/>
+        <path d="M3 17c3-4 6 4 9 0s6 4 9 0"/>
+      </svg>`;
+  }
+  if(name === "water"){
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0369a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12z"/>
+      </svg>`;
+  }
+  if(name === "steam"){
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3c2 2-2 4 0 6s-2 4 0 6"/>
+        <path d="M12 3c2 2-2 4 0 6s-2 4 0 6"/>
+        <path d="M16 3c2 2-2 4 0 6s-2 4 0 6"/>
+      </svg>`;
+  }
+  if(name === "energy"){
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13 2L3 14h7l-1 8 12-14h-7l-1-6z"/>
+      </svg>`;
+  }
+  if(name === "cooling"){
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v20"/>
+        <path d="M4.5 7.5l15 9"/>
+        <path d="M19.5 7.5l-15 9"/>
+        <circle cx="12" cy="12" r="2"/>
+      </svg>`;
+  }
+  if(name === "tank"){
+    return `
+      <svg viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 7c0-2 14-2 14 0v10c0 2-14 2-14 0V7z"/>
+        <path d="M5 7c0 2 14 2 14 0"/>
+      </svg>`;
+  }
+  return `
+    <svg viewBox="0 0 24 24" fill="none" stroke="#334155" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 7v6"/>
+      <path d="M12 17h.01"/>
+    </svg>`;
+}
+
 function criarCards(){
   const area = document.getElementById("utilidades-grid");
   area.innerHTML = "";
@@ -190,48 +310,52 @@ function criarCards(){
   sistemas.forEach(sys => {
     const a = document.createElement("a");
     a.className = "card-link";
-    a.href = `/utilidades/config/${sys.config_target}`;
+    a.href = (sys.disabled ? "javascript:void(0)" : `/utilidades/config/${sys.config_target}`);
+
+    const disabledPill = sys.disabled ? `<span class="pill-muted">NÃO MONITORADO</span>` : "";
 
     a.innerHTML = `
-      <div class="card" id="card-${sys.system_id}">
-        <div class="card-head">
-          <div class="card-title">${sys.nome}</div>
-          <div id="badge-${sys.system_id}" class="badge badge-unk">DESCONHECIDO</div>
+      <div class="card ${sys.tint}" id="card-${sys.system_id}">
+        <div class="card-row">
+          <div class="icon-wrap">${iconSvg(sys.icon)}</div>
+
+          <div class="card-main">
+            <div class="card-head">
+              <div class="card-title">${sys.nome}</div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                ${disabledPill}
+                <div id="badge-${sys.system_id}" class="badge badge-unk">DESCONHECIDO</div>
+              </div>
+            </div>
+
+            <div id="stop-${sys.system_id}" class="stopline">0 min parados</div>
+
+            <div class="mini">
+              <div class="k">Pressão</div>
+              <div class="v" id="pressure-${sys.system_id}">—</div>
+
+              <div class="k">Ativos</div>
+              <div class="v" id="equip-${sys.system_id}">—</div>
+
+              <div class="k">Consumo hoje</div>
+              <div class="v" id="energy-${sys.system_id}">—</div>
+            </div>
+
+            <div class="footer-note">Clique para detalhes</div>
+          </div>
         </div>
-
-        <div id="stop-${sys.system_id}" class="stopline">0 min parados</div>
-
-        <div class="subline">
-          <div class="k">Pressão</div>
-          <div class="v" id="pressure-${sys.system_id}">—</div>
-        </div>
-
-        <div class="subline">
-          <div class="k">Equipamentos ativos</div>
-          <div class="v" id="equip-${sys.system_id}">—</div>
-        </div>
-
-        <div class="subline">
-          <div class="k">Potência agora</div>
-          <div class="v" id="power-${sys.system_id}">—</div>
-        </div>
-
-        <div class="subline">
-          <div class="k">Consumo hoje</div>
-          <div class="v" id="energy-${sys.system_id}">—</div>
-        </div>
-
-        <div class="footer-note">Clique para detalhes</div>
       </div>
     `;
+
+    if(sys.disabled){
+      a.addEventListener("click", (e) => e.preventDefault());
+    }
 
     area.appendChild(a);
   });
 }
 
-// ===============================
-// 1) BUSCA LEGADO (equipamentos)
-// ===============================
+// LEGADO
 async function fetchLegacyEquip(machine_id){
   const r = await fetch(`/utilidades/status?machine_id=${machine_id}`);
   if(!r.ok) return null;
@@ -239,7 +363,6 @@ async function fetchLegacyEquip(machine_id){
 }
 
 async function calcLegacyEquipSummary(legacy_ids){
-  // soma simples: considera "ativo" se ligado==1 e falha==0
   let total = 0;
   let ativos = 0;
 
@@ -256,36 +379,38 @@ async function calcLegacyEquipSummary(legacy_ids){
   return { total, ativos };
 }
 
-// ===============================
-// 2) BUSCA SYSTEM API (novo)
-// ===============================
+// SYSTEM API (novo)
 async function fetchSystemStatus(system_id){
   const r = await fetch(`/utilidades/system/status?system_id=${system_id}`);
   if(!r.ok) return null;
   return await r.json();
 }
 
-// ===============================
-// ATUALIZA SOMENTE OS VALORES
-// ===============================
 async function atualizarSistemas(){
   for(const sys of sistemas){
-    // DOM refs
     const badgeEl = document.getElementById(`badge-${sys.system_id}`);
     const stopEl = document.getElementById(`stop-${sys.system_id}`);
     const pressureEl = document.getElementById(`pressure-${sys.system_id}`);
     const equipEl = document.getElementById(`equip-${sys.system_id}`);
-    const powerEl = document.getElementById(`power-${sys.system_id}`);
     const energyEl = document.getElementById(`energy-${sys.system_id}`);
 
-    // defaults
+    if(sys.disabled){
+      // mantém simples e bonito
+      badgeEl.textContent = "DESCONHECIDO";
+      badgeEl.className = `badge badge-unk`;
+      pressureEl.textContent = "—";
+      equipEl.textContent = "—";
+      energyEl.textContent = "—";
+      stopEl.style.display = "none";
+      continue;
+    }
+
     let status = "DESCONHECIDO";
     let pressure_ok = null;
-    let power_kw = null;
     let energy_kwh_day = null;
     let parado_min = null;
 
-    // (A) resumo de equipamentos via legado (sempre)
+    // (A) legado para ativos
     const eqSum = await calcLegacyEquipSummary(sys.legacy_equip_ids);
     if(eqSum){
       equipEl.textContent = `${eqSum.ativos}/${eqSum.total}`;
@@ -293,17 +418,16 @@ async function atualizarSistemas(){
       equipEl.textContent = "—";
     }
 
-    // (B) se tiver system api ativo, usa para pressão/energia/status/parada
+    // (B) system api quando existir
     if(sys.use_system_api){
       const s = await fetchSystemStatus(sys.system_id);
       if(s){
         status = normalizeStatus(s.status);
         pressure_ok = (s.pressure_ok === true || s.pressure_ok === false) ? s.pressure_ok : null;
-        power_kw = s.power_kw;
         energy_kwh_day = s.energy_kwh_day;
         parado_min = s.parado_min;
       }else{
-        // fallback: sem system api ainda -> inferência básica por legado
+        // fallback básico
         if(eqSum && eqSum.ativos >= 1){
           status = "PRODUZINDO";
         }else if(eqSum){
@@ -311,7 +435,7 @@ async function atualizarSistemas(){
         }
       }
     }else{
-      // (C) sistema sem system api ainda -> status por legado
+      // sem system api -> inferência via legado
       if(eqSum && eqSum.ativos >= 1){
         status = "PRODUZINDO";
       }else if(eqSum){
@@ -319,19 +443,20 @@ async function atualizarSistemas(){
       }
     }
 
-    // Atualiza badge
+    // Badge
     badgeEl.textContent = status;
     badgeEl.className = `badge ${badgeClass(status)}`;
 
-    // Pressão
-    // Só exibe pressão (OK/BAIXA) no Ar Comprimido (system_api)
+    // Pressão (só em ar por enquanto)
     pressureEl.textContent = (sys.use_system_api ? pressureText(pressure_ok) : "—");
 
     // Consumo (quando existir)
-    powerEl.textContent = (power_kw === null || power_kw === undefined) ? "—" : `${fmtNum(power_kw, 1)} kW`;
-    energyEl.textContent = (energy_kwh_day === null || energy_kwh_day === undefined) ? "—" : `${fmtNum(energy_kwh_day, 1)} kWh`;
+    energyEl.textContent =
+      (energy_kwh_day === null || energy_kwh_day === undefined)
+        ? "—"
+        : `${fmtNum(energy_kwh_day, 1)} kWh`;
 
-    // Linha de parada
+    // Parada
     if(status === "PARADA" && parado_min !== null && parado_min !== undefined){
       stopEl.textContent = `${fmtInt(parado_min)} min parados`;
       stopEl.style.display = "";
@@ -342,7 +467,6 @@ async function atualizarSistemas(){
   }
 }
 
-// INIT
 criarCards();
 atualizarSistemas();
 setInterval(atualizarSistemas, 2000);

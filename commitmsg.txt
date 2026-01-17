@@ -1,6 +1,6 @@
-﻿feat(utilidades-ui): trocar tela de utilidades para cards de sistemas (pai) pre-configurados
+﻿feat(utilidades-ui): cards mais visuais com cores por tipo e icones, reduzindo informacoes
 
-- Tela agora mostra sistemas (Ar Comprimido, Energia/Gerador) com resumo
-- Integra /utilidades/system/status (quando disponível) para status/pressao/consumo/parado_min
-- Mantém sinais digitais atuais via /utilidades/status (legado) para contagem de equipamentos ativos
-- Clique ainda abre config do primeiro equipamento (placeholder até tela de detalhe do sistema)
+- Adiciona tint (cor fraca) por utilidade: ar/agua/vapor/energia/refrigeracao/tanque
+- Inclui icones SVG no card (mais visual)
+- Reduz informacoes no card para Pressao/Ativos/Consumo hoje + tempo parado quando PARADA
+- Mantem integracao com legado e system/status sem mexer no backend
