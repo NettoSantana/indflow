@@ -1,3 +1,9 @@
+/*
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\static\dashboard.ui.js
+Último recode: 2026-01-16 21:25 (America/Bahia)
+Motivo: No card de Produção, padronizar status para PRODUZINDO/PARADA e exibir "XX min parados" usando status_ui/parado_min do backend, sem alterar percentuais.
+*/
+
 // static/dashboard.ui.js
 
 function fmt(n){
@@ -14,6 +20,82 @@ function setText(id, txt){
 function setVisible(id, isVisible){
   const el = document.getElementById(id);
   if(el) el.style.display = isVisible ? "" : "none";
+}
+
+/* ===========================
+   STATUS UI (PRODUZINDO / PARADA)
+   =========================== */
+
+function resolveStatusUI(data){
+  const ui = String((data && data.status_ui) || "").trim().toUpperCase();
+  if(ui === "PRODUZINDO" || ui === "PARADA") return ui;
+
+  // fallback: backend antigo
+  const raw = String((data && data.status) || "").trim().toUpperCase();
+  if(raw === "AUTO") return "PRODUZINDO";
+  if(raw) return "PARADA";
+  return "PARADA";
+}
+
+function resolveParadoMin(data){
+  const v = Number(data && data.parado_min);
+  if(Number.isFinite(v) && v >= 0) return Math.floor(v);
+  return null;
+}
+
+function applyStatusToCard(machineId, data){
+  const sid = safeSid(machineId);
+
+  const badgeId = `status-badge-${sid}`;
+  const stopId = `stopline-${sid}`;
+
+  const statusUI = resolveStatusUI(data);
+  const produzindo = (statusUI === "PRODUZINDO");
+  const mins = resolveParadoMin(data);
+
+  // Badge: PRODUZINDO (verde) / PARADA (vermelho)
+  const badge = document.getElementById(badgeId);
+  if(badge){
+    badge.textContent = statusUI;
+
+    badge.classList.remove("status-auto");
+    badge.classList.remove("status-manual");
+
+    if(produzindo){
+      badge.classList.add("status-auto");
+    }else{
+      badge.classList.add("status-manual");
+    }
+  }
+
+  // Linha: "XX min parados" (só quando PARADA e mins disponível)
+  const stopEl = document.getElementById(stopId);
+  if(stopEl){
+    if(!produzindo && mins !== null){
+      stopEl.textContent = `${mins} min parados`;
+      stopEl.style.display = "";
+    }else{
+      stopEl.textContent = "";
+      stopEl.style.display = "none";
+    }
+  }
+}
+
+/* Poll simples só do status (não mexe em percentuais) */
+function refreshStatuses(){
+  try{
+    const pageItems = getMachinesPage(); // só as máquinas visíveis (pager)
+    pageItems.forEach((machineId) => {
+      fetch(`/machine/status?machine_id=${machineId}`)
+        .then(r => r.json())
+        .then(data => applyStatusToCard(machineId, data))
+        .catch(() => {
+          // se falhar, não quebra a tela
+        });
+    });
+  }catch(e){
+    // silencioso
+  }
 }
 
 /* ===========================
@@ -149,7 +231,8 @@ function cardHTML(machineId){
         <div class="machine-name">${upper}</div>
 
         <div style="display:flex; align-items:center; gap:10px;">
-          <div id="status-badge-${sid}" class="machine-status status-auto">AUTO</div>
+          <!-- padrão inicial: será substituído por refreshStatuses() -->
+          <div id="status-badge-${sid}" class="machine-status status-auto">PRODUZINDO</div>
 
           <button
             type="button"
@@ -162,6 +245,9 @@ function cardHTML(machineId){
           </button>
         </div>
       </div>
+
+      <!-- NOVO: linha abaixo do badge -->
+      <div id="stopline-${sid}" class="machine-stopline" style="display:none"></div>
 
       <div class="percent-container">
 
@@ -231,6 +317,9 @@ function renderMachines(){
   grid.innerHTML = pageItems.map(cardHTML).join("");
 
   renderPager();
+
+  // ✅ atualiza o status assim que renderiza
+  refreshStatuses();
 }
 
 /* ===========================
@@ -278,3 +367,6 @@ document.getElementById("btnSave").addEventListener("click", () => {
 
 /* INIT UI */
 renderMachines();
+
+// ✅ Poll leve só do status (não mexe nos números do card)
+setInterval(refreshStatuses, 2000);
