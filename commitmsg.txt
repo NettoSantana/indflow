@@ -1,5 +1,5 @@
-﻿feat(producao-card): exibir PRODUZINDO/PARADA e 'XX min parados' no dashboard
+﻿fix(producao-card): remover conflito AUTO/MANUAL e padronizar PRODUZINDO/PARADA no update loop
 
-- Badge agora usa status_ui (fallback: status AUTO/...)
-- Quando PARADA, mostra parado_min como 'XX min parados' abaixo do badge
-- Implementado somente em static/dashboard.ui.js (sem mexer em percentuais)
+- dashboard.update.js agora usa status_ui (fallback status) no badge
+- exibe 'XX min parados' com parado_min no elemento stopline-*
+- evita alternancia com AUTO/MANUAL
