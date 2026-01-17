@@ -1,5 +1,6 @@
-﻿feat(utilidades): criar store de sistemas (card pai) separado do legado de equipamentos
+﻿feat(utilidades-backend): endpoints V1 para sistemas (card pai) com status e parado_min
 
-- Mantém utilidades_data (equipamentos individuais) como legado
-- Adiciona utilidades_systems (ex: air_01) para utilidades por sistema
-- Inclui helper get_or_create_system e timestamps em America/Bahia
+- Adiciona POST /utilidades/system/update (payload padrão do ESP)
+- Adiciona GET  /utilidades/system/status (retorno pronto para card pai)
+- Implementa regras de status PRODUZINDO/ATENCAO/PARADA + offline + parado_min
+- Mantém rotas legadas (/update e /status) intactas
