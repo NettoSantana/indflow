@@ -1,5 +1,5 @@
-﻿fix(producao-card): remover conflito AUTO/MANUAL e padronizar PRODUZINDO/PARADA no update loop
+﻿feat(utilidades): criar store de sistemas (card pai) separado do legado de equipamentos
 
-- dashboard.update.js agora usa status_ui (fallback status) no badge
-- exibe 'XX min parados' com parado_min no elemento stopline-*
-- evita alternancia com AUTO/MANUAL
+- Mantém utilidades_data (equipamentos individuais) como legado
+- Adiciona utilidades_systems (ex: air_01) para utilidades por sistema
+- Inclui helper get_or_create_system e timestamps em America/Bahia
