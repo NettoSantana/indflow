@@ -1,6 +1,5 @@
-﻿feat(utilidades-ui): cards mais visuais com cores por tipo e icones, reduzindo informacoes
+﻿feat(utilidades): adicionar rota de detalhe do sistema (cards filhos)
 
-- Adiciona tint (cor fraca) por utilidade: ar/agua/vapor/energia/refrigeracao/tanque
-- Inclui icones SVG no card (mais visual)
-- Reduz informacoes no card para Pressao/Ativos/Consumo hoje + tempo parado quando PARADA
-- Mantem integracao com legado e system/status sem mexer no backend
+- Cria GET /utilidades/system/<system_id> (pagina de detalhe do sistema)
+- Renderiza template utilidades_system_detail.html (sera criado no proximo passo)
+- Mantem rotas legadas e APIs existentes intactas
