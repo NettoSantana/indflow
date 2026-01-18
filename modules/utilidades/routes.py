@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\utilidades\routes.py
-# Último recode: 2026-01-16 23:20 (America/Bahia)
-# Motivo: Integrar services.py como fonte única das regras (status/offline/tempo parado) SEM remover linhas/estruturas existentes do routes.py.
+# Último recode: 2026-01-17 09:05 (America/Bahia)
+# Motivo: Adicionar rota de detalhe do sistema (card pai) em /utilidades/system/<system_id>, mantendo todo o resto intacto.
 
 from flask import Blueprint, render_template, request, jsonify
 from datetime import datetime
@@ -356,3 +356,47 @@ def system_status():
     # lista todos
     out = [build_out(s) for s in utilidades_systems.values()]
     return jsonify(out)
+
+
+# ============================================================
+# NOVO (V1) — PÁGINA DE DETALHE DO SISTEMA (CARD FILHOS)
+# ============================================================
+
+@utilidades_bp.route("/system/<system_id>")
+@login_required
+def system_detail(system_id):
+    """
+    Página de detalhe do SISTEMA (pai). Ex.: /utilidades/system/air_01
+
+    OBS: O template será criado no próximo passo:
+      templates/utilidades_system_detail.html
+    """
+    system_id = (system_id or "").strip()
+
+    s = utilidades_systems.get(system_id)
+    if not s:
+        return "system_id não encontrado", 404
+
+    # garante status/parada sempre atualizados ao abrir a página
+    status = _calc_system_status(s)
+    s["status"] = status
+    _update_stopped_clock(s, status)
+
+    eq = _equip_summary(s)
+
+    view_model = {
+        "system_id": s.get("system_id"),
+        "system_type": s.get("system_type"),
+        "status": s.get("status"),
+        "parado_min": s.get("parado_min"),
+        "pressure_ok": s.get("pressure_ok"),
+        "system_running": s.get("system_running"),
+        "power_kw": s.get("power_kw"),
+        "energy_kwh_day": s.get("energy_kwh_day"),
+        "equipments_total": eq["total"],
+        "equipments_running": eq["running"],
+        "equipments": s.get("equipments") or [],
+        "last_seen": s.get("last_seen"),
+    }
+
+    return render_template("utilidades_system_detail.html", system=view_model)
