@@ -1,0 +1,207 @@
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\utilidades\templates\utilidades_system_detail.html
+Último recode: 2026-01-17 09:30 (America/Bahia)
+Motivo: Criar tela de detalhe do sistema de utilidades (card pai) com visão geral e cards filhos (equipamentos).
+-->
+
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Utilidades | {{ system.system_type }} - {{ system.system_id }}</title>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #f3f6f9;
+            font-family: Arial, Helvetica, sans-serif;
+            color: #1f2937;
+        }
+
+        .container {
+            padding: 32px 48px;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 32px;
+        }
+
+        .title {
+            font-size: 26px;
+            font-weight: 700;
+        }
+
+        .status {
+            padding: 8px 18px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 13px;
+            text-transform: uppercase;
+            color: #fff;
+        }
+
+        .PRODUZINDO { background: #16a34a; }
+        .ATENCAO    { background: #f59e0b; }
+        .PARADA     { background: #dc2626; }
+        .DESCONHECIDO { background: #6b7280; }
+
+        /* CARD PAI */
+        .card-system {
+            background: #ffffff;
+            border-radius: 16px;
+            padding: 24px 28px;
+            box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+            margin-bottom: 40px;
+        }
+
+        .system-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 24px;
+            margin-top: 20px;
+        }
+
+        .metric {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+        }
+
+        .metric label {
+            display: block;
+            font-size: 13px;
+            color: #6b7280;
+            margin-bottom: 8px;
+        }
+
+        .metric span {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        /* CARDS FILHOS */
+        .equip-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+
+        .equip-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 20px;
+        }
+
+        .equip-card {
+            background: #ffffff;
+            border-radius: 14px;
+            padding: 18px 20px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+        }
+
+        .equip-card h3 {
+            margin: 0 0 12px 0;
+            font-size: 16px;
+        }
+
+        .equip-status {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 14px;
+            font-size: 12px;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .RUNNING { background: #16a34a; }
+        .STOPPED { background: #dc2626; }
+
+        .footer {
+            margin-top: 32px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <!-- HEADER -->
+    <div class="header">
+        <div class="title">
+            {{ system.system_type }} — {{ system.system_id }}
+        </div>
+        <div class="status {{ system.status }}">
+            {{ system.status }}
+        </div>
+    </div>
+
+    <!-- CARD PAI -->
+    <div class="card-system">
+        <h2>Visão Geral do Sistema</h2>
+
+        <div class="system-grid">
+            <div class="metric">
+                <label>Equipamentos ativos</label>
+                <span>{{ system.equipments_running }}/{{ system.equipments_total }}</span>
+            </div>
+
+            <div class="metric">
+                <label>Pressão OK</label>
+                <span>
+                    {% if system.pressure_ok == True %}SIM{% elif system.pressure_ok == False %}NÃO{% else %}—{% endif %}
+                </span>
+            </div>
+
+            <div class="metric">
+                <label>Potência atual (kW)</label>
+                <span>{{ system.power_kw if system.power_kw is not none else "—" }}</span>
+            </div>
+
+            <div class="metric">
+                <label>Consumo hoje (kWh)</label>
+                <span>{{ system.energy_kwh_day if system.energy_kwh_day is not none else "—" }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- CARDS FILHOS -->
+    <div class="equip-title">
+        Equipamentos do Sistema
+    </div>
+
+    <div class="equip-grid">
+        {% for eq in system.equipments %}
+        <div class="equip-card">
+            <h3>{{ eq.id }}</h3>
+
+            {% if eq.running %}
+                <span class="equip-status RUNNING">RODANDO</span>
+            {% else %}
+                <span class="equip-status STOPPED">PARADO</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+
+        {% if system.equipments|length == 0 %}
+        <div class="equip-card">
+            <h3>Sem equipamentos cadastrados</h3>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="footer">
+        Última atualização: {{ system.last_seen or "—" }}
+    </div>
+
+</div>
+
+</body>
+</html>
