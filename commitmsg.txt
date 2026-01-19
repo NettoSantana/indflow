@@ -1,6 +1,6 @@
-﻿feat(utilidades): criar tela de detalhe do sistema (card pai + cards filhos)
+﻿feat(utilidades-ui): melhorar visual do detalhe do sistema com cor por tipo e icones
 
-- Nova página utilidades_system_detail.html
-- Exibe visão geral do sistema (status, pressão, consumo, potência)
-- Lista equipamentos filhos com status rodando/parado
-- Layout limpo, visual e pronto para evoluções
+- Tela de detalhe agora herda base.html (navbar do sistema)
+- Aplica cores fracas (tint) por tipo: AIR/WATER/STEAM/ENERGY/COOLING/TANK
+- Inclui icone ao lado e reduz informacoes (essencial)
+- Exibe 'X min parados' quando status=PARADA e parado_min existir
