@@ -1,5 +1,6 @@
-﻿feat(utilidades): adicionar rota de detalhe do sistema (cards filhos)
+﻿feat(utilidades): criar tela de detalhe do sistema (card pai + cards filhos)
 
-- Cria GET /utilidades/system/<system_id> (pagina de detalhe do sistema)
-- Renderiza template utilidades_system_detail.html (sera criado no proximo passo)
-- Mantem rotas legadas e APIs existentes intactas
+- Nova página utilidades_system_detail.html
+- Exibe visão geral do sistema (status, pressão, consumo, potência)
+- Lista equipamentos filhos com status rodando/parado
+- Layout limpo, visual e pronto para evoluções
