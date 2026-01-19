@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\utilidades\data.py
-# Último recode: 2026-01-16 22:10 (America/Bahia)
-# Motivo: Separar store de "sistemas de utilidades" (ex: Ar Comprimido) do legado de equipamentos individuais, preparando backend V1.
+# Último recode: 2026-01-18 17:05 (America/Bahia)
+# Motivo: Adicionar sistema pré-configurado gen_01 (ENERGY) no store utilidades_systems para habilitar detalhe /utilidades/system/gen_01 sem 404.
 
 from __future__ import annotations
 
@@ -84,8 +84,10 @@ def _default_system(system_type: str, system_id: str) -> Dict[str, Any]:
 
 # Cards pré-configurados (V1) — pode adicionar depois:
 # AIR: Ar Comprimido
+# ENERGY: Energia / Gerador
 utilidades_systems: Dict[str, Dict[str, Any]] = {
     "air_01": _default_system("AIR", "air_01"),
+    "gen_01": _default_system("ENERGY", "gen_01"),
 }
 
 

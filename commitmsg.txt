@@ -1,5 +1,4 @@
-﻿fix(utilidades): clicar no card abre detalhe do sistema (opcao A)
+﻿feat(utilidades): adicionar sistema pre-configurado gen_01 (ENERGY)
 
-- utilidades_home.html agora aponta para /utilidades/system/<system_id>
-- Mantem comportamento de cards desabilitados (nao monitorado)
-- Sem alterar backend
+- Inclui gen_01 em utilidades_systems para permitir acesso ao detalhe /utilidades/system/gen_01
+- Mantem legado (util_comp01/util_ger01) intacto
