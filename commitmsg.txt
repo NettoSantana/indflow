@@ -1,6 +1,5 @@
-﻿feat(utilidades-ui): melhorar visual do detalhe do sistema com cor por tipo e icones
+﻿fix(utilidades): clicar no card abre detalhe do sistema (opcao A)
 
-- Tela de detalhe agora herda base.html (navbar do sistema)
-- Aplica cores fracas (tint) por tipo: AIR/WATER/STEAM/ENERGY/COOLING/TANK
-- Inclui icone ao lado e reduz informacoes (essencial)
-- Exibe 'X min parados' quando status=PARADA e parado_min existir
+- utilidades_home.html agora aponta para /utilidades/system/<system_id>
+- Mantem comportamento de cards desabilitados (nao monitorado)
+- Sem alterar backend
