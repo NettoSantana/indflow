@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\utilidades_home.html
-Último recode: 2026-01-17 08:55 (America/Bahia)
-Motivo: Melhorar visual dos cards de Utilidades com cores fracas por tipo (AR/VAPOR/AGUA/etc), ícones e menos informação exibida (sem poluir).
+Último recode: 2026-01-18 16:45 (America/Bahia)
+Motivo: Opção A — ao clicar no card de sistema, abrir detalhe do sistema (/utilidades/system/<system_id>) em vez da config do equipamento legado.
 -->
 
 {% extends "base.html" %}
@@ -184,7 +184,7 @@ Motivo: Melhorar visual dos cards de Utilidades com cores fracas por tipo (AR/VA
  *    - Pressão (quando fizer sentido)
  *    - Equipamentos ativos
  *    - Consumo hoje (kWh)
- * - Clique para detalhes (por enquanto abre config do primeiro equipamento)
+ * - Clique para detalhes
  */
 
 const sistemas = [
@@ -310,7 +310,9 @@ function criarCards(){
   sistemas.forEach(sys => {
     const a = document.createElement("a");
     a.className = "card-link";
-    a.href = (sys.disabled ? "javascript:void(0)" : `/utilidades/config/${sys.config_target}`);
+
+    // ✅ Opção A: clique abre detalhe do SISTEMA (pai)
+    a.href = (sys.disabled ? "javascript:void(0)" : `/utilidades/system/${sys.system_id}`);
 
     const disabledPill = sys.disabled ? `<span class="pill-muted">NÃO MONITORADO</span>` : "";
 
@@ -395,7 +397,6 @@ async function atualizarSistemas(){
     const energyEl = document.getElementById(`energy-${sys.system_id}`);
 
     if(sys.disabled){
-      // mantém simples e bonito
       badgeEl.textContent = "DESCONHECIDO";
       badgeEl.className = `badge badge-unk`;
       pressureEl.textContent = "—";
@@ -410,7 +411,6 @@ async function atualizarSistemas(){
     let energy_kwh_day = null;
     let parado_min = null;
 
-    // (A) legado para ativos
     const eqSum = await calcLegacyEquipSummary(sys.legacy_equip_ids);
     if(eqSum){
       equipEl.textContent = `${eqSum.ativos}/${eqSum.total}`;
@@ -418,7 +418,6 @@ async function atualizarSistemas(){
       equipEl.textContent = "—";
     }
 
-    // (B) system api quando existir
     if(sys.use_system_api){
       const s = await fetchSystemStatus(sys.system_id);
       if(s){
@@ -427,7 +426,6 @@ async function atualizarSistemas(){
         energy_kwh_day = s.energy_kwh_day;
         parado_min = s.parado_min;
       }else{
-        // fallback básico
         if(eqSum && eqSum.ativos >= 1){
           status = "PRODUZINDO";
         }else if(eqSum){
@@ -435,7 +433,6 @@ async function atualizarSistemas(){
         }
       }
     }else{
-      // sem system api -> inferência via legado
       if(eqSum && eqSum.ativos >= 1){
         status = "PRODUZINDO";
       }else if(eqSum){
@@ -443,20 +440,16 @@ async function atualizarSistemas(){
       }
     }
 
-    // Badge
     badgeEl.textContent = status;
     badgeEl.className = `badge ${badgeClass(status)}`;
 
-    // Pressão (só em ar por enquanto)
     pressureEl.textContent = (sys.use_system_api ? pressureText(pressure_ok) : "—");
 
-    // Consumo (quando existir)
     energyEl.textContent =
       (energy_kwh_day === null || energy_kwh_day === undefined)
         ? "—"
         : `${fmtNum(energy_kwh_day, 1)} kWh`;
 
-    // Parada
     if(status === "PARADA" && parado_min !== null && parado_min !== undefined){
       stopEl.textContent = `${fmtInt(parado_min)} min parados`;
       stopEl.style.display = "";
