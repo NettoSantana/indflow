@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 19:55 (America/Bahia)
-# Motivo: Alerta de Parada por Falta de Produção (por máquina): salvar alerta_sem_contagem_seg via /machine/config e aplicar no /machine/status (override de AUTO quando não há incremento).
+# Último recode: 2026-01-20 20:35 (America/Bahia)
+# Motivo: Corrigir produção da hora fora do turno: usar np_producao_hora (zera por hora) em vez do acumulado np_producao; evita 'pulos' na tabela.
 
 # modules/machine_routes.py
 import os
@@ -1126,10 +1126,16 @@ def machine_status():
         np_prod = 0
 
     if m.get("ultima_hora") is None and np_prod > 0:
-        m["producao_hora"] = np_prod
+        # ✅ Fora do turno: NUNCA usar np_producao (acumulado do dia) como produção da hora.
+        # Isso causava "pulos" e não zerava na virada da hora.
+        try:
+            np_h = int(m.get("np_producao_hora", 0) or 0)
+        except Exception:
+            np_h = 0
+        m["producao_hora"] = max(0, np_h)
         m["percentual_hora"] = 0
         m["fora_turno"] = True
-        m["producao_hora_liquida"] = np_prod
+        m["producao_hora_liquida"] = m["producao_hora"]
         return jsonify(m)
 
     try:
