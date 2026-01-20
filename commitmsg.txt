@@ -1,5 +1,4 @@
-﻿fix(machine): fechamento diario multi-tenant grava cliente_id no historico
+﻿fix(machine): /machine/config volta a salvar configs (resolve cliente_id)
 
-- seta m['cliente_id'] no /machine/update antes do reset diario
-- evita fechamento com data vazia no primeiro pacote
-- marca producao_diaria com cliente_id no fechamento (historico volta a aparecer)
+- corrige NameError em configurar_maquina(): cliente_id agora vem de _get_cliente_id_for_request()
+- mantém lógica de histórico multi-tenant
