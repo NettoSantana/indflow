@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 06:30 (America/Bahia)
-# Motivo: Corrigir fechamento diário multi-tenant: garantir cliente_id no contexto da máquina e marcar producao_diaria no reset diário (histórico passa a aparecer por cliente).
+# Último recode: 2026-01-20 16:32 (America/Bahia)
+# Motivo: Corrigir /machine/config (configurar_maquina): resolver cliente_id corretamente via sessão/API key (evita NameError e volta a permitir salvar configurações).
 
 # modules/machine_routes.py
 import os
@@ -520,6 +520,15 @@ def configurar_maquina():
     # ✅ MULTI-TENANT: injeta cliente_id no contexto da máquina
     # Isso garante que o fechamento diário (reset_contexto) grave o machine_id scoped
     # e permite marcar producao_diaria com cliente_id para o histórico.
+
+    # =====================================================
+    # ✅ MULTI-TENANT: resolve cliente_id para configuração
+    # /machine/config é usado via painel web (sessão) e pode ser usado via API (X-API-Key).
+    # Usamos o mesmo resolver do resto do módulo para evitar NameError e manter segurança.
+    cliente_id = _get_cliente_id_for_request()
+    if not cliente_id:
+        return jsonify({"error": "unauthorized"}), 401
+
     m["cliente_id"] = cliente_id
 
     # Se a máquina acabou de nascer no backend e ainda não tem ultimo_dia, ancora no dia operacional atual
