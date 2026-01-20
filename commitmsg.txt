@@ -1,5 +1,4 @@
-﻿feat(ui): adicionar alerta de parada por inatividade por máquina (config)
+﻿feat(machine_config): persistir alerta de parada por inatividade por máquina
 
-- inclui campo no_count_stop_sec na tela de configuração
-- envia no_count_stop_sec no POST /machine/config
-- carrega valor do GET /machine/status com fallback 60s
+- adiciona coluna alerta_sem_contagem_seg em machine_config (migração segura)
+- inclui alerta_sem_contagem_seg no upsert_machine_config
