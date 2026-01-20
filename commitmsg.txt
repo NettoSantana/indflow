@@ -1,4 +1,5 @@
-﻿fix(machine): /machine/config volta a salvar configs (resolve cliente_id)
+﻿fix(np): persistir hora extra (fora do planejado) no SQLite
 
-- corrige NameError em configurar_maquina(): cliente_id agora vem de _get_cliente_id_for_request()
-- mantém lógica de histórico multi-tenant
+- cria tabela nao_programado_diario (machine_id,data_ref)
+- recarrega np_producao/np_minutos após restart
+- grava continuamente np_producao/np_minutos por dia operacional (23:59)
