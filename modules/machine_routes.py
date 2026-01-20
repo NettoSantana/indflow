@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 16:32 (America/Bahia)
-# Motivo: Corrigir /machine/config (configurar_maquina): resolver cliente_id corretamente via sessão/API key (evita NameError e volta a permitir salvar configurações).
+# Último recode: 2026-01-20 17:25 (America/Bahia)
+# Motivo: Auto-parada por falta de contagem: mesmo em AUTO/PRODUZINDO, se não houver incremento de peças por um limiar, status_ui vira PARADA; persiste último instante de contagem por máquina.
 
 # modules/machine_routes.py
 import os
@@ -316,6 +316,73 @@ def _clear_stopped_since(machine_id: str, updated_at: str):
     try:
         _ensure_machine_stop_table(conn)
         conn.execute("DELETE FROM machine_stop WHERE machine_id = ?", (machine_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ============================================================
+# AUTO-PARADA POR FALTA DE CONTAGEM (BACKEND)
+#   - Mesmo que o ESP envie status=AUTO/PRODUZINDO, se não houver incremento de peças
+#     por um limiar (ex.: 60s), consideramos PARADA.
+#   - Limiar configurável via ENV: INDFLOW_NO_COUNT_STOP_SEC (default 60s)
+#   - Persistência simples por máquina (machine_id) em SQLite para sobreviver a restart.
+# ============================================================
+try:
+    NO_COUNT_STOP_SEC = int(os.getenv("INDFLOW_NO_COUNT_STOP_SEC") or "60")
+except Exception:
+    NO_COUNT_STOP_SEC = 60
+if NO_COUNT_STOP_SEC < 5:
+    NO_COUNT_STOP_SEC = 5
+
+
+def _ensure_machine_count_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS machine_count_state (
+            machine_id TEXT PRIMARY KEY,
+            last_esp_abs INTEGER NOT NULL,
+            last_count_ms INTEGER NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_machine_count_state_updated_at ON machine_count_state(updated_at)")
+    except Exception:
+        pass
+    conn.commit()
+
+
+def _get_count_state(machine_id: str):
+    conn = get_db()
+    try:
+        _ensure_machine_count_table(conn)
+        cur = conn.execute(
+            "SELECT last_esp_abs, last_count_ms FROM machine_count_state WHERE machine_id = ? LIMIT 1",
+            (machine_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            return int(row["last_esp_abs"] or 0), int(row["last_count_ms"] or 0)
+        except Exception:
+            return int(row[0] or 0), int(row[1] or 0)
+    finally:
+        conn.close()
+
+
+def _set_count_state(machine_id: str, last_esp_abs: int, last_count_ms: int, updated_at: str):
+    conn = get_db()
+    try:
+        _ensure_machine_count_table(conn)
+        conn.execute("""
+            INSERT INTO machine_count_state (machine_id, last_esp_abs, last_count_ms, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(machine_id) DO UPDATE SET
+                last_esp_abs=excluded.last_esp_abs,
+                last_count_ms=excluded.last_count_ms,
+                updated_at=excluded.updated_at
+        """, (machine_id, int(last_esp_abs), int(last_count_ms), updated_at))
         conn.commit()
     finally:
         conn.close()
@@ -683,12 +750,37 @@ def update_machine():
     # --- captura status anterior antes de sobrescrever
     prev_status = (m.get("status") or "").strip().upper()
 
+    # --- captura contador anterior para detectar incremento de peças (auto-parada)
+    try:
+        prev_esp_abs = int(m.get("esp_absoluto", 0) or 0)
+    except Exception:
+        prev_esp_abs = 0
+
+
     # status novo vindo do ESP
     new_status = (data.get("status", "DESCONHECIDO") or "DESCONHECIDO").strip().upper()
 
     m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
     m["run"] = _safe_int(data.get("run", 0), 0)
+
+    # --- auto-parada: atualiza último instante de contagem quando houver incremento
+    try:
+        agora = now_bahia()
+        updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+        now_ms = int(agora.timestamp() * 1000)
+
+        curr_esp_abs = int(m.get("esp_absoluto", 0) or 0)
+        if curr_esp_abs > int(prev_esp_abs or 0):
+            _set_count_state(machine_id, curr_esp_abs, now_ms, updated_at)
+            m["_last_count_ms"] = now_ms
+        else:
+            if _get_count_state(machine_id) is None:
+                _set_count_state(machine_id, curr_esp_abs, now_ms, updated_at)
+                m["_last_count_ms"] = now_ms
+    except Exception:
+        pass
+
 
     # --- parada oficial (backend)
     try:
@@ -898,8 +990,35 @@ def machine_status():
         now_ms = int(agora.timestamp() * 1000)
 
         if status == "AUTO":
-            m["status_ui"] = "PRODUZINDO"
-            m["parado_min"] = None
+            # ✅ AUTO-PARADA: se não houve incremento de peças por NO_COUNT_STOP_SEC, tratar como PARADA
+            ss_count = None
+            try:
+                ss_count = int(m.get("_last_count_ms") or 0) or None
+            except Exception:
+                ss_count = None
+
+            if ss_count is None:
+                try:
+                    st = _get_count_state(machine_id)
+                    if st:
+                        ss_count = int(st[1] or 0) or None
+                except Exception:
+                    ss_count = None
+
+            if ss_count is None:
+                # ancora agora para não marcar parada imediatamente
+                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+                _set_count_state(machine_id, int(m.get("esp_absoluto", 0) or 0), now_ms, updated_at)
+                ss_count = now_ms
+                m["_last_count_ms"] = now_ms
+
+            diff_ms = max(0, now_ms - int(ss_count))
+            if diff_ms >= int(NO_COUNT_STOP_SEC) * 1000:
+                m["status_ui"] = "PARADA"
+                m["parado_min"] = int(diff_ms // 60000)
+            else:
+                m["status_ui"] = "PRODUZINDO"
+                m["parado_min"] = None
         else:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
