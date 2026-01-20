@@ -1,4 +1,5 @@
-﻿feat(utilidades): adicionar sistema pre-configurado gen_01 (ENERGY)
+﻿fix(machine): fechamento diario multi-tenant grava cliente_id no historico
 
-- Inclui gen_01 em utilidades_systems para permitir acesso ao detalhe /utilidades/system/gen_01
-- Mantem legado (util_comp01/util_ger01) intacto
+- seta m['cliente_id'] no /machine/update antes do reset diario
+- evita fechamento com data vazia no primeiro pacote
+- marca producao_diaria com cliente_id no fechamento (historico volta a aparecer)
