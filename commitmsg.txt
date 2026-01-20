@@ -1,4 +1,5 @@
-﻿feat(machine): alerta de parada por falta de produção por máquina
+﻿fix(np): calcular e persistir hora extra por hora (zera na virada)
 
-- /machine/config: lê no_count_stop_sec e salva em alerta_sem_contagem_seg (machine_config)
-- /machine/status: carrega alerta_sem_contagem_seg do DB, expõe no_count_stop_sec e aplica no auto-parada
+- adiciona np_hour_ref/np_hour_baseline em nao_programado_diario
+- calcula np_producao_hora = np_producao - baseline da hora
+- reseta baseline na virada da hora para evitar 'pulos' na UI
