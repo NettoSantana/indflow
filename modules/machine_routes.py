@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 06:30 (America/Bahia)
-# Motivo: Corrigir fechamento diário multi-tenant: garantir cliente_id no contexto da máquina e marcar producao_diaria no reset diário (histórico passa a aparecer por cliente).
+# Último recode: 2026-01-16 19:05 (America/Bahia)
+# Motivo: Implementar "tempo parado" oficial (parado_min) no backend e status_ui (PRODUZINDO/PARADA) para o card de Produção.
 
 # modules/machine_routes.py
 import os
@@ -408,56 +408,6 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
     conn.commit()
 
 
-
-# ============================================================
-# PRODUCAO_DIARIA (multi-tenant) — garante coluna cliente_id e marca registros no fechamento
-# ============================================================
-def _ensure_producao_diaria_table(conn):
-    """
-    Garante que producao_diaria tenha cliente_id para o filtro do histórico.
-    Mantém compatibilidade com bancos antigos.
-    """
-    # tabela já existe no projeto; aqui só garantimos a coluna/índices
-    try:
-        conn.execute("ALTER TABLE producao_diaria ADD COLUMN cliente_id TEXT")
-    except Exception:
-        pass
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_diaria_cliente_data ON producao_diaria(cliente_id, data)")
-    except Exception:
-        pass
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_diaria_machine_data ON producao_diaria(machine_id, data)")
-    except Exception:
-        pass
-    conn.commit()
-
-
-def _marcar_producao_diaria_cliente(conn, cliente_id: str, raw_machine_id: str, dia_ref: str):
-    """
-    No fechamento diário (reset_contexto), o registro pode ser gravado sem cliente_id
-    em ambientes antigos. Como o histórico filtra por cliente_id, marcamos aqui.
-
-    Atualiza tanto machine_id legado (raw) quanto scoped (<cliente_id>::<raw>).
-    """
-    if not cliente_id:
-        return
-    mid = _norm_machine_id(raw_machine_id)
-    scoped = f"{cliente_id}::{mid}"
-    dr = (dia_ref or "").strip()
-    if not dr:
-        return
-    try:
-        conn.execute("""
-            UPDATE producao_diaria
-               SET cliente_id = ?
-             WHERE data = ?
-               AND (machine_id = ? OR machine_id = ?)
-               AND (cliente_id IS NULL OR TRIM(cliente_id) = '')
-        """, (cliente_id, dr, mid, scoped))
-        conn.commit()
-    except Exception:
-        pass
 # ============================================================
 # ADMIN - HARD RESET (LIMPA BANCO)
 # ============================================================
@@ -515,21 +465,6 @@ def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
-
-    # =====================================================
-    # ✅ MULTI-TENANT: injeta cliente_id no contexto da máquina
-    # Isso garante que o fechamento diário (reset_contexto) grave o machine_id scoped
-    # e permite marcar producao_diaria com cliente_id para o histórico.
-    m["cliente_id"] = cliente_id
-
-    # Se a máquina acabou de nascer no backend e ainda não tem ultimo_dia, ancora no dia operacional atual
-    # para evitar gravar histórico com data vazia no primeiro pacote.
-    agora = now_bahia()
-    dia_ref_atual = dia_operacional_ref_str(agora)
-    if not (str(m.get("ultimo_dia") or "").strip()):
-        m["ultimo_dia"] = dia_ref_atual
-
-    prev_dia_before = str(m.get("ultimo_dia") or "").strip()
 
     meta_turno = int(data["meta_turno"])
     rampa = int(data["rampa"])
@@ -641,35 +576,7 @@ def update_machine():
 
     m = get_machine(machine_id)
 
-    # ✅ multi-tenant: mantém cliente_id no contexto da máquina (necessário para reset/histórico)
-    m["cliente_id"] = cliente_id
-
-    # ✅ evita fechamento com data vazia no primeiro pacote da máquina
-    try:
-        agora = now_bahia()
-        dia_ref_atual = dia_operacional_ref_str(agora)
-        if not str(m.get("ultimo_dia") or "").strip():
-            m["ultimo_dia"] = dia_ref_atual
-    except Exception:
-        pass
-
-    prev_dia_before = str(m.get("ultimo_dia") or "").strip()
-
     verificar_reset_diario(m, machine_id)
-
-    # Se houve virada do dia operacional, o reset_contexto fechou o dia anterior.
-    # Garantimos que o registro em producao_diaria fique marcado com cliente_id (histórico filtra por isso).
-    try:
-        novo_dia = str(m.get("ultimo_dia") or "").strip()
-        if prev_dia_before and novo_dia and prev_dia_before != novo_dia:
-            conn = get_db()
-            try:
-                _ensure_producao_diaria_table(conn)
-                _marcar_producao_diaria_cliente(conn, cliente_id, machine_id, prev_dia_before)
-            finally:
-                conn.close()
-    except Exception:
-        pass
 
     # --- captura status anterior antes de sobrescrever
     prev_status = (m.get("status") or "").strip().upper()
