@@ -1,4 +1,6 @@
-# modules/repos/machine_config_repo.py
+# Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\repos\machine_config_repo.py
+# Último recode: 2026-01-20 19:20 (America/Bahia)
+# Motivo: Persistir configuração por máquina do "Alerta de Parada por Inatividade" (alerta_sem_contagem_seg) no machine_config.
 
 import json
 from datetime import datetime
@@ -40,6 +42,9 @@ def ensure_machine_config_table():
             unidade_2 TEXT,
             conv_m_por_pcs REAL,
 
+            -- ✅ NOVO: alerta de parada por falta de contagem (segundos)
+            alerta_sem_contagem_seg INTEGER,
+
             updated_at TEXT NOT NULL
         )
     """)
@@ -49,6 +54,9 @@ def ensure_machine_config_table():
     _ensure_column(conn, "machine_config", "unidade_1", "TEXT")
     _ensure_column(conn, "machine_config", "unidade_2", "TEXT")
     _ensure_column(conn, "machine_config", "conv_m_por_pcs", "REAL")
+
+    # ✅ NOVO: migração segura do alerta
+    _ensure_column(conn, "machine_config", "alerta_sem_contagem_seg", "INTEGER")
 
     conn.close()
 
@@ -64,6 +72,7 @@ def upsert_machine_config(machine_id: str, m: dict):
       - meta_por_hora (list)
       - unidade_1, unidade_2 (opcional)
       - conv_m_por_pcs (opcional)
+      - alerta_sem_contagem_seg (opcional)  ✅
     """
     machine_id = (machine_id or "").strip().lower()
     if not machine_id:
@@ -82,6 +91,21 @@ def upsert_machine_config(machine_id: str, m: dict):
         except Exception:
             conv = None
 
+        # ✅ NOVO: alerta de parada por falta de contagem (segundos)
+        # saneamento: mínimo 5s, máximo 86400s (24h) pra evitar absurdos
+        alerta_sec = m.get("alerta_sem_contagem_seg", None)
+        try:
+            if alerta_sec in (None, "", "none"):
+                alerta_sec = None
+            else:
+                alerta_sec = int(alerta_sec)
+                if alerta_sec < 5:
+                    alerta_sec = 5
+                if alerta_sec > 86400:
+                    alerta_sec = 86400
+        except Exception:
+            alerta_sec = None
+
         cur.execute("""
             INSERT INTO machine_config
             (
@@ -95,9 +119,10 @@ def upsert_machine_config(machine_id: str, m: dict):
               unidade_1,
               unidade_2,
               conv_m_por_pcs,
+              alerta_sem_contagem_seg,
               updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(machine_id) DO UPDATE SET
                 meta_turno=excluded.meta_turno,
                 turno_inicio=excluded.turno_inicio,
@@ -108,6 +133,7 @@ def upsert_machine_config(machine_id: str, m: dict):
                 unidade_1=excluded.unidade_1,
                 unidade_2=excluded.unidade_2,
                 conv_m_por_pcs=excluded.conv_m_por_pcs,
+                alerta_sem_contagem_seg=excluded.alerta_sem_contagem_seg,
                 updated_at=excluded.updated_at
         """, (
             machine_id,
@@ -120,6 +146,7 @@ def upsert_machine_config(machine_id: str, m: dict):
             (m.get("unidade_1") or None),
             (m.get("unidade_2") or None),
             conv,
+            alerta_sec,
             datetime.now().isoformat()
         ))
         conn.commit()
