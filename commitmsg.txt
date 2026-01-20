@@ -1,4 +1,4 @@
-﻿feat(machine_config): persistir alerta de parada por inatividade por máquina
+﻿feat(machine): alerta de parada por falta de produção por máquina
 
-- adiciona coluna alerta_sem_contagem_seg em machine_config (migração segura)
-- inclui alerta_sem_contagem_seg no upsert_machine_config
+- /machine/config: lê no_count_stop_sec e salva em alerta_sem_contagem_seg (machine_config)
+- /machine/status: carrega alerta_sem_contagem_seg do DB, expõe no_count_stop_sec e aplica no auto-parada
