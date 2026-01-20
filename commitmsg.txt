@@ -1,5 +1,5 @@
-﻿feat(machine): auto-parada por falta de contagem (backend)
+﻿feat(ui): adicionar alerta de parada por inatividade por máquina (config)
 
-- cria machine_count_state (last_esp_abs, last_count_ms)
-- /machine/update atualiza last_count_ms quando esp_absoluto incrementa
-- /machine/status: mesmo em AUTO, se sem contagem por INDFLOW_NO_COUNT_STOP_SEC => status_ui=PARADA
+- inclui campo no_count_stop_sec na tela de configuração
+- envia no_count_stop_sec no POST /machine/config
+- carrega valor do GET /machine/status com fallback 60s
