@@ -1,3 +1,9 @@
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
+Último recode: 2026-01-20 18:55 (America/Bahia)
+Motivo: Adicionar configuração por máquina do "Alerta de Parada por Inatividade" (segundos sem contagem) e enviar/ler via API.
+-->
+
 {% extends "base.html" %}
 {% block title %}Configuração da Máquina{% endblock %}
 
@@ -41,6 +47,14 @@
     background: #e5e7eb;
     color: #64748b;
     cursor: not-allowed;
+  }
+
+  /* HELP TEXT */
+  .help-text{
+    font-size: 13px;
+    color: #64748b;
+    margin-top: 6px;
+    line-height: 1.3;
   }
 </style>
 
@@ -111,6 +125,22 @@
 
       <label class="mt-20">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
+
+      <!-- ✅ NOVO: ALERTA DE PARADA POR INATIVIDADE -->
+      <label class="mt-20">Alerta de Parada por Inatividade (segundos sem produção):</label>
+      <input
+        type="number"
+        id="no_count_stop_sec"
+        class="input"
+        min="5"
+        step="1"
+        placeholder="Ex: 60"
+        required
+      >
+      <div class="help-text">
+        Mesmo que a máquina esteja em AUTO/PRODUZINDO, se não houver aumento de contagem por este tempo,
+        o sistema considera PARADA. Use valores maiores para ciclos longos (ex: 180s).
+      </div>
 
       <button class="btn btn-primary mt-20" type="submit">
         Salvar Configuração
@@ -302,6 +332,12 @@ document.getElementById("config-form").addEventListener("submit", function(e){
     return;
   }
 
+  const stopSec = Number(document.getElementById("no_count_stop_sec").value);
+  if(!Number.isFinite(stopSec) || stopSec < 5){
+    alert("Alerta de parada por inatividade inválido. Use um valor >= 5 segundos.");
+    return;
+  }
+
   fetch("/machine/config", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -313,13 +349,23 @@ document.getElementById("config-form").addEventListener("submit", function(e){
       rampa: document.getElementById("rampa").value,
       unidade_1: document.getElementById("unidade_1").value,
       unidade_2: document.getElementById("unidade_2").value,
-      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value
+      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value,
+
+      // ✅ NOVO
+      no_count_stop_sec: Math.floor(stopSec)
     })
   })
   .then(r => r.json())
-  .then(() => {
+  .then((resp) => {
+    if(resp && resp.error){
+      alert(resp.error);
+      return;
+    }
     alert("Configuração salva com sucesso!");
     carregarTabela();
+  })
+  .catch(() => {
+    alert("Erro ao salvar configuração.");
   });
 });
 
@@ -341,6 +387,13 @@ function carregarTabela(){
       if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
       if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
       if(data.rampa_percentual !== undefined && data.rampa_percentual !== null) document.getElementById("rampa").value = data.rampa_percentual;
+
+      // ✅ NOVO: carrega do backend quando existir; fallback 60
+      const stopSec = Number(
+        data.no_count_stop_sec ?? data.no_count_stop_threshold_sec ?? data.no_count_stop ?? 60
+      );
+      document.getElementById("no_count_stop_sec").value =
+        (Number.isFinite(stopSec) && stopSec >= 5) ? Math.floor(stopSec) : 60;
 
       const inicioTurnoStr = (data.turno_inicio ?? document.getElementById("inicio").value);
       const fimTurnoStr = (data.turno_fim ?? document.getElementById("fim").value);
