@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 17:25 (America/Bahia)
-# Motivo: Auto-parada por falta de contagem: mesmo em AUTO/PRODUZINDO, se não houver incremento de peças por um limiar, status_ui vira PARADA; persiste último instante de contagem por máquina.
+# Último recode: 2026-01-20 19:55 (America/Bahia)
+# Motivo: Alerta de Parada por Falta de Produção (por máquina): salvar alerta_sem_contagem_seg via /machine/config e aplicar no /machine/status (override de AUTO quando não há incremento).
 
 # modules/machine_routes.py
 import os
@@ -336,6 +336,61 @@ if NO_COUNT_STOP_SEC < 5:
     NO_COUNT_STOP_SEC = 5
 
 
+def _norm_alerta_sec(v, default_sec: int) -> int:
+    """
+    Normaliza o limiar (segundos) para considerar PARADA por falta de contagem.
+    - mínimo 5s
+    - máximo 86400s (24h)
+    """
+    try:
+        if v in (None, "", "none"):
+            sec = int(default_sec or 60)
+        else:
+            sec = int(v)
+    except Exception:
+        sec = int(default_sec or 60)
+
+    if sec < 5:
+        sec = 5
+    if sec > 86400:
+        sec = 86400
+    return sec
+
+
+def _load_alerta_sem_contagem_seg(machine_id: str) -> int | None:
+    """
+    Lê o alerta por máquina do SQLite (machine_config.alerta_sem_contagem_seg).
+    Observação: machine_config é legado por machine_id (sem tenant).
+    """
+    mid = (machine_id or "").strip().lower()
+    if not mid:
+        return None
+
+    conn = get_db()
+    try:
+        cur = conn.execute(
+            "SELECT alerta_sem_contagem_seg FROM machine_config WHERE machine_id = ? LIMIT 1",
+            (mid,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            v = row["alerta_sem_contagem_seg"]
+        except Exception:
+            v = row[0]
+        try:
+            if v is None:
+                return None
+            return int(v)
+        except Exception:
+            return None
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
+
 def _ensure_machine_count_table(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS machine_count_state (
@@ -475,7 +530,6 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
     conn.commit()
 
 
-
 # ============================================================
 # PRODUCAO_DIARIA (multi-tenant) — garante coluna cliente_id e marca registros no fechamento
 # ============================================================
@@ -525,6 +579,8 @@ def _marcar_producao_diaria_cliente(conn, cliente_id: str, raw_machine_id: str, 
         conn.commit()
     except Exception:
         pass
+
+
 # ============================================================
 # ADMIN - HARD RESET (LIMPA BANCO)
 # ============================================================
@@ -584,19 +640,33 @@ def configurar_maquina():
     m = get_machine(machine_id)
 
     # =====================================================
-    # ✅ MULTI-TENANT: injeta cliente_id no contexto da máquina
-    # Isso garante que o fechamento diário (reset_contexto) grave o machine_id scoped
-    # e permite marcar producao_diaria com cliente_id para o histórico.
-
-    # =====================================================
     # ✅ MULTI-TENANT: resolve cliente_id para configuração
     # /machine/config é usado via painel web (sessão) e pode ser usado via API (X-API-Key).
-    # Usamos o mesmo resolver do resto do módulo para evitar NameError e manter segurança.
     cliente_id = _get_cliente_id_for_request()
     if not cliente_id:
         return jsonify({"error": "unauthorized"}), 401
 
     m["cliente_id"] = cliente_id
+
+    # =====================================================
+    # ✅ ALERTA POR MÁQUINA: tempo (segundos) sem contagem para considerar PARADA
+    # Aceita no payload:
+    #   - no_count_stop_sec (UI)
+    #   - alerta_sem_contagem_seg (API)
+    #   - no_count_stop_threshold_sec (compat)
+    raw_alerta = data.get("no_count_stop_sec")
+    if raw_alerta in (None, "", "none"):
+        raw_alerta = data.get("alerta_sem_contagem_seg")
+    if raw_alerta in (None, "", "none"):
+        raw_alerta = data.get("no_count_stop_threshold_sec")
+
+    try:
+        if raw_alerta in (None, "", "none"):
+            m["alerta_sem_contagem_seg"] = None
+        else:
+            m["alerta_sem_contagem_seg"] = _norm_alerta_sec(raw_alerta, NO_COUNT_STOP_SEC)
+    except Exception:
+        m["alerta_sem_contagem_seg"] = None
 
     # Se a máquina acabou de nascer no backend e ainda não tem ultimo_dia, ancora no dia operacional atual
     # para evitar gravar histórico com data vazia no primeiro pacote.
@@ -670,7 +740,9 @@ def configurar_maquina():
         "meta_por_hora": m["meta_por_hora"],
         "unidade_1": m.get("unidade_1"),
         "unidade_2": m.get("unidade_2"),
-        "conv_m_por_pcs": m.get("conv_m_por_pcs")
+        "conv_m_por_pcs": m.get("conv_m_por_pcs"),
+        "alerta_sem_contagem_seg": m.get("alerta_sem_contagem_seg"),
+        "no_count_stop_sec": m.get("alerta_sem_contagem_seg"),
     })
 
 
@@ -756,7 +828,6 @@ def update_machine():
     except Exception:
         prev_esp_abs = 0
 
-
     # status novo vindo do ESP
     new_status = (data.get("status", "DESCONHECIDO") or "DESCONHECIDO").strip().upper()
 
@@ -780,7 +851,6 @@ def update_machine():
                 m["_last_count_ms"] = now_ms
     except Exception:
         pass
-
 
     # --- parada oficial (backend)
     try:
@@ -983,6 +1053,23 @@ def machine_status():
     if "run" not in m:
         m["run"] = 0
 
+    # =====================================================
+    # ✅ ALERTA POR MÁQUINA: carrega do DB se ainda não estiver no contexto
+    # (o painel salva em machine_config.alerta_sem_contagem_seg)
+    try:
+        if m.get("alerta_sem_contagem_seg") in (None, "", "none"):
+            vdb = _load_alerta_sem_contagem_seg(machine_id)
+            if vdb is not None:
+                m["alerta_sem_contagem_seg"] = int(vdb)
+    except Exception:
+        pass
+
+    # expõe também com o nome usado pela UI
+    try:
+        m["no_count_stop_sec"] = _norm_alerta_sec(m.get("alerta_sem_contagem_seg"), NO_COUNT_STOP_SEC)
+    except Exception:
+        m["no_count_stop_sec"] = int(NO_COUNT_STOP_SEC)
+
     # --- parada oficial (backend): devolve parado_min e status_ui
     try:
         status = (m.get("status") or "").strip().upper()
@@ -990,7 +1077,7 @@ def machine_status():
         now_ms = int(agora.timestamp() * 1000)
 
         if status == "AUTO":
-            # ✅ AUTO-PARADA: se não houve incremento de peças por NO_COUNT_STOP_SEC, tratar como PARADA
+            # ✅ AUTO-PARADA: se não houve incremento de peças por no_count_stop_sec, tratar como PARADA
             ss_count = None
             try:
                 ss_count = int(m.get("_last_count_ms") or 0) or None
@@ -1013,7 +1100,7 @@ def machine_status():
                 m["_last_count_ms"] = now_ms
 
             diff_ms = max(0, now_ms - int(ss_count))
-            if diff_ms >= int(NO_COUNT_STOP_SEC) * 1000:
+            if diff_ms >= int(m.get("no_count_stop_sec", NO_COUNT_STOP_SEC)) * 1000:
                 m["status_ui"] = "PARADA"
                 m["parado_min"] = int(diff_ms // 60000)
             else:
