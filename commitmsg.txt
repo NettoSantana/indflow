@@ -1,5 +1,4 @@
-﻿fix(np): calcular e persistir hora extra por hora (zera na virada)
+﻿fix(producao_hora): fora do turno usar np_producao_hora (zera por hora) e evitar salto
 
-- adiciona np_hour_ref/np_hour_baseline em nao_programado_diario
-- calcula np_producao_hora = np_producao - baseline da hora
-- reseta baseline na virada da hora para evitar 'pulos' na UI
+- /machine/status: no fallback fora do turno, usar np_producao_hora em vez de np_producao
+- evita pulo/repetição na tabela por hora e garante zerar na virada da hora
