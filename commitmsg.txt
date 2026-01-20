@@ -1,5 +1,5 @@
-﻿fix(np): persistir hora extra (fora do planejado) no SQLite
+﻿feat(machine): auto-parada por falta de contagem (backend)
 
-- cria tabela nao_programado_diario (machine_id,data_ref)
-- recarrega np_producao/np_minutos após restart
-- grava continuamente np_producao/np_minutos por dia operacional (23:59)
+- cria machine_count_state (last_esp_abs, last_count_ms)
+- /machine/update atualiza last_count_ms quando esp_absoluto incrementa
+- /machine/status: mesmo em AUTO, se sem contagem por INDFLOW_NO_COUNT_STOP_SEC => status_ui=PARADA
