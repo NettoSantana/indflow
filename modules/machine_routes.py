@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-16 19:05 (America/Bahia)
-# Motivo: Implementar "tempo parado" oficial (parado_min) no backend e status_ui (PRODUZINDO/PARADA) para o card de Produção.
+# Último recode: 2026-01-21 09:40 (America/Bahia)
+# Motivo: Garantir persistência da hora extra (Não Programado) gravando delta por hora em nao_programado_horaria, inclusive virada de hora e dia operacional.
 
 # modules/machine_routes.py
 import os
@@ -119,6 +119,179 @@ def _load_np_por_hora_24(machine_id_scoped: str, data_ref: str) -> list:
     dr = (data_ref or "").strip()
     if not mid or not dr:
         return arr
+
+# ============================================================
+# NÃO PROGRAMADO (HORA EXTRA) — persistência horária
+#   Regra: sempre gravar DELTA da hora em nao_programado_horaria
+#         (machine_id, data_ref, hora_dia) -> produzido += delta
+#   - Nunca usar acumulado diário para preencher hora
+#   - Suporta dia operacional (data_ref) diferente do calendário
+# ============================================================
+def _upsert_np_delta(conn, machine_id_scoped: str, data_ref: str, hora_dia: int, delta: int, updated_at: str):
+    try:
+        d = int(delta or 0)
+        if d <= 0:
+            return
+    except Exception:
+        return
+
+    mid = (machine_id_scoped or "").strip()
+    dr = (data_ref or "").strip()
+    try:
+        hd = int(hora_dia)
+    except Exception:
+        return
+
+    if not mid or not dr or hd < 0 or hd > 23:
+        return
+
+    _ensure_np_horaria_table(conn)
+
+    # UPSERT: soma deltas na mesma hora (0..23)
+    try:
+        conn.execute(
+            """
+            INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(machine_id, data_ref, hora_dia)
+            DO UPDATE SET
+                produzido = produzido + excluded.produzido,
+                updated_at = excluded.updated_at
+            """,
+            (mid, dr, hd, int(d), updated_at),
+        )
+        conn.commit()
+    except Exception:
+        # fallback para SQLite antigo (sem ON CONFLICT DO UPDATE)
+        try:
+            cur = conn.execute(
+                """SELECT produzido FROM nao_programado_horaria
+                     WHERE machine_id=? AND data_ref=? AND hora_dia=? LIMIT 1""",
+                (mid, dr, hd),
+            )
+            row = cur.fetchone()
+            if row:
+                novo = int(row[0] or 0) + int(d)
+                conn.execute(
+                    """UPDATE nao_programado_horaria
+                         SET produzido=?, updated_at=?
+                         WHERE machine_id=? AND data_ref=? AND hora_dia=?""",
+                    (novo, updated_at, mid, dr, hd),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+                         VALUES (?, ?, ?, ?, ?)""",
+                    (mid, dr, hd, int(d), updated_at),
+                )
+            conn.commit()
+        except Exception:
+            pass
+
+
+def _process_nao_programado_update(m: dict, machine_id_scoped: str, dia_ref: str, hora_dia: int, esp_abs: int, updated_at: str):
+    """
+    Atualiza estado em memória + persiste delta/hora quando estiver fora do turno.
+
+    Heurística usada:
+      - Se m["ultima_hora"] is None => fora do turno (não programado)
+      - Dentro do turno => desativa NP e apenas sincroniza o último esp para evitar delta gigante
+    """
+    try:
+        esp = int(esp_abs or 0)
+    except Exception:
+        esp = 0
+
+    fora_turno = (m.get("ultima_hora") is None)
+
+    # chaves de estado (em memória)
+    np_data_ref = (m.get("_np_data_ref") or "").strip()
+    np_last_esp = _safe_int(m.get("_np_last_esp", 0), 0)
+
+    # tracking por hora (para exibir np_producao_hora)
+    np_hour_ref = m.get("np_hour_ref")
+    np_hour_baseline = m.get("np_hour_baseline")
+
+    # garantia de tipo
+    try:
+        np_hour_ref_int = int(np_hour_ref) if np_hour_ref is not None else None
+    except Exception:
+        np_hour_ref_int = None
+
+    try:
+        np_hour_baseline_int = int(np_hour_baseline) if np_hour_baseline is not None else None
+    except Exception:
+        np_hour_baseline_int = None
+
+    if not fora_turno:
+        # Dentro do turno: desliga NP e sincroniza último esp
+        m["_np_active"] = False
+        m["_np_data_ref"] = dia_ref
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = datetime.now().isoformat()
+
+        m["np_hour_ref"] = None
+        m["np_hour_baseline"] = None
+        m["np_producao"] = 0
+        m["np_producao_hora"] = 0
+        m["np_minutos"] = 0
+        return
+
+    # Fora do turno => NP ativo
+    m["_np_active"] = True
+
+    # se mudou o dia operacional, reinicia tracking para evitar misturar dias
+    if np_data_ref != dia_ref:
+        m["_np_data_ref"] = dia_ref
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = datetime.now().isoformat()
+
+        m["np_hour_ref"] = int(hora_dia)
+        m["np_hour_baseline"] = esp
+
+        m["np_producao"] = 0
+        m["np_producao_hora"] = 0
+        m["np_minutos"] = 0
+        return
+
+    # se mudou a hora atual, reinicia baseline da hora (para métrica np_producao_hora)
+    if np_hour_ref_int is None or np_hour_baseline_int is None or np_hour_ref_int != int(hora_dia):
+        m["np_hour_ref"] = int(hora_dia)
+        m["np_hour_baseline"] = esp
+        m["np_producao_hora"] = 0
+
+    # delta desde o último update (regra: nunca usar acumulado diário)
+    delta = esp - np_last_esp
+    if delta < 0:
+        # contador voltou (reset/overflow). sincroniza e não grava delta negativo
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = datetime.now().isoformat()
+        m["np_producao_hora"] = 0
+        m["np_producao"] = 0
+        return
+
+    if delta > 0:
+        try:
+            conn = get_db()
+            try:
+                _upsert_np_delta(conn, machine_id_scoped, dia_ref, int(hora_dia), int(delta), updated_at)
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    # atualiza trackers
+    m["_np_last_esp"] = esp
+    m["_np_last_ts"] = datetime.now().isoformat()
+
+    # métrica de exibição: produção NP da hora atual
+    try:
+        base = _safe_int(m.get("np_hour_baseline", esp), esp)
+        m["np_producao_hora"] = max(0, esp - base)
+    except Exception:
+        m["np_producao_hora"] = 0
+
+    m["np_producao"] = int(m.get("np_producao_hora", 0) or 0)
 
     conn = get_db()
     try:
@@ -717,6 +890,22 @@ def update_machine():
         m["percentual_turno"] = 0
 
     atualizar_producao_hora(m)
+
+    # =====================================================
+    # HORA EXTRA (NÃO PROGRAMADO) — persistência horária
+    #   - Se estiver fora do turno, grava delta/hora em nao_programado_horaria
+    #   - Nunca usa acumulado diário
+    # =====================================================
+    try:
+        agora_np = now_bahia()
+        dia_ref_np = dia_operacional_ref_str(agora_np)
+        hora_dia_np = int(agora_np.hour)
+        updated_at_np = agora_np.strftime("%Y-%m-%d %H:%M:%S")
+        machine_id_scoped = f"{cliente_id}::{machine_id}" if cliente_id else machine_id
+        _process_nao_programado_update(m, machine_id_scoped, dia_ref_np, hora_dia_np, int(m.get("esp_absoluto", 0) or 0), updated_at_np)
+    except Exception:
+        pass
+
 
     return jsonify({
         "message": "OK",
