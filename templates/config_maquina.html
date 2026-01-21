@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Último recode: 2026-01-20 22:15 (America/Bahia)
-Motivo: Preencher tabela 24h com hora extra persistida (np_por_hora_24) fora do turno, mantendo produção do turno dentro da programação.
+Último recode: 2026-01-21 20:45 (America/Bahia)
+Motivo: OPÇÃO 1 — UI passa a usar producao_exibicao_24 (24h pronto vindo do backend) e para de recalcular turno/fora do turno no front, evitando “hora extra zerada”.
 -->
 
 {% extends "base.html" %}
@@ -231,7 +231,7 @@ function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
 }
 
 // ===============================
-// MAP TURNO -> 24H (meta e produzido)
+// MAP TURNO -> 24H (meta)
 // ===============================
 function mapTurnoListPara24h(lista_turno, inicioStr, fillValue){
   const out = new Array(24).fill(fillValue);
@@ -400,18 +400,16 @@ function carregarTabela(){
 
       const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
 
-      // Produção do turno (mapeada para 24h)
-      const produzidoTurno24 = mapTurnoListPara24h(data.producao_por_hora, inicioTurnoStr, null);
+      // ✅ OPÇÃO 1: backend manda produção 24h pronta
+      const exibicao24 = Array.isArray(data.producao_exibicao_24)
+        ? data.producao_exibicao_24
+        : null;
 
-      // ✅ Hora extra persistida por hora do dia (0..23)
-      const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
-
+      // Hora do dia atual (para marcar futuro como "—")
       const horaDiaAtual =
         (typeof data.ultima_hora === "number")
           ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
           : new Date().getHours();
-
-      const produzidoHoraAtual = data.producao_hora ?? 0;
 
       const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
       const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
@@ -422,6 +420,7 @@ function carregarTabela(){
       for(let i = 0; i < 24; i++){
         const tr = document.createElement("tr");
 
+        // Mantém destaque visual do turno (apenas visual)
         const dentroTurno = horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr);
         if(dentroTurno){
           tr.classList.add("turno-ativo");
@@ -434,37 +433,22 @@ function carregarTabela(){
         tdMeta.textContent = meta24[i] ?? 0;
 
         // =====================================================
-        // ✅ Produzido Hora:
-        // - Dentro do turno: usa produzidoTurno24
-        // - Fora do turno: usa np24 (hora extra persistida)
-        // - Hora futura: "—"
+        // ✅ Produzido Hora (OPÇÃO 1):
+        //   - usa SOMENTE exibicao24[i] vindo do backend
+        //   - hora futura: "—"
         // =====================================================
-        let baseVal = null;
+        let baseVal = 0;
 
         if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
           baseVal = null; // futuro
-        } else if (dentroTurno) {
-          const v = produzidoTurno24[i];
-          if (v !== null && v !== undefined && v !== "") {
-            baseVal = Number(v);
-            if(!Number.isFinite(baseVal)) baseVal = 0;
-          } else if (i === horaDiaAtual) {
-            baseVal = Number(produzidoHoraAtual);
-            if(!Number.isFinite(baseVal)) baseVal = 0;
-          } else {
-            // passado do turno sem dado: 0 (evita "—")
-            baseVal = 0;
-          }
         } else {
-          // fora do turno: hora extra persistida
-          const vnp = Number(np24[i] ?? 0);
-          if (Number.isFinite(vnp) && vnp >= 0) {
-            baseVal = vnp;
-          } else if (i === horaDiaAtual) {
-            baseVal = Number(produzidoHoraAtual);
-            if(!Number.isFinite(baseVal)) baseVal = 0;
+          if (exibicao24) {
+            const v = Number(exibicao24[i] ?? 0);
+            baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
           } else {
-            baseVal = 0;
+            // fallback de segurança (se backend ainda não enviou o campo)
+            const v = Number(data.np_por_hora_24?.[i] ?? 0);
+            baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
           }
         }
 
