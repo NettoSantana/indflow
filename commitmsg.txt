@@ -1,5 +1,5 @@
-﻿fix(np): status ler NP com tenant correto (cliente_id scoping)
+﻿chore(dev): adicionar debug e dump do NP para validar persistência/scoping
 
-- Salva cliente_id no estado da máquina durante /machine/update (via API key)
-- /machine/status resolve tenant via API key/sessão e fallback no estado
-- Evita np_por_hora_24 zerado por mismatch entre 'cliente::machine' e 'machine'
+- Salva cliente_id no estado da máquina em /machine/update
+- /machine/status passa a expor _np_debug_machine_id_scoped e _np_debug_data_ref
+- Cria /admin/np-dump (protegido por X-Admin-Token) para inspecionar tabela nao_programado_horaria
