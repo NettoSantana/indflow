@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-21 17:55 (America/Bahia)
-# Motivo: Limpar machine_routes removendo lógica/SQL do Não Programado; delegar persistência e leitura para machine_service + nao_programado_horaria_repo.
+# Último recode: 2026-01-21 18:10 (America/Bahia)
+# Motivo: Corrigir NP por hora no status usando o mesmo cliente_id do update; registrar cliente_id no estado m e melhorar resolução de tenant no /machine/status.
 
 # modules/machine_routes.py
 import os
@@ -23,9 +23,6 @@ from modules.machine_calc import (
     now_bahia,
     dia_operacional_ref_str,
 )
-
-from modules.machine_service import processar_nao_programado
-from modules.repos.nao_programado_horaria_repo import load_np_por_hora_24
 
 from modules.repos.machine_config_repo import upsert_machine_config
 from modules.repos.refugo_repo import load_refugo_24, upsert_refugo
@@ -80,10 +77,81 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
 
 
 # ============================================================
-# NÃO PROGRAMADO (HORA EXTRA)
-#   - Persistência/decisão fica no machine_service.processar_nao_programado()
-#   - Leitura 24h fica no repos.nao_programado_horaria_repo
+# NÃO PROGRAMADO (HORA EXTRA) — leitura horária para UI
+#   - Lê tabela nao_programado_horaria (se existir)
+#   - Retorna lista 24h com produção NP por hora do dia (0..23)
 # ============================================================
+def _ensure_np_horaria_table(conn):
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS nao_programado_horaria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                machine_id TEXT NOT NULL,
+                data_ref TEXT NOT NULL,
+                hora_dia INTEGER NOT NULL,
+                produzido INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try:
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_np_horaria
+                ON nao_programado_horaria(machine_id, data_ref, hora_dia)
+            """)
+        except Exception:
+            pass
+        try:
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS ix_np_horaria_data
+                ON nao_programado_horaria(data_ref)
+            """)
+        except Exception:
+            pass
+        conn.commit()
+    except Exception:
+        # não derruba o app por migração
+        pass
+
+
+def _load_np_por_hora_24(machine_id_scoped: str, data_ref: str) -> list:
+    arr = [0] * 24
+    mid = (machine_id_scoped or "").strip()
+    dr = (data_ref or "").strip()
+    if not mid or not dr:
+        return arr
+
+    conn = get_db()
+    try:
+        _ensure_np_horaria_table(conn)
+        cur = conn.execute(
+            """
+            SELECT hora_dia, produzido
+              FROM nao_programado_horaria
+             WHERE machine_id = ?
+               AND data_ref = ?
+            """,
+            (mid, dr),
+        )
+        rows = cur.fetchall() or []
+        for r in rows:
+            try:
+                h = int(r[0])
+            except Exception:
+                continue
+            try:
+                p = int(r[1] or 0)
+            except Exception:
+                p = 0
+            if 0 <= h < 24:
+                arr[h] = max(0, p)
+        return arr
+    except Exception:
+        return arr
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _admin_token_ok() -> bool:
@@ -211,6 +279,9 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, al
             owner = row[1] if len(row) > 1 else None
 
         if owner and owner != cliente_id:
+            # Se o device já estiver amarrado a outro cliente, por padrão bloqueia (403).
+            # No DEV, você pode permitir "takeover" controlado via ENV:
+            #   INDFLOW_ALLOW_DEVICE_TAKEOVER=1
             if allow_takeover:
                 conn.execute("""
                     UPDATE devices
@@ -343,16 +414,21 @@ def _ensure_baseline_table(conn):
         )
     """)
 
+    # tenta adicionar cliente_id (migração leve)
     try:
         conn.execute("ALTER TABLE baseline_diario ADD COLUMN cliente_id TEXT")
     except Exception:
         pass
 
+    # ⚠️ MUITO IMPORTANTE:
+    # NÃO criar mais o UNIQUE antigo (machine_id, dia_ref) porque pode haver duplicados
+    # e isso derruba o deploy/serviço.
     try:
         conn.execute("DROP INDEX IF EXISTS ux_baseline_diario")
     except Exception:
         pass
 
+    # Índice multi-tenant (principal)
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
@@ -361,6 +437,7 @@ def _ensure_baseline_table(conn):
     except Exception:
         pass
 
+    # Índice legado parcial (somente registros antigos com cliente_id NULL)
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_legacy
@@ -466,6 +543,9 @@ def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
+
+    # amarra tenant no estado (para /machine/status funcionar mesmo sem sessão)
+    m["cliente_id"] = cliente_id
 
     meta_turno = int(data["meta_turno"])
     rampa = int(data["rampa"])
@@ -579,7 +659,10 @@ def update_machine():
 
     verificar_reset_diario(m, machine_id)
 
+    # --- captura status anterior antes de sobrescrever
     prev_status = (m.get("status") or "").strip().upper()
+
+    # status novo vindo do ESP
     new_status = (data.get("status", "DESCONHECIDO") or "DESCONHECIDO").strip().upper()
 
     m["status"] = new_status
@@ -593,9 +676,11 @@ def update_machine():
         now_ms = int(agora.timestamp() * 1000)
 
         if new_status == "AUTO":
+            # voltou a produzir -> limpa parada
             _clear_stopped_since(machine_id, updated_at)
             m["stopped_since_ms"] = None
         else:
+            # entrou/parado -> seta apenas se ainda não existir
             existing = _get_stopped_since_ms(machine_id)
             if existing is None:
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
@@ -635,23 +720,6 @@ def update_machine():
         m["percentual_turno"] = 0
 
     atualizar_producao_hora(m)
-
-    # =====================================================
-    # HORA EXTRA (NÃO PROGRAMADO) — persistência horária (delegado ao service)
-    #   - Se estiver fora do turno, grava delta/hora em nao_programado_horaria
-    #   - Nunca usa acumulado diário
-    # =====================================================
-    try:
-        agora_np = now_bahia()
-        processar_nao_programado(
-            m=m,
-            machine_id=machine_id,
-            cliente_id=cliente_id,
-            esp_absoluto=int(m.get("esp_absoluto", 0) or 0),
-            agora=agora_np,
-        )
-    except Exception:
-        pass
 
     return jsonify({
         "message": "OK",
@@ -804,15 +872,12 @@ def machine_status():
     # - usado pela UI para preencher a tabela mesmo fora do turno
     # =====================================================
     try:
-        cid = (m.get("cliente_id") or "").strip()
+        # Resolve tenant do request (API-Key ou sessão). Se não houver, usa o último cliente_id visto no estado.
+        cid = (_get_cliente_id_for_request() or "").strip()
         if not cid:
-            cid = (session.get("cliente_id") or "").strip()
+            cid = (m.get("cliente_id") or "").strip()
         machine_id_scoped = f"{cid}::{machine_id}" if cid else machine_id
-        conn = get_db()
-        try:
-            m["np_por_hora_24"] = load_np_por_hora_24(conn, machine_id_scoped, dia_ref)
-        finally:
-            conn.close()
+        m["np_por_hora_24"] = _load_np_por_hora_24(machine_id_scoped, dia_ref)
     except Exception:
         m["np_por_hora_24"] = [0] * 24
 
@@ -832,6 +897,7 @@ def machine_status():
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
             if ss is None:
+                # fallback: se não existir (ex: primeiro status), ancora agora
                 updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
                 ss = now_ms
@@ -929,6 +995,7 @@ def historico_producao_api():
         mid = d.get("machine_id") or "maquina01"
         dia_ref = d.get("data") or ""
 
+        # para refugo, sempre usa máquina "limpa"
         refugo_total = _sum_refugo_24(mid, dia_ref)
 
         produzido = _safe_int(d.get("produzido"), 0)
