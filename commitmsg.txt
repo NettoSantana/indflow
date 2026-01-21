@@ -1,6 +1,6 @@
-﻿feat(repo): criar nao_programado_horaria_repo para persistência do NP por hora
+﻿feat(service): orquestrar Não Programado (hora extra) no machine_service
 
-- Cria ensure_table() e schema nao_programado_horaria
-- Implementa upsert_delta() somando delta por (machine_id,data_ref,hora_dia)
-- Implementa load_np_por_hora_24() retornando array 0..23
-- Inclui helpers *_db usando get_db() do projeto (com fallback de import)
+- Adiciona fuso Bahia e cálculo de dia operacional (vira 23:59)
+- Implementa decisão fora do turno e processamento de delta por update (sem acumulado diário)
+- Persiste NP por hora via repos/nao_programado_horaria_repo (upsert delta + leitura np_por_hora_24)
+- Atualiza estado m com flags e métricas: _np_active, np_producao_hora, np_por_hora_24, etc.
