@@ -1,4 +1,4 @@
-﻿fix(producao_hora): persistir hora (inclusive zero) e fechar última hora ao sair do turno
+﻿feat(status): expor hora extra por hora (np_por_hora_24) no /machine/status
 
-- atualizar_producao_hora: ao sair do turno (idx=None), fecha e faz upsert da última hora
-- garante persistência do '0' ao abrir hora (não depende de produzir)
+- lê nao_programado_horaria por (machine_id,data_ref)
+- retorna np_por_hora_24 (0..23) para UI preencher tabela 24h
