@@ -1,4 +1,4 @@
-﻿feat(np): persistir hora extra por hora (nao_programado_horaria)
+﻿fix(producao_hora): persistir hora (inclusive zero) e fechar última hora ao sair do turno
 
-- cria tabela nao_programado_horaria (machine_id,data_ref,hora_dia)
-- grava np_producao_hora por hora para não perder ao virar a hora
+- atualizar_producao_hora: ao sair do turno (idx=None), fecha e faz upsert da última hora
+- garante persistência do '0' ao abrir hora (não depende de produzir)
