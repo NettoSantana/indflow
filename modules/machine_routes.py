@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 21:40 (America/Bahia)
-# Motivo: Expor hora extra persistida por hora (np_por_hora_24) via /machine/status para preencher tabela 24h no UI.
+# Último recode: 2026-01-20 20:35 (America/Bahia)
+# Motivo: Corrigir produção da hora fora do turno: usar np_producao_hora (zera por hora) em vez do acumulado np_producao; evita 'pulos' na tabela.
 
 # modules/machine_routes.py
 import os
@@ -71,86 +71,6 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
         arr = load_refugo_24(_norm_machine_id(mid), (dia_ref or "").strip())
         if not isinstance(arr, list):
             return 0
-
-    except Exception:
-        return 0
-
-
-# ============================================================
-# NÃO PROGRAMADO (HORA EXTRA) — leitura horária para UI
-#   - Lê tabela nao_programado_horaria (se existir)
-#   - Retorna lista 24h com produção NP por hora do dia (0..23)
-# ============================================================
-def _ensure_np_horaria_table(conn):
-    try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS nao_programado_horaria (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                machine_id TEXT NOT NULL,
-                data_ref TEXT NOT NULL,
-                hora_dia INTEGER NOT NULL,
-                produzido INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        try:
-            conn.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_np_horaria
-                ON nao_programado_horaria(machine_id, data_ref, hora_dia)
-            """)
-        except Exception:
-            pass
-        conn.commit()
-    except Exception:
-        pass
-
-
-def _load_np_por_hora_24(machine_id_scoped: str, data_ref: str) -> list:
-    arr = [0] * 24
-    mid = (machine_id_scoped or "").strip()
-    dr = (data_ref or "").strip()
-    if not mid or not dr:
-        return arr
-
-    conn = get_db()
-    try:
-        _ensure_np_horaria_table(conn)
-        cur = conn.execute(
-            """
-            SELECT hora_dia, produzido
-              FROM nao_programado_horaria
-             WHERE machine_id = ?
-               AND data_ref = ?
-            """,
-            (mid, dr),
-        )
-        rows = cur.fetchall() or []
-        for r in rows:
-            try:
-                h = int(r[0] if not isinstance(r, dict) else r.get("hora_dia"))
-            except Exception:
-                try:
-                    h = int(r["hora_dia"])
-                except Exception:
-                    continue
-            try:
-                p = int(r[1] if not isinstance(r, dict) else r.get("produzido"))
-            except Exception:
-                try:
-                    p = int(r["produzido"])
-                except Exception:
-                    p = 0
-            if 0 <= h < 24:
-                arr[h] = max(0, p)
-        return arr
-    except Exception:
-        return arr
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
         return sum(_safe_int(x, 0) for x in arr)
     except Exception:
         return 0
@@ -1129,24 +1049,6 @@ def machine_status():
 
     dia_ref = dia_operacional_ref_str(now_bahia())
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
-
-# =====================================================
-# HORA EXTRA (NÃO PROGRAMADO): lista 24h persistida
-# - usado pela UI para preencher a tabela mesmo fora do turno
-# =====================================================
-try:
-    cid = (m.get("cliente_id") or "").strip()
-    machine_id_scoped = f"{cid}::{machine_id}" if cid else machine_id
-    m["np_por_hora_24"] = _load_np_por_hora_24(machine_id_scoped, dia_ref)
-except Exception:
-    m["np_por_hora_24"] = [0] * 24
-
-# valor da hora (fora do planejado) já calculado no fluxo NP quando existir
-if "np_producao_hora" not in m:
-    try:
-        m["np_producao_hora"] = int(m.get("np_producao_hora", 0) or 0)
-    except Exception:
-        m["np_producao_hora"] = 0
 
     if "run" not in m:
         m["run"] = 0
