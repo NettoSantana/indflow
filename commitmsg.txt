@@ -1,4 +1,4 @@
-﻿fix(producao_hora): fora do turno usar np_producao_hora (zera por hora) e evitar salto
+﻿feat(np): persistir hora extra por hora (nao_programado_horaria)
 
-- /machine/status: no fallback fora do turno, usar np_producao_hora em vez de np_producao
-- evita pulo/repetição na tabela por hora e garante zerar na virada da hora
+- cria tabela nao_programado_horaria (machine_id,data_ref,hora_dia)
+- grava np_producao_hora por hora para não perder ao virar a hora

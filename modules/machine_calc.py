@@ -1,3 +1,7 @@
+# Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc.py
+# Último recode: 2026-01-20 21:25 (America/Bahia)
+# Motivo: Persistir hora (inclusive zero) e fechar/persistir a última hora ao sair do turno (idx=None) para não perder registros na tabela/DB.
+
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -248,19 +252,59 @@ def atualizar_producao_hora(m):
         # não quebra o fluxo principal se o módulo novo não estiver disponível por algum motivo
         pass
 
-    # Fora do turno: continua zerando a HORA (programada), mas NÃO ignora mais:
-    # porque o update_nao_programado acima já acumulou o que tiver de produção/tempo fora do turno.
-    if idx is None:
-        m["ultima_hora"] = None
-        m["producao_hora"] = 0
-        m["percentual_hora"] = 0
-        return
-
+    # IDs e data_ref (usado tanto dentro quanto na saída do turno)
     raw_machine_id = _get_machine_id_from_m(m)
     machine_id = _scoped_machine_id(m, raw_machine_id) if raw_machine_id else None
 
     # ✅ CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
+
+    esp_abs = int(m.get("esp_absoluto", 0) or 0)
+    prev_idx = m.get("ultima_hora")
+
+    # ============================================================
+    # ✅ FIX: AO SAIR DO TURNO (idx=None), FECHAR E PERSISTIR A ÚLTIMA HORA
+    # Isso evita "sumir" da tabela/DB quando a hora vira e o sistema retorna cedo.
+    # ============================================================
+    if idx is None:
+        # fecha a última hora programada (se existia) e persiste, inclusive se for 0
+        if machine_id and isinstance(prev_idx, int) and prev_idx >= 0:
+            try:
+                ensure_producao_horaria_table()
+                base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
+                prod_prev = esp_abs - base_prev
+                if prod_prev < 0:
+                    prod_prev = 0
+                prod_prev = int(prod_prev)
+
+                meta_prev = _meta_by_idx(m, prev_idx)
+                pct_prev = _percentual(prod_prev, meta_prev)
+
+                # mantém array coerente (não deixa "—")
+                try:
+                    if isinstance(m.get("producao_por_hora"), list) and 0 <= prev_idx < len(m["producao_por_hora"]):
+                        m["producao_por_hora"][prev_idx] = prod_prev
+                except Exception:
+                    pass
+
+                upsert_hora(
+                    machine_id=machine_id,
+                    data_ref=data_ref,
+                    hora_idx=prev_idx,
+                    baseline_esp=base_prev,
+                    esp_last=esp_abs,
+                    produzido=prod_prev,
+                    meta=meta_prev,
+                    percentual=pct_prev,
+                )
+            except Exception:
+                pass
+
+        # zera HORA programada em memória (fora do turno)
+        m["ultima_hora"] = None
+        m["producao_hora"] = 0
+        m["percentual_hora"] = 0
+        return
 
     horas = m.get("horas_turno") or []
     horas_len = len(horas)
@@ -285,9 +329,6 @@ def atualizar_producao_hora(m):
             m["_ph_loaded"] = True
         except Exception:
             m["_ph_loaded"] = False
-
-    esp_abs = int(m.get("esp_absoluto", 0) or 0)
-    prev_idx = m.get("ultima_hora")
 
     # ============================================================
     # ✅ FIX OFFLINE/WIFI: se a hora "pulou" (ficou sem update),
@@ -397,7 +438,7 @@ def atualizar_producao_hora(m):
                 except Exception:
                     pass
 
-        # abre a nova hora
+        # abre a nova hora (e PERSISTE zero imediatamente)
         m["ultima_hora"] = idx
 
         baseline = None
@@ -419,6 +460,7 @@ def atualizar_producao_hora(m):
             try:
                 meta_now = _meta_by_idx(m, idx)
                 ensure_producao_horaria_table()
+                # ✅ IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
                 upsert_hora(
                     machine_id=machine_id,
                     data_ref=data_ref,
@@ -434,7 +476,7 @@ def atualizar_producao_hora(m):
 
         return
 
-    # mesma hora: atualiza parcial
+    # mesma hora: atualiza parcial (e persiste mesmo se for 0)
     base_h = int(m.get("baseline_hora", esp_abs) or esp_abs)
     prod_h = esp_abs - base_h
     if prod_h < 0:
