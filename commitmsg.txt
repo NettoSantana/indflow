@@ -1,5 +1,5 @@
-﻿chore(dev): adicionar debug e dump do NP para validar persistência/scoping
+﻿fix(np): evitar delta gigante no primeiro update fora do turno (bootstrap)
 
-- Salva cliente_id no estado da máquina em /machine/update
-- /machine/status passa a expor _np_debug_machine_id_scoped e _np_debug_data_ref
-- Cria /admin/np-dump (protegido por X-Admin-Token) para inspecionar tabela nao_programado_horaria
+- Em NP, se _np_last_esp estiver 0/None, ancora _np_last_esp=esp e não grava
+- Proteção adicional contra delta absurdo (ex: pós-deploy/reset com contador alto)
+- Mantém gravação hora a hora via repo apenas com delta real
