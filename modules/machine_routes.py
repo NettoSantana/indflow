@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-20 20:35 (America/Bahia)
-# Motivo: Corrigir produção da hora fora do turno: usar np_producao_hora (zera por hora) em vez do acumulado np_producao; evita 'pulos' na tabela.
+# Último recode: 2026-01-16 19:05 (America/Bahia)
+# Motivo: Implementar "tempo parado" oficial (parado_min) no backend e status_ui (PRODUZINDO/PARADA) para o card de Produção.
 
 # modules/machine_routes.py
 import os
@@ -74,6 +74,84 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
         return sum(_safe_int(x, 0) for x in arr)
     except Exception:
         return 0
+
+
+# ============================================================
+# NÃO PROGRAMADO (HORA EXTRA) — leitura horária para UI
+#   - Lê tabela nao_programado_horaria (se existir)
+#   - Retorna lista 24h com produção NP por hora do dia (0..23)
+# ============================================================
+def _ensure_np_horaria_table(conn):
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS nao_programado_horaria (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                machine_id TEXT NOT NULL,
+                data_ref TEXT NOT NULL,
+                hora_dia INTEGER NOT NULL,
+                produzido INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        try:
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_np_horaria
+                ON nao_programado_horaria(machine_id, data_ref, hora_dia)
+            """)
+        except Exception:
+            pass
+        try:
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS ix_np_horaria_data
+                ON nao_programado_horaria(data_ref)
+            """)
+        except Exception:
+            pass
+        conn.commit()
+    except Exception:
+        # não derruba o app por migração
+        pass
+
+
+def _load_np_por_hora_24(machine_id_scoped: str, data_ref: str) -> list:
+    arr = [0] * 24
+    mid = (machine_id_scoped or "").strip()
+    dr = (data_ref or "").strip()
+    if not mid or not dr:
+        return arr
+
+    conn = get_db()
+    try:
+        _ensure_np_horaria_table(conn)
+        cur = conn.execute(
+            """
+            SELECT hora_dia, produzido
+              FROM nao_programado_horaria
+             WHERE machine_id = ?
+               AND data_ref = ?
+            """,
+            (mid, dr),
+        )
+        rows = cur.fetchall() or []
+        for r in rows:
+            try:
+                h = int(r[0])
+            except Exception:
+                continue
+            try:
+                p = int(r[1] or 0)
+            except Exception:
+                p = 0
+            if 0 <= h < 24:
+                arr[h] = max(0, p)
+        return arr
+    except Exception:
+        return arr
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _admin_token_ok() -> bool:
@@ -322,128 +400,6 @@ def _clear_stopped_since(machine_id: str, updated_at: str):
 
 
 # ============================================================
-# AUTO-PARADA POR FALTA DE CONTAGEM (BACKEND)
-#   - Mesmo que o ESP envie status=AUTO/PRODUZINDO, se não houver incremento de peças
-#     por um limiar (ex.: 60s), consideramos PARADA.
-#   - Limiar configurável via ENV: INDFLOW_NO_COUNT_STOP_SEC (default 60s)
-#   - Persistência simples por máquina (machine_id) em SQLite para sobreviver a restart.
-# ============================================================
-try:
-    NO_COUNT_STOP_SEC = int(os.getenv("INDFLOW_NO_COUNT_STOP_SEC") or "60")
-except Exception:
-    NO_COUNT_STOP_SEC = 60
-if NO_COUNT_STOP_SEC < 5:
-    NO_COUNT_STOP_SEC = 5
-
-
-def _norm_alerta_sec(v, default_sec: int) -> int:
-    """
-    Normaliza o limiar (segundos) para considerar PARADA por falta de contagem.
-    - mínimo 5s
-    - máximo 86400s (24h)
-    """
-    try:
-        if v in (None, "", "none"):
-            sec = int(default_sec or 60)
-        else:
-            sec = int(v)
-    except Exception:
-        sec = int(default_sec or 60)
-
-    if sec < 5:
-        sec = 5
-    if sec > 86400:
-        sec = 86400
-    return sec
-
-
-def _load_alerta_sem_contagem_seg(machine_id: str) -> int | None:
-    """
-    Lê o alerta por máquina do SQLite (machine_config.alerta_sem_contagem_seg).
-    Observação: machine_config é legado por machine_id (sem tenant).
-    """
-    mid = (machine_id or "").strip().lower()
-    if not mid:
-        return None
-
-    conn = get_db()
-    try:
-        cur = conn.execute(
-            "SELECT alerta_sem_contagem_seg FROM machine_config WHERE machine_id = ? LIMIT 1",
-            (mid,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        try:
-            v = row["alerta_sem_contagem_seg"]
-        except Exception:
-            v = row[0]
-        try:
-            if v is None:
-                return None
-            return int(v)
-        except Exception:
-            return None
-    except Exception:
-        return None
-    finally:
-        conn.close()
-
-
-def _ensure_machine_count_table(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS machine_count_state (
-            machine_id TEXT PRIMARY KEY,
-            last_esp_abs INTEGER NOT NULL,
-            last_count_ms INTEGER NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-    """)
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_machine_count_state_updated_at ON machine_count_state(updated_at)")
-    except Exception:
-        pass
-    conn.commit()
-
-
-def _get_count_state(machine_id: str):
-    conn = get_db()
-    try:
-        _ensure_machine_count_table(conn)
-        cur = conn.execute(
-            "SELECT last_esp_abs, last_count_ms FROM machine_count_state WHERE machine_id = ? LIMIT 1",
-            (machine_id,),
-        )
-        row = cur.fetchone()
-        if not row:
-            return None
-        try:
-            return int(row["last_esp_abs"] or 0), int(row["last_count_ms"] or 0)
-        except Exception:
-            return int(row[0] or 0), int(row[1] or 0)
-    finally:
-        conn.close()
-
-
-def _set_count_state(machine_id: str, last_esp_abs: int, last_count_ms: int, updated_at: str):
-    conn = get_db()
-    try:
-        _ensure_machine_count_table(conn)
-        conn.execute("""
-            INSERT INTO machine_count_state (machine_id, last_esp_abs, last_count_ms, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(machine_id) DO UPDATE SET
-                last_esp_abs=excluded.last_esp_abs,
-                last_count_ms=excluded.last_count_ms,
-                updated_at=excluded.updated_at
-        """, (machine_id, int(last_esp_abs), int(last_count_ms), updated_at))
-        conn.commit()
-    finally:
-        conn.close()
-
-
-# ============================================================
 # BASELINE (agora com suporte a cliente_id quando existir)
 # ============================================================
 def _ensure_baseline_table(conn):
@@ -531,57 +487,6 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
 
 
 # ============================================================
-# PRODUCAO_DIARIA (multi-tenant) — garante coluna cliente_id e marca registros no fechamento
-# ============================================================
-def _ensure_producao_diaria_table(conn):
-    """
-    Garante que producao_diaria tenha cliente_id para o filtro do histórico.
-    Mantém compatibilidade com bancos antigos.
-    """
-    # tabela já existe no projeto; aqui só garantimos a coluna/índices
-    try:
-        conn.execute("ALTER TABLE producao_diaria ADD COLUMN cliente_id TEXT")
-    except Exception:
-        pass
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_diaria_cliente_data ON producao_diaria(cliente_id, data)")
-    except Exception:
-        pass
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_diaria_machine_data ON producao_diaria(machine_id, data)")
-    except Exception:
-        pass
-    conn.commit()
-
-
-def _marcar_producao_diaria_cliente(conn, cliente_id: str, raw_machine_id: str, dia_ref: str):
-    """
-    No fechamento diário (reset_contexto), o registro pode ser gravado sem cliente_id
-    em ambientes antigos. Como o histórico filtra por cliente_id, marcamos aqui.
-
-    Atualiza tanto machine_id legado (raw) quanto scoped (<cliente_id>::<raw>).
-    """
-    if not cliente_id:
-        return
-    mid = _norm_machine_id(raw_machine_id)
-    scoped = f"{cliente_id}::{mid}"
-    dr = (dia_ref or "").strip()
-    if not dr:
-        return
-    try:
-        conn.execute("""
-            UPDATE producao_diaria
-               SET cliente_id = ?
-             WHERE data = ?
-               AND (machine_id = ? OR machine_id = ?)
-               AND (cliente_id IS NULL OR TRIM(cliente_id) = '')
-        """, (cliente_id, dr, mid, scoped))
-        conn.commit()
-    except Exception:
-        pass
-
-
-# ============================================================
 # ADMIN - HARD RESET (LIMPA BANCO)
 # ============================================================
 @machine_bp.route("/admin/hard-reset", methods=["POST"])
@@ -638,44 +543,6 @@ def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
-
-    # =====================================================
-    # ✅ MULTI-TENANT: resolve cliente_id para configuração
-    # /machine/config é usado via painel web (sessão) e pode ser usado via API (X-API-Key).
-    cliente_id = _get_cliente_id_for_request()
-    if not cliente_id:
-        return jsonify({"error": "unauthorized"}), 401
-
-    m["cliente_id"] = cliente_id
-
-    # =====================================================
-    # ✅ ALERTA POR MÁQUINA: tempo (segundos) sem contagem para considerar PARADA
-    # Aceita no payload:
-    #   - no_count_stop_sec (UI)
-    #   - alerta_sem_contagem_seg (API)
-    #   - no_count_stop_threshold_sec (compat)
-    raw_alerta = data.get("no_count_stop_sec")
-    if raw_alerta in (None, "", "none"):
-        raw_alerta = data.get("alerta_sem_contagem_seg")
-    if raw_alerta in (None, "", "none"):
-        raw_alerta = data.get("no_count_stop_threshold_sec")
-
-    try:
-        if raw_alerta in (None, "", "none"):
-            m["alerta_sem_contagem_seg"] = None
-        else:
-            m["alerta_sem_contagem_seg"] = _norm_alerta_sec(raw_alerta, NO_COUNT_STOP_SEC)
-    except Exception:
-        m["alerta_sem_contagem_seg"] = None
-
-    # Se a máquina acabou de nascer no backend e ainda não tem ultimo_dia, ancora no dia operacional atual
-    # para evitar gravar histórico com data vazia no primeiro pacote.
-    agora = now_bahia()
-    dia_ref_atual = dia_operacional_ref_str(agora)
-    if not (str(m.get("ultimo_dia") or "").strip()):
-        m["ultimo_dia"] = dia_ref_atual
-
-    prev_dia_before = str(m.get("ultimo_dia") or "").strip()
 
     meta_turno = int(data["meta_turno"])
     rampa = int(data["rampa"])
@@ -740,9 +607,7 @@ def configurar_maquina():
         "meta_por_hora": m["meta_por_hora"],
         "unidade_1": m.get("unidade_1"),
         "unidade_2": m.get("unidade_2"),
-        "conv_m_por_pcs": m.get("conv_m_por_pcs"),
-        "alerta_sem_contagem_seg": m.get("alerta_sem_contagem_seg"),
-        "no_count_stop_sec": m.get("alerta_sem_contagem_seg"),
+        "conv_m_por_pcs": m.get("conv_m_por_pcs")
     })
 
 
@@ -789,44 +654,10 @@ def update_machine():
 
     m = get_machine(machine_id)
 
-    # ✅ multi-tenant: mantém cliente_id no contexto da máquina (necessário para reset/histórico)
-    m["cliente_id"] = cliente_id
-
-    # ✅ evita fechamento com data vazia no primeiro pacote da máquina
-    try:
-        agora = now_bahia()
-        dia_ref_atual = dia_operacional_ref_str(agora)
-        if not str(m.get("ultimo_dia") or "").strip():
-            m["ultimo_dia"] = dia_ref_atual
-    except Exception:
-        pass
-
-    prev_dia_before = str(m.get("ultimo_dia") or "").strip()
-
     verificar_reset_diario(m, machine_id)
-
-    # Se houve virada do dia operacional, o reset_contexto fechou o dia anterior.
-    # Garantimos que o registro em producao_diaria fique marcado com cliente_id (histórico filtra por isso).
-    try:
-        novo_dia = str(m.get("ultimo_dia") or "").strip()
-        if prev_dia_before and novo_dia and prev_dia_before != novo_dia:
-            conn = get_db()
-            try:
-                _ensure_producao_diaria_table(conn)
-                _marcar_producao_diaria_cliente(conn, cliente_id, machine_id, prev_dia_before)
-            finally:
-                conn.close()
-    except Exception:
-        pass
 
     # --- captura status anterior antes de sobrescrever
     prev_status = (m.get("status") or "").strip().upper()
-
-    # --- captura contador anterior para detectar incremento de peças (auto-parada)
-    try:
-        prev_esp_abs = int(m.get("esp_absoluto", 0) or 0)
-    except Exception:
-        prev_esp_abs = 0
 
     # status novo vindo do ESP
     new_status = (data.get("status", "DESCONHECIDO") or "DESCONHECIDO").strip().upper()
@@ -834,23 +665,6 @@ def update_machine():
     m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
     m["run"] = _safe_int(data.get("run", 0), 0)
-
-    # --- auto-parada: atualiza último instante de contagem quando houver incremento
-    try:
-        agora = now_bahia()
-        updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
-        now_ms = int(agora.timestamp() * 1000)
-
-        curr_esp_abs = int(m.get("esp_absoluto", 0) or 0)
-        if curr_esp_abs > int(prev_esp_abs or 0):
-            _set_count_state(machine_id, curr_esp_abs, now_ms, updated_at)
-            m["_last_count_ms"] = now_ms
-        else:
-            if _get_count_state(machine_id) is None:
-                _set_count_state(machine_id, curr_esp_abs, now_ms, updated_at)
-                m["_last_count_ms"] = now_ms
-    except Exception:
-        pass
 
     # --- parada oficial (backend)
     try:
@@ -1050,25 +864,21 @@ def machine_status():
     dia_ref = dia_operacional_ref_str(now_bahia())
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
 
+    # =====================================================
+    # HORA EXTRA (NÃO PROGRAMADO): lista 24h persistida
+    # - usado pela UI para preencher a tabela mesmo fora do turno
+    # =====================================================
+    try:
+        cid = (m.get("cliente_id") or "").strip()
+        if not cid:
+            cid = (session.get("cliente_id") or "").strip()
+        machine_id_scoped = f"{cid}::{machine_id}" if cid else machine_id
+        m["np_por_hora_24"] = _load_np_por_hora_24(machine_id_scoped, dia_ref)
+    except Exception:
+        m["np_por_hora_24"] = [0] * 24
+
     if "run" not in m:
         m["run"] = 0
-
-    # =====================================================
-    # ✅ ALERTA POR MÁQUINA: carrega do DB se ainda não estiver no contexto
-    # (o painel salva em machine_config.alerta_sem_contagem_seg)
-    try:
-        if m.get("alerta_sem_contagem_seg") in (None, "", "none"):
-            vdb = _load_alerta_sem_contagem_seg(machine_id)
-            if vdb is not None:
-                m["alerta_sem_contagem_seg"] = int(vdb)
-    except Exception:
-        pass
-
-    # expõe também com o nome usado pela UI
-    try:
-        m["no_count_stop_sec"] = _norm_alerta_sec(m.get("alerta_sem_contagem_seg"), NO_COUNT_STOP_SEC)
-    except Exception:
-        m["no_count_stop_sec"] = int(NO_COUNT_STOP_SEC)
 
     # --- parada oficial (backend): devolve parado_min e status_ui
     try:
@@ -1077,35 +887,8 @@ def machine_status():
         now_ms = int(agora.timestamp() * 1000)
 
         if status == "AUTO":
-            # ✅ AUTO-PARADA: se não houve incremento de peças por no_count_stop_sec, tratar como PARADA
-            ss_count = None
-            try:
-                ss_count = int(m.get("_last_count_ms") or 0) or None
-            except Exception:
-                ss_count = None
-
-            if ss_count is None:
-                try:
-                    st = _get_count_state(machine_id)
-                    if st:
-                        ss_count = int(st[1] or 0) or None
-                except Exception:
-                    ss_count = None
-
-            if ss_count is None:
-                # ancora agora para não marcar parada imediatamente
-                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
-                _set_count_state(machine_id, int(m.get("esp_absoluto", 0) or 0), now_ms, updated_at)
-                ss_count = now_ms
-                m["_last_count_ms"] = now_ms
-
-            diff_ms = max(0, now_ms - int(ss_count))
-            if diff_ms >= int(m.get("no_count_stop_sec", NO_COUNT_STOP_SEC)) * 1000:
-                m["status_ui"] = "PARADA"
-                m["parado_min"] = int(diff_ms // 60000)
-            else:
-                m["status_ui"] = "PRODUZINDO"
-                m["parado_min"] = None
+            m["status_ui"] = "PRODUZINDO"
+            m["parado_min"] = None
         else:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
@@ -1126,16 +909,10 @@ def machine_status():
         np_prod = 0
 
     if m.get("ultima_hora") is None and np_prod > 0:
-        # ✅ Fora do turno: NUNCA usar np_producao (acumulado do dia) como produção da hora.
-        # Isso causava "pulos" e não zerava na virada da hora.
-        try:
-            np_h = int(m.get("np_producao_hora", 0) or 0)
-        except Exception:
-            np_h = 0
-        m["producao_hora"] = max(0, np_h)
+        m["producao_hora"] = np_prod
         m["percentual_hora"] = 0
         m["fora_turno"] = True
-        m["producao_hora_liquida"] = m["producao_hora"]
+        m["producao_hora_liquida"] = np_prod
         return jsonify(m)
 
     try:
