@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc_nao_programado.py
-# Último recode: 2026-01-20 20:15 (America/Bahia)
-# Motivo: Corrigir "hora extra" por hora: calcular e persistir np_producao_hora (zera na virada da hora) evitando usar np_producao (acumulado do dia) como produção da hora.
+# Último recode: 2026-01-20 21:10 (America/Bahia)
+# Motivo: Persistir hora extra por HORA: criar tabela nao_programado_horaria e salvar np_producao_hora por hora do dia, evitando perder valor ao virar a hora.
 
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -70,11 +70,13 @@ def _scoped_machine_id(m: dict, raw_mid: str) -> str:
     return mid
 
 
+# ============================================================
+# PERSISTÊNCIA - DIA (já existia)
+# ============================================================
 def _ensure_np_table(conn) -> None:
     """
-    Tabela simples para persistir hora extra / fora do planejado.
-    ✅ Agora também persiste controle de hora (np_hour_ref / np_hour_baseline),
-    para que np_producao_hora sobreviva a restart.
+    Tabela diária para persistir hora extra / fora do planejado.
+    Mantém np_producao (dia) e np_minutos (dia) + controle de hora atual (baseline).
     """
     conn.execute("""
         CREATE TABLE IF NOT EXISTS nao_programado_diario (
@@ -126,7 +128,6 @@ def _load_np_from_db(machine_id: str, data_ref: str) -> dict | None:
         if not row:
             return None
 
-        # row pode ser sqlite Row ou tupla
         try:
             return {
                 "np_producao": int(row["np_producao"] or 0),
@@ -145,8 +146,8 @@ def _load_np_from_db(machine_id: str, data_ref: str) -> dict | None:
         conn.close()
 
 
-def _upsert_np_to_db(machine_id: str, data_ref: str, np_producao: int, np_minutos: int, updated_at: str,
-                     np_hour_ref: int | None, np_hour_baseline: int | None) -> None:
+def _upsert_np_diario_to_db(machine_id: str, data_ref: str, np_producao: int, np_minutos: int, updated_at: str,
+                           np_hour_ref: int | None, np_hour_baseline: int | None) -> None:
     conn = get_db()
     try:
         _ensure_np_table(conn)
@@ -170,12 +171,66 @@ def _upsert_np_to_db(machine_id: str, data_ref: str, np_producao: int, np_minuto
         conn.close()
 
 
+# ============================================================
+# ✅ NOVO: PERSISTÊNCIA - HORA (para "não sumir" ao virar a hora)
+# ============================================================
+def _ensure_np_horaria_table(conn) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS nao_programado_horaria (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT NOT NULL,
+            data_ref TEXT NOT NULL,
+            hora_dia INTEGER NOT NULL,
+            produzido INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    try:
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_np_horaria
+            ON nao_programado_horaria(machine_id, data_ref, hora_dia)
+        """)
+    except Exception:
+        pass
+    try:
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS ix_np_horaria_data
+            ON nao_programado_horaria(data_ref)
+        """)
+    except Exception:
+        pass
+    conn.commit()
+
+
+def upsert_np_horaria(machine_id: str, data_ref: str, hora_dia: int, produzido: int, updated_at: str) -> None:
+    """
+    Grava a produção NÃO programada por hora do dia (0..23).
+    """
+    conn = get_db()
+    try:
+        _ensure_np_horaria_table(conn)
+        conn.execute(
+            """
+            INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(machine_id, data_ref, hora_dia) DO UPDATE SET
+                produzido = excluded.produzido,
+                updated_at = excluded.updated_at
+            """,
+            (machine_id, (data_ref or "").strip(), int(hora_dia), int(produzido), updated_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = None) -> None:
     """
     Acumula produção e tempo "não programados" (fora do turno) + PERSISTE em DB.
 
-    ✅ Agora calcula também:
-      - np_producao_hora (zera na virada da hora)
+    ✅ Agora também persiste por hora em nao_programado_horaria:
+      - np_producao_hora é gravado em (data_ref, hora_dia)
+      - assim o valor fica "na tabela" e não some ao virar a hora
     """
     if agora is None:
         agora = now_bahia()
@@ -192,7 +247,7 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
     if "_np_secs" not in m:
         m["_np_secs"] = 0
 
-    # ✅ controle "por hora" (fora do turno)
+    # controle por hora
     if "np_hour_ref" not in m:
         m["np_hour_ref"] = None
     if "np_hour_baseline" not in m:
@@ -200,7 +255,7 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
     if "np_producao_hora" not in m:
         m["np_producao_hora"] = 0
 
-    # reset por dia operacional + recarrega do DB (se existir)
+    # reset por dia operacional + recarrega do DB
     prev_data_ref = str(m.get("_np_data_ref") or "").strip()
     if prev_data_ref != data_ref:
         m["_np_data_ref"] = data_ref
@@ -209,7 +264,6 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
         m["_np_active"] = False
         m["_np_secs"] = 0
 
-        # reset hora-extra por hora
         m["np_hour_ref"] = None
         m["np_hour_baseline"] = None
         m["np_producao_hora"] = 0
@@ -220,9 +274,6 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
             m["np_minutos"] = _safe_int(loaded.get("np_minutos", 0), 0)
             m["np_hour_ref"] = loaded.get("np_hour_ref", None)
             m["np_hour_baseline"] = loaded.get("np_hour_baseline", None)
-        else:
-            m["np_producao"] = _safe_int(m.get("np_producao", 0), 0)
-            m["np_minutos"] = _safe_int(m.get("np_minutos", 0), 0)
 
     curr_esp = _safe_int(m.get("esp_absoluto", 0), 0)
 
@@ -239,16 +290,16 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
         or _get_bool(m.get("sinal_run"))
     )
 
-    # dentro do turno: fecha janela NP e atualiza marcadores (não conta hora extra por hora aqui)
+    # dentro do turno: só salva o diário (horária não é usada)
     if dentro_turno:
         m["_np_active"] = False
         m["_np_last_ts"] = agora.isoformat()
         m["_np_last_esp"] = curr_esp
         m["_np_secs"] = 0
-        m["np_producao_hora"] = 0  # quando volta pro turno, hora extra "por hora" não é relevante
+        m["np_producao_hora"] = 0
 
         try:
-            _upsert_np_to_db(
+            _upsert_np_diario_to_db(
                 machine_id=scoped_mid,
                 data_ref=data_ref,
                 np_producao=_safe_int(m.get("np_producao", 0), 0),
@@ -262,17 +313,12 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
         return
 
     # =========================
-    # FORA DO TURNO: calcula "por hora"
+    # FORA DO TURNO: por hora do dia
     # =========================
     hora_ref = int(agora.hour)
 
-    # se hora mudou, ancora baseline da np_producao atual
-    try:
-        if m.get("np_hour_ref") is None or int(m.get("np_hour_ref")) != hora_ref:
-            m["np_hour_ref"] = hora_ref
-            m["np_hour_baseline"] = int(_safe_int(m.get("np_producao", 0), 0))
-            m["np_producao_hora"] = 0
-    except Exception:
+    # se hora mudou, ancora baseline da np_producao atual (zera hora)
+    if m.get("np_hour_ref") is None or _safe_int(m.get("np_hour_ref"), -1) != hora_ref:
         m["np_hour_ref"] = hora_ref
         m["np_hour_baseline"] = int(_safe_int(m.get("np_producao", 0), 0))
         m["np_producao_hora"] = 0
@@ -300,19 +346,17 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
         m["np_producao"] = _safe_int(m.get("np_producao", 0), 0) + int(delta)
 
     # produção NP (hora): dia - baseline da hora
-    try:
-        base = _safe_int(m.get("np_hour_baseline", 0), 0)
-        cur_np = _safe_int(m.get("np_producao", 0), 0)
-        m["np_producao_hora"] = max(0, int(cur_np - base))
-    except Exception:
-        m["np_producao_hora"] = 0
+    base = _safe_int(m.get("np_hour_baseline", 0), 0)
+    cur_np = _safe_int(m.get("np_producao", 0), 0)
+    m["np_producao_hora"] = max(0, int(cur_np - base))
 
     m["_np_active"] = bool(run_flag or (delta > 0))
     m["_np_last_ts"] = agora.isoformat()
     m["_np_last_esp"] = curr_esp
 
+    # ✅ persiste: diário + horária (a cada atualização)
     try:
-        _upsert_np_to_db(
+        _upsert_np_diario_to_db(
             machine_id=scoped_mid,
             data_ref=data_ref,
             np_producao=_safe_int(m.get("np_producao", 0), 0),
@@ -320,6 +364,17 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
             updated_at=agora.isoformat(),
             np_hour_ref=m.get("np_hour_ref"),
             np_hour_baseline=m.get("np_hour_baseline"),
+        )
+    except Exception:
+        pass
+
+    try:
+        upsert_np_horaria(
+            machine_id=scoped_mid,
+            data_ref=data_ref,
+            hora_dia=hora_ref,
+            produzido=_safe_int(m.get("np_producao_hora", 0), 0),
+            updated_at=agora.isoformat(),
         )
     except Exception:
         pass
