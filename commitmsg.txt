@@ -1,4 +1,6 @@
-﻿feat(ui): preencher tabela 24h com hora extra persistida (np_por_hora_24)
+﻿fix(np): persistir hora extra por delta/hora em nao_programado_horaria
 
-- dentro do turno: usa producao_por_hora (mapeado para 24h)
-- fora do turno: usa np_por_hora_24 para mostrar hora extra por hora do dia
+- Adiciona UPSERT somando delta por (machine_id, data_ref, hora_dia)
+- Ativa modo NP quando ultima_hora=None (fora do turno)
+- Respeita dia operacional (data_ref) e evita usar acumulado diário
+- Chama persistência no POST /machine/update após atualizar_producao_hora
