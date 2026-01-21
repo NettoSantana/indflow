@@ -1,6 +1,5 @@
-﻿refactor(routes): remover lógica/SQL do Não Programado do machine_routes
+﻿fix(np): status ler NP com tenant correto (cliente_id scoping)
 
-- Remove helpers locais de NP (ensure/upsert/process/load) do routes
-- POST /machine/update delega persistência de NP para machine_service.processar_nao_programado
-- GET /machine/status lê np_por_hora_24 via repos.nao_programado_horaria_repo
-- Mantém restante do arquivo fora do escopo
+- Salva cliente_id no estado da máquina durante /machine/update (via API key)
+- /machine/status resolve tenant via API key/sessão e fallback no estado
+- Evita np_por_hora_24 zerado por mismatch entre 'cliente::machine' e 'machine'
