@@ -1,4 +1,3 @@
-﻿feat(status): expor hora extra por hora (np_por_hora_24) no /machine/status
+﻿fix(machine_routes): SyntaxError (try sem except) em _sum_refugo_24
 
-- lê nao_programado_horaria por (machine_id,data_ref)
-- retorna np_por_hora_24 (0..23) para UI preencher tabela 24h
+- adiciona except em _sum_refugo_24 para não quebrar import do módulo
