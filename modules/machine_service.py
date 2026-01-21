@@ -1,8 +1,85 @@
+# Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_service.py
+# Último recode: 2026-01-21 17:48 (America/Bahia)
+# Motivo: Transformar machine_service em orquestrador do Não Programado (hora extra): decidir fora do turno, calcular delta por update e persistir hora a hora via nao_programado_horaria_repo, expondo np_por_hora_24 e flags no estado da máquina.
+
+from __future__ import annotations
+
 from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+from typing import Optional, List
+
 from modules.db_indflow import get_db
+
+# Repo NP (persistência)
+try:
+    from modules.repos.nao_programado_horaria_repo import (
+        ensure_table as np_ensure_table,
+        upsert_delta as np_upsert_delta,
+        load_np_por_hora_24 as np_load_np_por_hora_24,
+    )
+except Exception:
+    # fallback relativo (caso rode como package)
+    try:
+        from .repos.nao_programado_horaria_repo import (  # type: ignore
+            ensure_table as np_ensure_table,
+            upsert_delta as np_upsert_delta,
+            load_np_por_hora_24 as np_load_np_por_hora_24,
+        )
+    except Exception:
+        np_ensure_table = None  # type: ignore
+        np_upsert_delta = None  # type: ignore
+        np_load_np_por_hora_24 = None  # type: ignore
+
+# Calc NP (regras puras) — best-effort
+try:
+    from modules import machine_calc_nao_programado as np_calc  # type: ignore
+except Exception:
+    try:
+        from . import machine_calc_nao_programado as np_calc  # type: ignore
+    except Exception:
+        np_calc = None  # type: ignore
+
 
 UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 
+# ============================================================
+# FUSO / DIA OPERACIONAL
+# ============================================================
+TZ_BAHIA = ZoneInfo("America/Bahia")
+DIA_OPERACIONAL_VIRA = time(23, 59)  # vira às 23:59
+
+
+def now_bahia() -> datetime:
+    return datetime.now(TZ_BAHIA)
+
+
+def dia_operacional_ref_str(agora: Optional[datetime] = None) -> str:
+    """
+    Dia operacional:
+      - inicia às 23:59 e vai até 23:58 do dia seguinte.
+    Referência (data_ref) é o dia em que começou (YYYY-MM-DD).
+    """
+    a = agora or now_bahia()
+    if a.time() >= DIA_OPERACIONAL_VIRA:
+        return a.date().isoformat()
+    return (a.date() - timedelta(days=1)).isoformat()
+
+
+def _safe_int(v, default: int = 0) -> int:
+    try:
+        return int(v)
+    except Exception:
+        return default
+
+
+def _fmt_updated_at(agora: Optional[datetime] = None) -> str:
+    a = agora or now_bahia()
+    return a.strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ============================================================
+# UNIDADES
+# ============================================================
 def normalizar_unidade(v):
     if v is None:
         return None
@@ -10,6 +87,7 @@ def normalizar_unidade(v):
     if v == "" or v == "none":
         return None
     return v if v in UNIDADES_VALIDAS else None
+
 
 def aplicar_unidades(m, unidade_1, unidade_2):
     u1 = normalizar_unidade(unidade_1)
@@ -22,25 +100,33 @@ def aplicar_unidades(m, unidade_1, unidade_2):
     m["unidade_1"] = u1
     m["unidade_2"] = u2
 
+
+# ============================================================
+# RESET DIÁRIO (mantido, mas com fuso Bahia e dia operacional)
+# ============================================================
 def reset_contexto(m, machine_id):
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("""
+    cur.execute(
+        """
         INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual)
         VALUES (?, ?, ?, ?, ?)
-    """, (
-        machine_id,
-        m["ultimo_dia"].isoformat(),
-        m["producao_turno"],
-        m["meta_turno"],
-        m["percentual_turno"]
-    ))
+        """,
+        (
+            machine_id,
+            # mantém o que já existia: grava dia calendário do último_dia
+            m["ultimo_dia"].isoformat() if hasattr(m.get("ultimo_dia"), "isoformat") else str(m.get("ultimo_dia")),
+            m.get("producao_turno", 0),
+            m.get("meta_turno", 0),
+            m.get("percentual_turno", 0),
+        ),
+    )
 
     conn.commit()
     conn.close()
 
-    m["baseline_diario"] = m["esp_absoluto"]
+    m["baseline_diario"] = m.get("esp_absoluto", 0)
     m["producao_turno"] = 0
     m["producao_turno_anterior"] = 0
     m["producao_hora"] = 0
@@ -48,19 +134,41 @@ def reset_contexto(m, machine_id):
     m["percentual_turno"] = 0
     m["tempo_medio_min_por_peca"] = None
     m["ultima_hora"] = None
-    m["ultimo_dia"] = datetime.now().date()
+    m["ultimo_dia"] = now_bahia().date()
     m["reset_executado_hoje"] = True
 
+    # zera NP do estado (por segurança)
+    m["_np_active"] = False
+    m["_np_secs"] = 0
+    m["_np_data_ref"] = dia_operacional_ref_str()
+    m["_np_last_esp"] = m.get("esp_absoluto", 0)
+    m["_np_last_ts"] = now_bahia().isoformat()
+    m["np_hour_ref"] = None
+    m["np_hour_baseline"] = None
+    m["np_producao"] = 0
+    m["np_producao_hora"] = 0
+    m["np_minutos"] = 0
+    m["np_por_hora_24"] = [0] * 24
+
+
 def verificar_reset_diario(m, machine_id):
-    agora = datetime.now()
+    """
+    Mantém a lógica existente de reset às 23:59.
+    Obs: usa fuso Bahia para consistência com resto do sistema.
+    """
+    agora = now_bahia()
     horario_reset = time(23, 59)
 
-    if agora.time() >= horario_reset and not m["reset_executado_hoje"]:
+    if agora.time() >= horario_reset and not m.get("reset_executado_hoje", False):
         reset_contexto(m, machine_id)
 
-    if agora.date() != m["ultimo_dia"]:
+    if m.get("ultimo_dia") and agora.date() != m["ultimo_dia"]:
         m["reset_executado_hoje"] = False
 
+
+# ============================================================
+# TURNO / METAS
+# ============================================================
 def calcular_horas_turno(inicio_str, fim_str):
     inicio = datetime.strptime(inicio_str, "%H:%M")
     fim = datetime.strptime(fim_str, "%H:%M")
@@ -76,6 +184,7 @@ def calcular_horas_turno(inicio_str, fim_str):
         atual = proxima
 
     return horas, inicio, fim
+
 
 def calcular_metas_por_hora(meta_turno, horas, rampa_percentual):
     qtd_horas = len(horas)
@@ -99,16 +208,17 @@ def calcular_metas_por_hora(meta_turno, horas, rampa_percentual):
 
     return metas
 
+
 def calcular_tempo_medio_turno_min_por_peca(m):
     try:
         produzido = int(m.get("producao_turno", 0) or 0)
         inicio_str = m.get("turno_inicio")
 
         if produzido > 0 and inicio_str:
-            agora = datetime.now()
+            agora = now_bahia()
 
             inicio_dt = datetime.strptime(inicio_str, "%H:%M")
-            inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day)
+            inicio_dt = inicio_dt.replace(year=agora.year, month=agora.month, day=agora.day, tzinfo=TZ_BAHIA)
 
             # turno atravessou meia-noite
             if agora < inicio_dt:
@@ -123,6 +233,10 @@ def calcular_tempo_medio_turno_min_por_peca(m):
     except Exception:
         return None
 
+
+# ============================================================
+# HISTÓRICO
+# ============================================================
 def buscar_historico(machine_id=None, inicio=None, fim=None):
     query = """
         SELECT machine_id, data, produzido, meta, percentual
@@ -152,3 +266,202 @@ def buscar_historico(machine_id=None, inicio=None, fim=None):
     conn.close()
 
     return [dict(r) for r in rows]
+
+
+# ============================================================
+# NÃO PROGRAMADO (HORA EXTRA) — ORQUESTRAÇÃO
+#   - Decide fora/dentro do turno
+#   - Calcula delta por update (nunca usa acumulado diário)
+#   - Persiste hora a hora em nao_programado_horaria
+#   - Atualiza m com np_por_hora_24 e métricas
+# ============================================================
+def _parse_turno_range(agora: datetime, inicio_str: str, fim_str: str):
+    """
+    Retorna (inicio_dt, fim_dt) no mesmo dia-base de 'agora', ajustando virada de meia-noite.
+    """
+    ini = datetime.strptime(inicio_str, "%H:%M").time()
+    fim = datetime.strptime(fim_str, "%H:%M").time()
+
+    inicio_dt = agora.replace(hour=ini.hour, minute=ini.minute, second=0, microsecond=0)
+    fim_dt = agora.replace(hour=fim.hour, minute=fim.minute, second=0, microsecond=0)
+
+    if fim_dt <= inicio_dt:
+        fim_dt += timedelta(days=1)
+
+    # se agora estiver "antes" do início e o turno atravessa meia-noite, o início pode ser no dia anterior
+    if agora < inicio_dt and (fim_dt - inicio_dt) > timedelta(hours=0) and fim_dt.date() != inicio_dt.date():
+        inicio_dt -= timedelta(days=1)
+        fim_dt -= timedelta(days=1)
+
+    return inicio_dt, fim_dt
+
+
+def is_fora_do_turno(m: dict, agora: Optional[datetime] = None) -> bool:
+    """
+    Decide se está fora do turno com base em turno_inicio/turno_fim.
+    Fallback: se faltar configuração, assume fora_do_turno=True (para não perder NP).
+    """
+    a = agora or now_bahia()
+
+    # Preferência: se existir calc dedicado e tiver uma função reconhecível, usa.
+    # (best-effort: não quebra se nomes não baterem)
+    if np_calc is not None:
+        for fname in ("is_fora_do_turno", "fora_do_turno", "is_out_of_shift"):
+            fn = getattr(np_calc, fname, None)
+            if callable(fn):
+                try:
+                    return bool(fn(m, a))
+                except Exception:
+                    pass
+
+    inicio = (m.get("turno_inicio") or "").strip()
+    fim = (m.get("turno_fim") or "").strip()
+    if not inicio or not fim:
+        return True
+
+    try:
+        inicio_dt, fim_dt = _parse_turno_range(a, inicio, fim)
+        return not (inicio_dt <= a < fim_dt)
+    except Exception:
+        return True
+
+
+def _machine_id_scoped(cliente_id: Optional[str], machine_id: str) -> str:
+    if cliente_id:
+        return f"{cliente_id}::{machine_id}"
+    return machine_id
+
+
+def processar_nao_programado(
+    m: dict,
+    machine_id: str,
+    cliente_id: Optional[str],
+    esp_absoluto: int,
+    agora: Optional[datetime] = None,
+) -> None:
+    """
+    Atualiza o estado m e persiste NP por hora quando fora do turno.
+
+    Regras:
+      - delta = esp_absoluto - _np_last_esp (por update)
+      - delta > 0 => grava em (machine_id_scoped, data_ref, hora_dia)
+      - data_ref = dia_operacional_ref_str(agora)
+      - hora_dia = agora.hour (0..23)
+      - Nunca usa acumulado diário para preencher hora
+    """
+    a = agora or now_bahia()
+    data_ref = dia_operacional_ref_str(a)
+    hora_dia = int(a.hour)
+    updated_at = _fmt_updated_at(a)
+
+    mid = _machine_id_scoped(cliente_id, machine_id)
+    esp = _safe_int(esp_absoluto, 0)
+
+    fora_turno = is_fora_do_turno(m, a)
+
+    # defaults do estado NP
+    if "np_por_hora_24" not in m or not isinstance(m.get("np_por_hora_24"), list) or len(m.get("np_por_hora_24")) != 24:
+        m["np_por_hora_24"] = [0] * 24
+
+    if not fora_turno:
+        # Dentro do turno: desativa NP e sincroniza para evitar delta gigante depois
+        m["_np_active"] = False
+        m["_np_secs"] = 0
+        m["_np_data_ref"] = data_ref
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = a.isoformat()
+
+        m["np_hour_ref"] = None
+        m["np_hour_baseline"] = None
+        m["np_producao"] = 0
+        m["np_producao_hora"] = 0
+        m["np_minutos"] = 0
+        return
+
+    # Fora do turno => NP ativo
+    m["_np_active"] = True
+
+    np_data_ref = (m.get("_np_data_ref") or "").strip()
+    np_last_esp = _safe_int(m.get("_np_last_esp", esp), esp)
+
+    # Mudou o dia operacional: reseta trackers (não mistura dias)
+    if np_data_ref != data_ref:
+        m["_np_data_ref"] = data_ref
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = a.isoformat()
+
+        m["np_hour_ref"] = hora_dia
+        m["np_hour_baseline"] = esp
+        m["np_producao_hora"] = 0
+        m["np_producao"] = 0
+        m["np_minutos"] = 0
+
+        # carrega np_por_hora_24 do dia novo (zerado)
+        try:
+            if np_load_np_por_hora_24 is not None:
+                conn = get_db()
+                try:
+                    m["np_por_hora_24"] = np_load_np_por_hora_24(conn, mid, data_ref)
+                finally:
+                    conn.close()
+        except Exception:
+            pass
+        return
+
+    # Tracking por hora para exibir np_producao_hora
+    prev_hour_ref = m.get("np_hour_ref")
+    prev_hour_ref_int = _safe_int(prev_hour_ref, -1) if prev_hour_ref is not None else -1
+    if prev_hour_ref_int != hora_dia:
+        m["np_hour_ref"] = hora_dia
+        m["np_hour_baseline"] = esp
+        m["np_producao_hora"] = 0
+
+    # Delta por update (nunca acumulado diário)
+    delta = esp - np_last_esp
+
+    # Contador voltou (reset/overflow) => só sincroniza, não grava delta negativo
+    if delta < 0:
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = a.isoformat()
+        m["np_producao_hora"] = 0
+        m["np_producao"] = 0
+        return
+
+    # Persistência (upsert delta)
+    if delta > 0:
+        try:
+            if np_upsert_delta is not None and np_ensure_table is not None:
+                conn = get_db()
+                try:
+                    np_ensure_table(conn)
+                    np_upsert_delta(conn, mid, data_ref, hora_dia, delta, updated_at)
+                    # Atualiza np_por_hora_24 para o status refletir imediatamente
+                    if np_load_np_por_hora_24 is not None:
+                        m["np_por_hora_24"] = np_load_np_por_hora_24(conn, mid, data_ref)
+                finally:
+                    conn.close()
+        except Exception:
+            # não derruba update por falha de DB
+            pass
+
+    # Atualiza trackers
+    m["_np_last_esp"] = esp
+    m["_np_last_ts"] = a.isoformat()
+
+    # Métrica de exibição: NP da hora atual = esp - baseline da hora
+    base_hora = _safe_int(m.get("np_hour_baseline", esp), esp)
+    np_hora = max(0, esp - base_hora)
+
+    m["np_producao_hora"] = np_hora
+    m["np_producao"] = np_hora
+
+    # np_minutos (informativo): quanto tempo desde o primeiro "NP ativo" do dia_ref
+    # (best-effort, sem depender de logs)
+    try:
+        # se não existir ainda, inicializa com o primeiro timestamp que viu fora do turno
+        if not m.get("_np_first_ts"):
+            m["_np_first_ts"] = a.isoformat()
+        first = datetime.fromisoformat(m["_np_first_ts"])
+        m["np_minutos"] = int(max(0, (a - first).total_seconds() // 60))
+    except Exception:
+        m["np_minutos"] = _safe_int(m.get("np_minutos", 0), 0)
