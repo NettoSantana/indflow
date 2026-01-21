@@ -1,5 +1,6 @@
-﻿fix(np): evitar delta gigante no primeiro update fora do turno (bootstrap)
+﻿refactor(np): opção 1 backend entrega produção 24h (turno+NP) e corrige leitura NP
 
-- Em NP, se _np_last_esp estiver 0/None, ancora _np_last_esp=esp e não grava
-- Proteção adicional contra delta absurdo (ex: pós-deploy/reset com contador alto)
-- Mantém gravação hora a hora via repo apenas com delta real
+- Remove helpers NP quebrados do routes (SQL/delta não ficam aqui)
+- /machine/update salva cliente_id no estado e delega persistência NP ao machine_service
+- /machine/status lê np_por_hora_24 via repo com scoping correto
+- Cria m.producao_exibicao_24 (24h) mesclando producao_turno + np_por_hora_24
