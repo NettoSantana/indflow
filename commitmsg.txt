@@ -1,6 +1,6 @@
-﻿feat(service): orquestrar Não Programado (hora extra) no machine_service
+﻿refactor(routes): remover lógica/SQL do Não Programado do machine_routes
 
-- Adiciona fuso Bahia e cálculo de dia operacional (vira 23:59)
-- Implementa decisão fora do turno e processamento de delta por update (sem acumulado diário)
-- Persiste NP por hora via repos/nao_programado_horaria_repo (upsert delta + leitura np_por_hora_24)
-- Atualiza estado m com flags e métricas: _np_active, np_producao_hora, np_por_hora_24, etc.
+- Remove helpers locais de NP (ensure/upsert/process/load) do routes
+- POST /machine/update delega persistência de NP para machine_service.processar_nao_programado
+- GET /machine/status lê np_por_hora_24 via repos.nao_programado_horaria_repo
+- Mantém restante do arquivo fora do escopo
