@@ -1,5 +1,4 @@
-﻿fix(machine_routes): corrigir SyntaxError e expor np_por_hora_24 no /machine/status
+﻿feat(ui): preencher tabela 24h com hora extra persistida (np_por_hora_24)
 
-- adiciona helpers _ensure_np_horaria_table e _load_np_por_hora_24
-- preenche m['np_por_hora_24'] dentro de machine_status (indentação correta)
-- evita except solto / bloco fora de função
+- dentro do turno: usa producao_por_hora (mapeado para 24h)
+- fora do turno: usa np_por_hora_24 para mostrar hora extra por hora do dia
