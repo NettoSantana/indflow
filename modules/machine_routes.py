@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-21 19:25 (America/Bahia)
-# Motivo: Fixar scoping do NP por cliente_id (leitura/gravacao), e adicionar debug de NP (dump e campos de diagnóstico) para validar persistência em DEV.
+# Último recode: 2026-01-21 20:15 (America/Bahia)
+# Motivo: Opção 1 — backend entrega produção exibível 24h mesclando turno e Não Programado; corrigir leitura NP via repo + scoping por cliente_id e remover helpers NP quebrados do routes.
 
 # modules/machine_routes.py
 import os
@@ -23,6 +23,9 @@ from modules.machine_calc import (
     now_bahia,
     dia_operacional_ref_str,
 )
+
+from modules.machine_service import processar_nao_programado
+from modules.repos.nao_programado_horaria_repo import load_np_por_hora_24
 
 from modules.repos.machine_config_repo import upsert_machine_config
 from modules.repos.refugo_repo import load_refugo_24, upsert_refugo
@@ -77,254 +80,58 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
 
 
 # ============================================================
-# NÃO PROGRAMADO (HORA EXTRA) — leitura horária para UI
-#   - Lê tabela nao_programado_horaria (se existir)
-#   - Retorna lista 24h com produção NP por hora do dia (0..23)
+# NÃO PROGRAMADO (HORA EXTRA)
+#   - Persistência/decisão: modules.machine_service.processar_nao_programado()
+#   - Leitura 24h: repos.nao_programado_horaria_repo.load_np_por_hora_24()
+#   - IMPORTANTE: routes não deve ter SQL nem lógica de delta do NP
 # ============================================================
-def _ensure_np_horaria_table(conn):
+
+def _resolve_cliente_id_for_status(m: dict) -> str | None:
+    """
+    Resolve tenant para leitura do NP no /machine/status.
+    Ordem:
+      1) X-API-Key (se existir)
+      2) session['cliente_id'] (web)
+      3) m['cliente_id'] (gravado no update do ESP)
+    """
     try:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS nao_programado_horaria (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                machine_id TEXT NOT NULL,
-                data_ref TEXT NOT NULL,
-                hora_dia INTEGER NOT NULL,
-                produzido INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT NOT NULL
-            )
-        """)
-        try:
-            conn.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_np_horaria
-                ON nao_programado_horaria(machine_id, data_ref, hora_dia)
-            """)
-        except Exception:
-            pass
-        try:
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS ix_np_horaria_data
-                ON nao_programado_horaria(data_ref)
-            """)
-        except Exception:
-            pass
-        conn.commit()
+        c = _get_cliente_from_api_key()
+        if c and c.get("id"):
+            return str(c["id"])
     except Exception:
-        # não derruba o app por migração
         pass
 
-
-def _load_np_por_hora_24(machine_id_scoped: str, data_ref: str) -> list:
-    arr = [0] * 24
-    mid = (machine_id_scoped or "").strip()
-    dr = (data_ref or "").strip()
-    if not mid or not dr:
-        return arr
-
-# ============================================================
-# NÃO PROGRAMADO (HORA EXTRA) — persistência horária
-#   Regra: sempre gravar DELTA da hora em nao_programado_horaria
-#         (machine_id, data_ref, hora_dia) -> produzido += delta
-#   - Nunca usar acumulado diário para preencher hora
-#   - Suporta dia operacional (data_ref) diferente do calendário
-# ============================================================
-def _upsert_np_delta(conn, machine_id_scoped: str, data_ref: str, hora_dia: int, delta: int, updated_at: str):
     try:
-        d = int(delta or 0)
-        if d <= 0:
-            return
+        cid = (session.get("cliente_id") or "").strip()
+        if cid:
+            return cid
     except Exception:
-        return
+        pass
 
-    mid = (machine_id_scoped or "").strip()
-    dr = (data_ref or "").strip()
     try:
-        hd = int(hora_dia)
+        cid = (m.get("cliente_id") or "").strip()
+        return cid or None
     except Exception:
-        return
+        return None
 
-    if not mid or not dr or hd < 0 or hd > 23:
-        return
 
-    _ensure_np_horaria_table(conn)
+def _machine_id_scoped(cliente_id: str | None, machine_id: str) -> str:
+    if cliente_id:
+        return f"{cliente_id}::{machine_id}"
+    return machine_id
 
-    # UPSERT: soma deltas na mesma hora (0..23)
+
+def _load_np_por_hora_24_scoped(machine_id: str, dia_ref: str, cliente_id: str | None) -> list:
+    """Carrega NP por hora (24) do banco para a máquina (scoped)."""
     try:
-        conn.execute(
-            """
-            INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(machine_id, data_ref, hora_dia)
-            DO UPDATE SET
-                produzido = produzido + excluded.produzido,
-                updated_at = excluded.updated_at
-            """,
-            (mid, dr, hd, int(d), updated_at),
-        )
-        conn.commit()
-    except Exception:
-        # fallback para SQLite antigo (sem ON CONFLICT DO UPDATE)
+        mid = _machine_id_scoped(cliente_id, machine_id)
+        conn = get_db()
         try:
-            cur = conn.execute(
-                """SELECT produzido FROM nao_programado_horaria
-                     WHERE machine_id=? AND data_ref=? AND hora_dia=? LIMIT 1""",
-                (mid, dr, hd),
-            )
-            row = cur.fetchone()
-            if row:
-                novo = int(row[0] or 0) + int(d)
-                conn.execute(
-                    """UPDATE nao_programado_horaria
-                         SET produzido=?, updated_at=?
-                         WHERE machine_id=? AND data_ref=? AND hora_dia=?""",
-                    (novo, updated_at, mid, dr, hd),
-                )
-            else:
-                conn.execute(
-                    """INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
-                         VALUES (?, ?, ?, ?, ?)""",
-                    (mid, dr, hd, int(d), updated_at),
-                )
-            conn.commit()
-        except Exception:
-            pass
-
-
-def _process_nao_programado_update(m: dict, machine_id_scoped: str, dia_ref: str, hora_dia: int, esp_abs: int, updated_at: str):
-    """
-    Atualiza estado em memória + persiste delta/hora quando estiver fora do turno.
-
-    Heurística usada:
-      - Se m["ultima_hora"] is None => fora do turno (não programado)
-      - Dentro do turno => desativa NP e apenas sincroniza o último esp para evitar delta gigante
-    """
-    try:
-        esp = int(esp_abs or 0)
-    except Exception:
-        esp = 0
-
-    fora_turno = (m.get("ultima_hora") is None)
-
-    # chaves de estado (em memória)
-    np_data_ref = (m.get("_np_data_ref") or "").strip()
-    np_last_esp = _safe_int(m.get("_np_last_esp", 0), 0)
-
-    # tracking por hora (para exibir np_producao_hora)
-    np_hour_ref = m.get("np_hour_ref")
-    np_hour_baseline = m.get("np_hour_baseline")
-
-    # garantia de tipo
-    try:
-        np_hour_ref_int = int(np_hour_ref) if np_hour_ref is not None else None
-    except Exception:
-        np_hour_ref_int = None
-
-    try:
-        np_hour_baseline_int = int(np_hour_baseline) if np_hour_baseline is not None else None
-    except Exception:
-        np_hour_baseline_int = None
-
-    if not fora_turno:
-        # Dentro do turno: desliga NP e sincroniza último esp
-        m["_np_active"] = False
-        m["_np_data_ref"] = dia_ref
-        m["_np_last_esp"] = esp
-        m["_np_last_ts"] = datetime.now().isoformat()
-
-        m["np_hour_ref"] = None
-        m["np_hour_baseline"] = None
-        m["np_producao"] = 0
-        m["np_producao_hora"] = 0
-        m["np_minutos"] = 0
-        return
-
-    # Fora do turno => NP ativo
-    m["_np_active"] = True
-
-    # se mudou o dia operacional, reinicia tracking para evitar misturar dias
-    if np_data_ref != dia_ref:
-        m["_np_data_ref"] = dia_ref
-        m["_np_last_esp"] = esp
-        m["_np_last_ts"] = datetime.now().isoformat()
-
-        m["np_hour_ref"] = int(hora_dia)
-        m["np_hour_baseline"] = esp
-
-        m["np_producao"] = 0
-        m["np_producao_hora"] = 0
-        m["np_minutos"] = 0
-        return
-
-    # se mudou a hora atual, reinicia baseline da hora (para métrica np_producao_hora)
-    if np_hour_ref_int is None or np_hour_baseline_int is None or np_hour_ref_int != int(hora_dia):
-        m["np_hour_ref"] = int(hora_dia)
-        m["np_hour_baseline"] = esp
-        m["np_producao_hora"] = 0
-
-    # delta desde o último update (regra: nunca usar acumulado diário)
-    delta = esp - np_last_esp
-    if delta < 0:
-        # contador voltou (reset/overflow). sincroniza e não grava delta negativo
-        m["_np_last_esp"] = esp
-        m["_np_last_ts"] = datetime.now().isoformat()
-        m["np_producao_hora"] = 0
-        m["np_producao"] = 0
-        return
-
-    if delta > 0:
-        try:
-            conn = get_db()
-            try:
-                _upsert_np_delta(conn, machine_id_scoped, dia_ref, int(hora_dia), int(delta), updated_at)
-            finally:
-                conn.close()
-        except Exception:
-            pass
-
-    # atualiza trackers
-    m["_np_last_esp"] = esp
-    m["_np_last_ts"] = datetime.now().isoformat()
-
-    # métrica de exibição: produção NP da hora atual
-    try:
-        base = _safe_int(m.get("np_hour_baseline", esp), esp)
-        m["np_producao_hora"] = max(0, esp - base)
-    except Exception:
-        m["np_producao_hora"] = 0
-
-    m["np_producao"] = int(m.get("np_producao_hora", 0) or 0)
-
-    conn = get_db()
-    try:
-        _ensure_np_horaria_table(conn)
-        cur = conn.execute(
-            """
-            SELECT hora_dia, produzido
-              FROM nao_programado_horaria
-             WHERE machine_id = ?
-               AND data_ref = ?
-            """,
-            (mid, dr),
-        )
-        rows = cur.fetchall() or []
-        for r in rows:
-            try:
-                h = int(r[0])
-            except Exception:
-                continue
-            try:
-                p = int(r[1] or 0)
-            except Exception:
-                p = 0
-            if 0 <= h < 24:
-                arr[h] = max(0, p)
-        return arr
-    except Exception:
-        return arr
-    finally:
-        try:
+            return load_np_por_hora_24(conn, mid, (dia_ref or "").strip())
+        finally:
             conn.close()
-        except Exception:
-            pass
+    except Exception:
+        return [0] * 24
 
 
 def _admin_token_ok() -> bool:
@@ -707,68 +514,6 @@ def admin_hard_reset():
         "note": "Banco limpo. Recomece a contagem a partir do próximo envio do ESP."
     })
 
-# ============================================================
-# ADMIN (DEV) — DUMP NÃO PROGRAMADO (NP) PARA DIAGNÓSTICO
-#   Header obrigatório: X-Admin-Token: <INDFLOW_ADMIN_TOKEN>
-#   Query: /admin/np-dump?machine_id=maquina02&dia_ref=2026-01-20
-# ============================================================
-@machine_bp.route("/admin/np-dump", methods=["GET"])
-def admin_np_dump():
-    if not _admin_token_ok():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-
-    raw_mid = _norm_machine_id(request.args.get("machine_id", "maquina01"))
-    dia_ref = (request.args.get("dia_ref") or "").strip() or dia_operacional_ref_str(now_bahia())
-
-    # aceita scoping explícito por query (cliente_id), senão tenta sessão
-    cid = (request.args.get("cliente_id") or "").strip()
-    if not cid:
-        cid = (_get_cliente_id_for_request() or "").strip()
-    if not cid:
-        m = get_machine(raw_mid)
-        cid = (m.get("cliente_id") or "").strip()
-
-    machine_id_scoped = f"{cid}::{raw_mid}" if cid else raw_mid
-
-    conn = get_db()
-    try:
-        # garante tabela existe (repo já cria, mas aqui evita erro em ambiente velho)
-        try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS nao_programado_horaria (
-                    machine_id TEXT NOT NULL,
-                    data_ref TEXT NOT NULL,
-                    hora_dia INTEGER NOT NULL,
-                    produzido INTEGER NOT NULL DEFAULT 0,
-                    updated_at TEXT,
-                    PRIMARY KEY (machine_id, data_ref, hora_dia)
-                )
-            """)
-            conn.commit()
-        except Exception:
-            pass
-
-        cur = conn.execute(
-            """SELECT machine_id, data_ref, hora_dia, produzido, updated_at
-                   FROM nao_programado_horaria
-                  WHERE machine_id = ? AND data_ref = ?
-               ORDER BY hora_dia""",
-            (machine_id_scoped, dia_ref),
-        )
-        rows = [dict(r) for r in cur.fetchall() or []]
-    finally:
-        conn.close()
-
-    return jsonify({
-        "ok": True,
-        "machine_id": raw_mid,
-        "cliente_id": cid or None,
-        "machine_id_scoped": machine_id_scoped,
-        "dia_ref": dia_ref,
-        "rows": rows,
-    })
-
-
 
 # ============================================================
 # CONFIGURAÇÃO DA MÁQUINA
@@ -778,6 +523,8 @@ def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
+    # guarda tenant no estado para leitura do NP no /machine/status (web)
+    m["cliente_id"] = cliente_id
 
     meta_turno = int(data["meta_turno"])
     rampa = int(data["rampa"])
@@ -889,9 +636,6 @@ def update_machine():
 
     m = get_machine(machine_id)
 
-    # mantém cliente_id no estado para leitura do NP no /machine/status (scoping)
-    m["cliente_id"] = cliente_id
-
     verificar_reset_diario(m, machine_id)
 
     # --- captura status anterior antes de sobrescrever
@@ -955,22 +699,6 @@ def update_machine():
         m["percentual_turno"] = 0
 
     atualizar_producao_hora(m)
-
-    # =====================================================
-    # HORA EXTRA (NÃO PROGRAMADO) — persistência horária
-    #   - Se estiver fora do turno, grava delta/hora em nao_programado_horaria
-    #   - Nunca usa acumulado diário
-    # =====================================================
-    try:
-        agora_np = now_bahia()
-        dia_ref_np = dia_operacional_ref_str(agora_np)
-        hora_dia_np = int(agora_np.hour)
-        updated_at_np = agora_np.strftime("%Y-%m-%d %H:%M:%S")
-        machine_id_scoped = f"{cliente_id}::{machine_id}" if cliente_id else machine_id
-        _process_nao_programado_update(m, machine_id_scoped, dia_ref_np, hora_dia_np, int(m.get("esp_absoluto", 0) or 0), updated_at_np)
-    except Exception:
-        pass
-
 
     return jsonify({
         "message": "OK",
@@ -1119,29 +847,52 @@ def machine_status():
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
 
     # =====================================================
-    # HORA EXTRA (NÃO PROGRAMADO): lista 24h persistida
-    # - usado pela UI para preencher a tabela mesmo fora do turno
+    # HORA EXTRA (NÃO PROGRAMADO): lista 24h persistida (DB)
     # =====================================================
     try:
-        # Resolve tenant para ler NP com o mesmo scoping usado na gravação (cliente_id::machine_id)
-        cid = _get_cliente_id_for_request()
-        if not cid:
-            cid = (m.get("cliente_id") or "").strip()
-        if not cid:
-            cid = (session.get("cliente_id") or "").strip()
-        machine_id_scoped = f"{cid}::{machine_id}" if cid else machine_id
-
-        # Debug (DEV): mostra qual chave foi usada para buscar no banco
-        m["_np_debug_machine_id_scoped"] = machine_id_scoped
-        m["_np_debug_data_ref"] = dia_ref
-
-        conn = get_db()
-        try:
-            m["np_por_hora_24"] = load_np_por_hora_24(conn, machine_id_scoped, dia_ref)
-        finally:
-            conn.close()
+        cid = _resolve_cliente_id_for_status(m)
+        m["np_por_hora_24"] = _load_np_por_hora_24_scoped(machine_id, dia_ref, cid)
     except Exception:
         m["np_por_hora_24"] = [0] * 24
+
+
+    # =====================================================
+    # OPÇÃO 1 (BACKEND): produção exibível 24h (turno + NP)
+    # - Dentro do turno: usa producao_por_hora (index do turno)
+    # - Fora do turno: usa np_por_hora_24 (hora do dia)
+    # Resultado em m["producao_exibicao_24"] (lista 24)
+    # =====================================================
+    try:
+        exib = [0] * 24
+
+        horas_turno = m.get("horas_turno") or []
+        prod_turno = m.get("producao_por_hora") or []
+
+        # mapeia cada slot do turno para hora inicial (ex: "12:00 - 13:00" -> 12)
+        if isinstance(horas_turno, list) and isinstance(prod_turno, list):
+            for i, faixa in enumerate(horas_turno):
+                if i >= len(prod_turno):
+                    break
+                try:
+                    h_ini = int(str(faixa).split("-", 1)[0].strip().split(":", 1)[0])
+                except Exception:
+                    continue
+                if 0 <= h_ini <= 23:
+                    v = prod_turno[i]
+                    if v is None:
+                        continue
+                    exib[h_ini] = _safe_int(v, 0)
+
+        # fora do turno: sobrescreve com NP quando houver valor
+        np24 = m.get("np_por_hora_24") or [0] * 24
+        if isinstance(np24, list) and len(np24) == 24:
+            for h in range(24):
+                if exib[h] == 0 and _safe_int(np24[h], 0) > 0:
+                    exib[h] = _safe_int(np24[h], 0)
+
+        m["producao_exibicao_24"] = exib
+    except Exception:
+        m["producao_exibicao_24"] = [0] * 24
 
     if "run" not in m:
         m["run"] = 0
