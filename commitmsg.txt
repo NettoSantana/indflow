@@ -1,3 +1,5 @@
-﻿fix(machine_routes): SyntaxError (try sem except) em _sum_refugo_24
+﻿fix(machine_routes): corrigir SyntaxError e expor np_por_hora_24 no /machine/status
 
-- adiciona except em _sum_refugo_24 para não quebrar import do módulo
+- adiciona helpers _ensure_np_horaria_table e _load_np_por_hora_24
+- preenche m['np_por_hora_24'] dentro de machine_status (indentação correta)
+- evita except solto / bloco fora de função
