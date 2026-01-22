@@ -1,5 +1,5 @@
-﻿fix(np): baseline por hora ancorado no esp_absoluto (evita explosão np_hour_baseline pequeno)
+﻿fix(np): catch-up na persistência horária (DB não trava em valor antigo)
 
-- np_hour_baseline passa a ser o esp_absoluto ao virar a hora (fora do turno)
-- np_producao_hora vira esp_absoluto - np_hour_baseline
-- mantém np_producao diário como soma de deltas
+- calcula total real da hora: esp - np_hour_baseline
+- grava no DB a diferença (catch-up) para o banco alcançar o total da hora
+- mantém proteções de bootstrap/delta gigante
