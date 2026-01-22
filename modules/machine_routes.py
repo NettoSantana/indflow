@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-22 16:35 (America/Bahia)
-# Motivo: Corrigir contagem de ociosidade (parado_min): definir TZ_BAHIA e contar apenas dentro do turno (produção programada).
+# Último recode: 2026-01-22 19:25 (America/Bahia)
+# Motivo: Corrigir parado_min e preservar contagem de producao por hora apos deploy: setar m['cliente_id'] no /machine/status antes de atualizar_producao_hora; manter contagem apenas no turno.
 
 # modules/machine_routes.py
 import os
@@ -74,25 +74,6 @@ def _parse_hhmm(hhmm: str) -> tuple[int, int] | None:
     except Exception:
         pass
     return None
-
-
-def _is_inside_turno(agora: datetime, turno_inicio: str | None, turno_fim: str | None) -> bool:
-    ini = _parse_hhmm(turno_inicio or "")
-    fim = _parse_hhmm(turno_fim or "")
-    if ini is None or fim is None:
-        return False
-
-    s0 = datetime(agora.year, agora.month, agora.day, ini[0], ini[1], 0, tzinfo=TZ_BAHIA)
-    e0 = datetime(agora.year, agora.month, agora.day, fim[0], fim[1], 0, tzinfo=TZ_BAHIA)
-    if e0 <= s0:
-        e0 = e0 + timedelta(days=1)
-
-    if s0 <= agora < e0:
-        return True
-
-    s1 = s0 - timedelta(days=1)
-    e1 = e0 - timedelta(days=1)
-    return s1 <= agora < e1
 
 
 def _calc_minutos_parados_somente_turno(start_ms: int, end_ms: int, turno_inicio: str | None, turno_fim: str | None) -> int:
@@ -480,8 +461,8 @@ def _ensure_baseline_table(conn):
     except Exception:
         pass
 
-    # MUITO IMPORTANTE:
-    # NAO criar mais o UNIQUE antigo (machine_id, dia_ref) porque pode haver duplicados
+    # ⚠️ MUITO IMPORTANTE:
+    # NÃO criar mais o UNIQUE antigo (machine_id, dia_ref) porque pode haver duplicados
     # e isso derruba o deploy/serviço.
     try:
         conn.execute("DROP INDEX IF EXISTS ux_baseline_diario")
@@ -605,7 +586,7 @@ def configurar_maquina():
     m = get_machine(machine_id)
 
     # guarda tenant no estado para leitura do NP no /machine/status (web)
-    # RECODE: antes era cliente_id (variável inexistente). Agora resolvemos de forma segura.
+    # ✅ RECODE: antes era cliente_id (variável inexistente). Agora resolvemos de forma segura.
     cliente_id = None
     try:
         cliente_id = _get_cliente_id_for_request()
@@ -723,7 +704,7 @@ def update_machine():
 
     m = get_machine(machine_id)
 
-    # RECODE: garantir que o status consiga ler NP scoped (cliente_id::machine_id)
+    # ✅ RECODE: garantir que o status consiga ler NP scoped (cliente_id::machine_id)
     m["cliente_id"] = cliente_id
 
     verificar_reset_diario(m, machine_id)
@@ -790,7 +771,7 @@ def update_machine():
 
     atualizar_producao_hora(m)
 
-    # RECODE: persistir NP hora a hora (sem travar o update)
+    # ✅ RECODE: persistir NP hora a hora (sem travar o update)
     try:
         agora_np = now_bahia()
         # assinatura pode variar entre versões, por isso usamos kwargs e protegemos com try/except
@@ -945,6 +926,14 @@ def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
+    # tenant: importante para carregar producao_horaria (scoped) apos restart/deploy
+    try:
+        cid_tmp = _resolve_cliente_id_for_status(m)
+        if cid_tmp:
+            m["cliente_id"] = cid_tmp
+    except Exception:
+        pass
+
     carregar_baseline_diario(m, machine_id)
 
     atualizar_producao_hora(m)
@@ -962,7 +951,6 @@ def machine_status():
         m["np_por_hora_24"] = _load_np_por_hora_24_scoped(machine_id, dia_ref, cid)
     except Exception:
         m["np_por_hora_24"] = [0] * 24
-
 
     # =====================================================
     # OPÇÃO 1 (BACKEND): produção exibível 24h (turno + NP)
@@ -1024,7 +1012,7 @@ def machine_status():
                 ss = now_ms
             turno_inicio = (m.get("turno_inicio") or "").strip()
             turno_fim = (m.get("turno_fim") or "").strip()
-            if turno_inicio and turno_fim and _is_inside_turno(agora, turno_inicio, turno_fim):
+            if turno_inicio and turno_fim:
                 m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
             else:
                 m["parado_min"] = None
@@ -1072,7 +1060,7 @@ def historico_page():
 
 
 # ============================================================
-# HISTÓRICO - API (JSON)  AGORA É MULTI-TENANT
+# HISTÓRICO - API (JSON)  ✅ AGORA É MULTI-TENANT
 # ============================================================
 @machine_bp.route("/api/producao/historico", methods=["GET"])
 def historico_producao_api():
