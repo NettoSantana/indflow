@@ -1,5 +1,4 @@
-﻿fix(np): catch-up na persistência horária (DB não trava em valor antigo)
+﻿fix(np): OPÇÃO A - chamar processar_nao_programado no /machine/update
 
-- calcula total real da hora: esp - np_hour_baseline
-- grava no DB a diferença (catch-up) para o banco alcançar o total da hora
-- mantém proteções de bootstrap/delta gigante
+- Garante execução do orquestrador de Não Programado a cada update do ESP
+- Usa timestamp único (agora_np) por update para consistência
