@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-21 20:15 (America/Bahia)
-# Motivo: Opção 1 — backend entrega produção exibível 24h mesclando turno e Não Programado; corrigir leitura NP via repo + scoping por cliente_id e remover helpers NP quebrados do routes.
+# Último recode: 2026-01-21 22:05 (America/Bahia)
+# Motivo: RECODE sem remover linhas: corrigir cliente_id inexistente em /machine/config; em /machine/update gravar m['cliente_id']=cliente_id e chamar processar_nao_programado para persistir NP hora a hora (destrava np_por_hora_24 e producao_exibicao_24 fora do turno).
 
 # modules/machine_routes.py
 import os
@@ -523,7 +523,14 @@ def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
+
     # guarda tenant no estado para leitura do NP no /machine/status (web)
+    # ✅ RECODE: antes era cliente_id (variável inexistente). Agora resolvemos de forma segura.
+    cliente_id = None
+    try:
+        cliente_id = _get_cliente_id_for_request()
+    except Exception:
+        cliente_id = None
     m["cliente_id"] = cliente_id
 
     meta_turno = int(data["meta_turno"])
@@ -636,6 +643,9 @@ def update_machine():
 
     m = get_machine(machine_id)
 
+    # ✅ RECODE: garantir que o status consiga ler NP scoped (cliente_id::machine_id)
+    m["cliente_id"] = cliente_id
+
     verificar_reset_diario(m, machine_id)
 
     # --- captura status anterior antes de sobrescrever
@@ -699,6 +709,23 @@ def update_machine():
         m["percentual_turno"] = 0
 
     atualizar_producao_hora(m)
+
+    # ✅ RECODE: persistir NP hora a hora (sem travar o update)
+    try:
+        # assinatura pode variar entre versões, por isso usamos kwargs e protegemos com try/except
+        processar_nao_programado(
+            m=m,
+            machine_id=machine_id,
+            cliente_id=cliente_id,
+            esp_absoluto=int(m.get("esp_absoluto", 0) or 0),
+            agora=now_bahia(),
+        )
+    except Exception:
+        try:
+            # fallback posicional (caso seu processar_nao_programado seja antigo)
+            processar_nao_programado(m, machine_id, cliente_id)
+        except Exception:
+            pass
 
     return jsonify({
         "message": "OK",
