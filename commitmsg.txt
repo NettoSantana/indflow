@@ -1,4 +1,5 @@
-﻿feat(parada): contar minutos parados apenas dentro do horario programado
+﻿fix(machine_calc): opcao C producao por hora com acumulador + anti-explosao na virada
 
-- /machine/status agora calcula parado_min somente dentro do turno (turno_inicio..turno_fim)
-- fora do turno nao soma minutos de parada
+- adiciona acumulador por delta de esp_absoluto por hora
+- valida baseline vs acumulador e evita spike na virada de hora
+- ao fechar hora (virada/saida do turno), prioriza acumulador quando alinhado
