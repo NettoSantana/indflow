@@ -1,5 +1,4 @@
-﻿fix(machine_calc): opcao C producao por hora com acumulador + anti-explosao na virada
+﻿fix(machine_routes): restaurar contagem de ociosidade somente no turno
 
-- adiciona acumulador por delta de esp_absoluto por hora
-- valida baseline vs acumulador e evita spike na virada de hora
-- ao fechar hora (virada/saida do turno), prioriza acumulador quando alinhado
+- importa TZ_BAHIA para corrigir NameError no calculo de parado_min
+- parado_min so conta dentro do turno (producao programada); fora do turno retorna None
