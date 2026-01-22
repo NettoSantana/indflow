@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_service.py
-# Ultimo recode: 2026-01-22 07:35 (America/Bahia)
-# Motivo: Debug NP - expor estado do repo e erros de persistencia no estado m (para aparecer no /machine/status). Mantem OPCAO A.
+# Último recode: 2026-01-22 07:40 (America/Bahia)
+# Motivo: Debug NP - adicionar readback direto do DB apos upsert e expor parametros de persistencia para identificar chave/hora/data divergente.
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Optional, List
 
 from modules.db_indflow import get_db
 
-# Repo NP (persistencia)
+# Repo NP (persistência)
 try:
     from modules.repos.nao_programado_horaria_repo import (
         ensure_table as np_ensure_table,
@@ -29,7 +29,7 @@ except Exception:
         np_upsert_delta = None  # type: ignore
         np_load_np_por_hora_24 = None  # type: ignore
 
-# Calc NP (regras puras) - best-effort
+# Calc NP (regras puras) — best-effort
 try:
     from modules import machine_calc_nao_programado as np_calc  # type: ignore
 except Exception:
@@ -45,7 +45,7 @@ UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 # FUSO / DIA OPERACIONAL
 # ============================================================
 TZ_BAHIA = ZoneInfo("America/Bahia")
-DIA_OPERACIONAL_VIRA = time(23, 59)  # vira as 23:59
+DIA_OPERACIONAL_VIRA = time(23, 59)  # vira às 23:59
 
 
 def now_bahia() -> datetime:
@@ -55,8 +55,8 @@ def now_bahia() -> datetime:
 def dia_operacional_ref_str(agora: Optional[datetime] = None) -> str:
     """
     Dia operacional:
-      - inicia as 23:59 e vai ate 23:58 do dia seguinte.
-    Referencia (data_ref) e o dia em que comecou (YYYY-MM-DD).
+      - inicia às 23:59 e vai até 23:58 do dia seguinte.
+    Referência (data_ref) é o dia em que começou (YYYY-MM-DD).
     """
     a = agora or now_bahia()
     if a.time() >= DIA_OPERACIONAL_VIRA:
@@ -100,7 +100,7 @@ def aplicar_unidades(m, unidade_1, unidade_2):
 
 
 # ============================================================
-# RESET DIARIO (mantido, mas com fuso Bahia e dia operacional)
+# RESET DIÁRIO (mantido, mas com fuso Bahia e dia operacional)
 # ============================================================
 def reset_contexto(m, machine_id):
     conn = get_db()
@@ -228,7 +228,7 @@ def calcular_tempo_medio_turno_min_por_peca(m):
 
 
 # ============================================================
-# HISTORICO
+# HISTÓRICO
 # ============================================================
 def buscar_historico(machine_id=None, inicio=None, fim=None):
     query = """
@@ -262,7 +262,7 @@ def buscar_historico(machine_id=None, inicio=None, fim=None):
 
 
 # ============================================================
-# NAO PROGRAMADO (HORA EXTRA) - ORQUESTRACAO
+# NÃO PROGRAMADO (HORA EXTRA) — ORQUESTRAÇÃO
 # ============================================================
 def _parse_turno_range(agora: datetime, inicio_str: str, fim_str: str):
     ini = datetime.strptime(inicio_str, "%H:%M").time()
@@ -330,10 +330,12 @@ def processar_nao_programado(
 
     was_active = bool(m.get("_np_active", False))
 
-    # Debug_toggle: expor estado do repo e ultimo erro de persistencia (visivel no /machine/status)
+    # Debug: expor estado do repo e ultimo erro de persistência (visível no /machine/status)
     m["_np_repo_ok"] = bool(np_ensure_table and np_upsert_delta and np_load_np_por_hora_24)
     m["_np_persist_error"] = None
     m["_np_persist_stage"] = None
+    m["_np_persist_params"] = None
+    m["_np_db_value_after_upsert"] = None
 
     if "np_por_hora_24" not in m or not isinstance(m.get("np_por_hora_24"), list) or len(m.get("np_por_hora_24")) != 24:
         m["np_por_hora_24"] = [0] * 24
@@ -354,9 +356,8 @@ def processar_nao_programado(
 
     # Fora do turno => NP ativo
 
-    # OPCAO A: ao entrar em NP (fora do turno), reancorar baseline da hora quando
-    # o estado anterior estiver inativo ou inconsistente. Isso evita travar em valor
-    # antigo quando perder updates/bootstraps e o baseline ficar "fantasma".
+    # Opção A: ao entrar em NP (fora do turno), reancorar baseline da hora quando
+    # o estado anterior estiver inativo ou inconsistente.
     entering_np = (not was_active) or (m.get("np_hour_ref") is None) or (m.get("np_hour_baseline") is None)
     if entering_np:
         m["_np_data_ref"] = data_ref
@@ -381,7 +382,6 @@ def processar_nao_programado(
                     conn.close()
         except Exception as e:
             m["_np_persist_error"] = repr(e)
-            pass
 
     m["_np_active"] = True
 
@@ -411,10 +411,9 @@ def processar_nao_programado(
                     conn.close()
         except Exception as e:
             m["_np_persist_error"] = repr(e)
-            pass
         return
 
-    # Se mudou a hora, reinicia baseline da hora (apenas metrica)
+    # Se mudou a hora, reinicia baseline da hora (apenas métrica)
     prev_hour_ref = m.get("np_hour_ref")
     prev_hour_ref_int = _safe_int(prev_hour_ref, -1) if prev_hour_ref is not None else -1
     if prev_hour_ref_int != hora_dia:
@@ -422,10 +421,10 @@ def processar_nao_programado(
         m["np_hour_baseline"] = esp
         m["np_producao_hora"] = 0
 
-    # Delta por update (NUNCA acumulado diario)
+    # Delta por update (NUNCA acumulado diário)
     delta = esp - np_last_esp
 
-    # Contador voltou => so sincroniza
+    # Contador voltou => só sincroniza
     if delta < 0:
         m["_np_last_esp"] = esp
         m["_np_last_ts"] = a.isoformat()
@@ -433,10 +432,7 @@ def processar_nao_programado(
         m["np_producao"] = 0
         return
 
-    # =====================================================
-    # BOOTSTRAP: se _np_last_esp esta 0 (ou delta gigante),
-    # ancorar e NAO gravar neste update.
-    # =====================================================
+    # Bootstrap: se _np_last_esp está 0, ancorar e não gravar neste update
     if np_last_esp <= 0 and esp > 0:
         m["_np_last_esp"] = esp
         m["_np_last_ts"] = a.isoformat()
@@ -444,40 +440,41 @@ def processar_nao_programado(
             m["_np_first_ts"] = a.isoformat()
         return
 
-    # delta absurdo (protecao): provavelmente _np_last_esp inconsistente
-    # Ex.: primeiro update apos deploy/reset com contador alto.
-    if delta > 200000:  # limiar simples e seguro para evitar "explodir" o banco
+    # Delta absurdo: provavelmente _np_last_esp inconsistente
+    if delta > 200000:
         m["_np_last_esp"] = esp
         m["_np_last_ts"] = a.isoformat()
         if not m.get("_np_first_ts"):
             m["_np_first_ts"] = a.isoformat()
         return
 
-    # =====================================================
-    # CATCH-UP: total real da hora (esp - baseline_hora)
-    # e grava no DB a diferenca para nao "travar" em valor antigo.
-    # =====================================================
+    # Catch-up: total real da hora (esp - baseline_hora)
     base_hora = _safe_int(m.get("np_hour_baseline", esp), esp)
     np_hora_total = max(0, esp - base_hora)
 
-    # valor ja conhecido do DB (ou do ultimo load)
+    # valor já conhecido do DB (ou do último load)
     try:
         db_total_hora = _safe_int((m.get("np_por_hora_24") or [0] * 24)[hora_dia], 0)
     except Exception:
         db_total_hora = 0
 
-    # delta que precisamos gravar para o DB alcancar o total real da hora
     catchup_delta = max(0, int(np_hora_total - db_total_hora))
 
-    # Persistencia (delta real + catch-up)
+    # Persistência: persistir o maior ganho para evitar dupla contagem
     delta_to_persist = 0
     if delta > 0:
-        delta_to_persist += int(delta)
+        delta_to_persist = int(delta)
     if catchup_delta > 0:
-        # evita dupla contagem: se delta ja cobre parte, mantem o maior ganho
-        # (na pratica, catchup ja considera o db_total; somar delta pode duplicar)
-        # entao aqui escolhemos persistir o MAIOR entre delta e catchup, nao a soma.
-        delta_to_persist = max(int(delta), int(catchup_delta))
+        delta_to_persist = max(int(delta_to_persist), int(catchup_delta))
+
+    m["_np_persist_params"] = {
+        "mid": mid,
+        "data_ref": data_ref,
+        "hora_dia": int(hora_dia),
+        "delta_to_persist": int(delta_to_persist),
+        "np_hora_total": int(np_hora_total),
+        "db_total_hora_before": int(db_total_hora),
+    }
 
     if delta_to_persist > 0:
         if not (np_ensure_table and np_upsert_delta and np_load_np_por_hora_24):
@@ -485,22 +482,42 @@ def processar_nao_programado(
             m["_np_persist_error"] = "np_repo_missing"
         else:
             try:
-                if np_upsert_delta is not None and np_ensure_table is not None:
-                    conn = get_db()
+                conn = get_db()
+                try:
+                    m["_np_persist_stage"] = "ensure_table"
+                    np_ensure_table(conn)
+
+                    m["_np_persist_stage"] = "upsert_delta"
+                    np_upsert_delta(conn, mid, data_ref, hora_dia, int(delta_to_persist), updated_at)
+
+                    # Readback direto do DB para a chave exata (mata duvida de chave/hora/data)
                     try:
-                        m["_np_persist_stage"] = "ensure_table"
-                        np_ensure_table(conn)
-                        m["_np_persist_stage"] = "upsert_delta"
-                        np_upsert_delta(conn, mid, data_ref, hora_dia, int(delta_to_persist), updated_at)
-                        if np_load_np_por_hora_24 is not None:
-                            m["_np_persist_stage"] = "load_24_after_upsert"
-                            m["np_por_hora_24"] = np_load_np_por_hora_24(conn, mid, data_ref)
-                    finally:
-                        conn.close()
+                        cur = conn.execute(
+                            """
+                            SELECT produzido
+                            FROM nao_programado_horaria
+                            WHERE machine_id = ? AND data_ref = ? AND hora_dia = ?
+                            LIMIT 1
+                            """,
+                            (mid, data_ref, int(hora_dia)),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            m["_np_db_value_after_upsert"] = _safe_int(row[0], 0)
+                        else:
+                            m["_np_db_value_after_upsert"] = None
+                    except Exception as e:
+                        m["_np_db_value_after_upsert"] = None
+                        m["_np_persist_error"] = repr(e)
+
+                    if np_load_np_por_hora_24 is not None:
+                        m["_np_persist_stage"] = "load_24_after_upsert"
+                        m["np_por_hora_24"] = np_load_np_por_hora_24(conn, mid, data_ref)
+                finally:
+                    conn.close()
             except Exception as e:
                 m["_np_persist_stage"] = "persist_exception"
                 m["_np_persist_error"] = repr(e)
-                pass
 
     # Atualiza trackers
     m["_np_last_esp"] = esp
@@ -508,7 +525,7 @@ def processar_nao_programado(
     if not m.get("_np_first_ts"):
         m["_np_first_ts"] = a.isoformat()
 
-    # Metrica: NP da hora atual = esp - baseline da hora
+    # Métrica: NP da hora atual = esp - baseline da hora
     m["np_producao_hora"] = np_hora_total
     m["np_producao"] = np_hora_total
 
