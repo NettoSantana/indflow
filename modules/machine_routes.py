@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-21 22:05 (America/Bahia)
-# Motivo: RECODE sem remover linhas: corrigir cliente_id inexistente em /machine/config; em /machine/update gravar m['cliente_id']=cliente_id e chamar processar_nao_programado para persistir NP hora a hora (destrava np_por_hora_24 e producao_exibicao_24 fora do turno).
+# Último recode: 2026-01-21 23:45 (America/Bahia)
+# Motivo: OPÇÃO A — Garantir chamada de processar_nao_programado() no /machine/update (sem remover linhas), usando timestamp único por update para persistir NP hora a hora.
 
 # modules/machine_routes.py
 import os
@@ -712,13 +712,14 @@ def update_machine():
 
     # ✅ RECODE: persistir NP hora a hora (sem travar o update)
     try:
+        agora_np = now_bahia()
         # assinatura pode variar entre versões, por isso usamos kwargs e protegemos com try/except
         processar_nao_programado(
             m=m,
             machine_id=machine_id,
             cliente_id=cliente_id,
             esp_absoluto=int(m.get("esp_absoluto", 0) or 0),
-            agora=now_bahia(),
+            agora=agora_np,
         )
     except Exception:
         try:
