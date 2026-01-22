@@ -1,4 +1,5 @@
-﻿fix(machine_routes): recuperar producao por hora apos deploy aceitando cliente_id numerico na sessao
+﻿fix(refugo): refugo passa a acumular por hora e nao sobrescrever valores
 
-- ajusta _looks_like_uuid para aceitar id numerico (apenas digitos) alem de uuid
-- permite /machine/status reconstruir m['cliente_id'] e voltar a ler producao_horaria correta
+- remove deduplicacao destrutiva
+- upsert passa a somar refugo existente + novo valor
+- evita perda de dados apos deploy
