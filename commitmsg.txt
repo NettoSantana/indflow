@@ -1,5 +1,4 @@
-﻿fix(refugo): refugo passa a acumular por hora e nao sobrescrever valores
+﻿fix(refugo_repo): corrigir salvamento legacy sem quebrar multi-tenant
 
-- remove deduplicacao destrutiva
-- upsert passa a somar refugo existente + novo valor
-- evita perda de dados apos deploy
+- remove ON CONFLICT do caminho legacy (cliente_id IS NULL) por incompatibilidade com indice parcial
+- aplica UPDATE + INSERT quando necessario, mantendo resto do arquivo intacto
