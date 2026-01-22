@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-22 08:15 (America/Bahia)
-# Motivo: OPCAO 1 — Corrigir leitura do NP no /machine/status priorizando m["cliente_id"] (do update do ESP) antes da session, evitando tenant divergente e np_por_hora_24 zerado.
+# Último recode: 2026-01-22 08:25 (America/Bahia)
+# Motivo: Contar parado_min somente dentro do horario programado (turno) no /machine/status, ignorando fora do turno.
 
 # modules/machine_routes.py
 import os
@@ -62,6 +62,40 @@ def _safe_int(v, default=0):
         return int(v)
     except Exception:
         return default
+
+
+def _parse_hhmm(hhmm: str) -> tuple[int, int] | None:
+    try:
+        h_str, m_str = (hhmm or '').strip().split(':', 1)
+        h = int(h_str); m = int(m_str)
+        if 0 <= h <= 23 and 0 <= m <= 59:
+            return (h, m)
+    except Exception:
+        pass
+    return None
+
+
+def _calc_minutos_parados_somente_turno(start_ms: int, end_ms: int, turno_inicio: str | None, turno_fim: str | None) -> int:
+    ini = _parse_hhmm(turno_inicio or '')
+    fim = _parse_hhmm(turno_fim or '')
+    if ini is None or fim is None or end_ms <= start_ms:
+        return 0
+    a0 = datetime.fromtimestamp(int(start_ms) / 1000, TZ_BAHIA)
+    a1 = datetime.fromtimestamp(int(end_ms) / 1000, TZ_BAHIA)
+    d = a0.date() - timedelta(days=1)
+    d_end = a1.date() + timedelta(days=1)
+    total = 0
+    while d <= d_end:
+        s = datetime(d.year, d.month, d.day, ini[0], ini[1], 0, tzinfo=TZ_BAHIA)
+        e = datetime(d.year, d.month, d.day, fim[0], fim[1], 0, tzinfo=TZ_BAHIA)
+        if e <= s:
+            e = e + timedelta(days=1)
+        x0 = a0 if a0 > s else s
+        x1 = a1 if a1 < e else e
+        if x1 > x0:
+            total += int((x1 - x0).total_seconds())
+        d = d + timedelta(days=1)
+    return int(total // 60)
 
 
 def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
@@ -968,8 +1002,13 @@ def machine_status():
                 updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
                 ss = now_ms
-            diff_ms = max(0, now_ms - int(ss))
-            m["parado_min"] = int(diff_ms // 60000)
+            turno_inicio = (m.get("turno_inicio") or "").strip()
+            turno_fim = (m.get("turno_fim") or "").strip()
+            if turno_inicio and turno_fim:
+                m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
+            else:
+                diff_ms = max(0, now_ms - int(ss))
+                m["parado_min"] = int(diff_ms // 60000)
     except Exception:
         m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
         m["parado_min"] = None
