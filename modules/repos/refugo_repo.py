@@ -195,14 +195,24 @@ def upsert_refugo(machine_id: str, dia_ref: str, hora_dia: int, refugo: int, upd
                     updated_at=excluded.updated_at
             """, (cid, mid, dia_ref, int(hora_dia), int(refugo), updated_at_iso))
         else:
+            # FIX MINIMO:
+            # Evita ON CONFLICT em indice parcial (WHERE cliente_id IS NULL).
+            # Faz UPDATE primeiro; se nao atualizou nada, faz INSERT.
             cur.execute("""
-                INSERT INTO refugo_horaria (cliente_id, machine_id, dia_ref, hora_dia, refugo, updated_at)
-                VALUES (NULL, ?, ?, ?, ?, ?)
-                ON CONFLICT(machine_id, dia_ref, hora_dia)
-                DO UPDATE SET
-                    refugo=excluded.refugo,
-                    updated_at=excluded.updated_at
-            """, (mid, dia_ref, int(hora_dia), int(refugo), updated_at_iso))
+                UPDATE refugo_horaria
+                   SET refugo=?,
+                       updated_at=?
+                 WHERE cliente_id IS NULL
+                   AND machine_id=?
+                   AND dia_ref=?
+                   AND hora_dia=?
+            """, (int(refugo), updated_at_iso, mid, dia_ref, int(hora_dia)))
+
+            if cur.rowcount == 0:
+                cur.execute("""
+                    INSERT INTO refugo_horaria (cliente_id, machine_id, dia_ref, hora_dia, refugo, updated_at)
+                    VALUES (NULL, ?, ?, ?, ?, ?)
+                """, (mid, dia_ref, int(hora_dia), int(refugo), updated_at_iso))
 
         conn.commit()
         conn.close()
