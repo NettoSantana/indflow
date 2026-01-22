@@ -1,4 +1,4 @@
-﻿fix(machine_routes): manter producao por hora apos deploy e corrigir parado_min
+﻿fix(machine_routes): recuperar producao por hora apos deploy aceitando cliente_id numerico na sessao
 
-- importa TZ_BAHIA para evitar falha no calculo de parado_min
-- no /machine/status, seta m['cliente_id'] (tenant) antes de atualizar_producao_hora para carregar registros scoped
+- ajusta _looks_like_uuid para aceitar id numerico (apenas digitos) alem de uuid
+- permite /machine/status reconstruir m['cliente_id'] e voltar a ler producao_horaria correta
