@@ -1,6 +1,5 @@
-﻿refactor(np): opção 1 backend entrega produção 24h (turno+NP) e corrige leitura NP
+﻿fix(ui): usar producao_exibicao_24 (opção 1) e parar de recalcular turno/NP no front
 
-- Remove helpers NP quebrados do routes (SQL/delta não ficam aqui)
-- /machine/update salva cliente_id no estado e delega persistência NP ao machine_service
-- /machine/status lê np_por_hora_24 via repo com scoping correto
-- Cria m.producao_exibicao_24 (24h) mesclando producao_turno + np_por_hora_24
+- Tabela 24h passa a usar somente producao_exibicao_24 vindo do backend
+- Mantém destaque visual do turno e refugo editável
+- Hora futura continua exibindo '—'

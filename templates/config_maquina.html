@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Último recode: 2026-01-21 20:45 (America/Bahia)
-Motivo: OPÇÃO 1 — UI passa a usar producao_exibicao_24 (24h pronto vindo do backend) e para de recalcular turno/fora do turno no front, evitando “hora extra zerada”.
+Último recode: 2026-01-21 21:25 (America/Bahia)
+Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do backend (fonte única). Mantém meta/refugo e destaque visual do turno.
 -->
 
 {% extends "base.html" %}
@@ -400,12 +400,19 @@ function carregarTabela(){
 
       const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
 
-      // ✅ OPÇÃO 1: backend manda produção 24h pronta
-      const exibicao24 = Array.isArray(data.producao_exibicao_24)
+      // ✅ OPÇÃO 1: backend manda a produção 24h pronta (turno + não programado)
+      // Fonte única para a tabela.
+      const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length === 24)
         ? data.producao_exibicao_24
         : null;
 
-      // Hora do dia atual (para marcar futuro como "—")
+      // Fallback controlado: se o backend ainda não enviar producao_exibicao_24,
+      // mantém compatibilidade usando np_por_hora_24 (evita tabela zerada).
+      const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
+      if(!exibicao24){
+        console.warn("[config_maquina] backend não enviou producao_exibicao_24; usando np_por_hora_24 como fallback. Atualize o backend (OPÇÃO 1) para enviar o campo.");
+      }
+
       const horaDiaAtual =
         (typeof data.ultima_hora === "number")
           ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
@@ -434,7 +441,8 @@ function carregarTabela(){
 
         // =====================================================
         // ✅ Produzido Hora (OPÇÃO 1):
-        //   - usa SOMENTE exibicao24[i] vindo do backend
+        //   - usa SOMENTE (producao_exibicao_24) vindo do backend (24 posições)
+        //   - fallback: np_por_hora_24 (compatibilidade)
         //   - hora futura: "—"
         // =====================================================
         let baseVal = 0;
@@ -442,14 +450,9 @@ function carregarTabela(){
         if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
           baseVal = null; // futuro
         } else {
-          if (exibicao24) {
-            const v = Number(exibicao24[i] ?? 0);
-            baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
-          } else {
-            // fallback de segurança (se backend ainda não enviou o campo)
-            const v = Number(data.np_por_hora_24?.[i] ?? 0);
-            baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
-          }
+          const fonte = exibicao24 ? exibicao24 : np24;
+          const v = Number(fonte[i] ?? 0);
+          baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
         }
 
         const ref = toNonNegInt(refugo24[i] ?? 0);
