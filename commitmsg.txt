@@ -1,5 +1,5 @@
-﻿fix(np): persistir NP no update e garantir scoping por cliente_id
+﻿fix(np): sem remover linhas - corrigir cliente_id no config e persistir NP no update
 
-- /machine/update salva m['cliente_id']=cliente_id e chama processar_nao_programado()
-- /machine/config remove uso de variavel cliente_id inexistente; tenta obter tenant do request
-- Destrava np_por_hora_24 e producao_exibicao_24 fora do turno (OPÇÃO 1)
+- /machine/config: define cliente_id via _get_cliente_id_for_request() (corrige variável inexistente)
+- /machine/update: grava m['cliente_id']=cliente_id para scoping do NP no /machine/status
+- /machine/update: chama processar_nao_programado para persistir NP hora a hora (destrava np_por_hora_24 e producao_exibicao_24)
