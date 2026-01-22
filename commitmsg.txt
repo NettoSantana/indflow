@@ -1,6 +1,6 @@
-﻿debug(np): readback do DB apos upsert para validar chave/hora/data
+﻿fix(np): usar total da hora via SELECT no DB antes do catch-up
 
-- Adiciona _np_persist_params e _np_db_value_after_upsert no estado m
-- Faz SELECT direto em nao_programado_horaria apos upsert_delta
-- Mantem debug anterior e opcao A
-- Sem remover linhas; apenas adicao pontual em machine_service.py
+- db_total_hora passa a vir de SELECT direto em nao_programado_horaria
+- evita delta_to_persist=0 por valor fantasma em m[np_por_hora_24]
+- reancora np_hour_baseline quando DB maior que metrica, alinhando exibicao
+- mantem debug existente
