@@ -1,5 +1,5 @@
-﻿fix(ui): tabela 24h usa producao_exibicao_24 (opção 1) como fonte única
+﻿fix(np): persistir NP no update e garantir scoping por cliente_id
 
-- Remove decisão duplicada (turno vs NP) para o produzido/hora
-- Mantém destaque visual do turno e refugo editável
-- Fallback controlado para np_por_hora_24 quando backend ainda não enviar o campo
+- /machine/update salva m['cliente_id']=cliente_id e chama processar_nao_programado()
+- /machine/config remove uso de variavel cliente_id inexistente; tenta obter tenant do request
+- Destrava np_por_hora_24 e producao_exibicao_24 fora do turno (OPÇÃO 1)
