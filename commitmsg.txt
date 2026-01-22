@@ -1,6 +1,4 @@
-﻿fix(np): usar total da hora via SELECT no DB antes do catch-up
+﻿fix(status): priorizar m.cliente_id na leitura do NP (opcao 1)
 
-- db_total_hora passa a vir de SELECT direto em nao_programado_horaria
-- evita delta_to_persist=0 por valor fantasma em m[np_por_hora_24]
-- reancora np_hour_baseline quando DB maior que metrica, alinhando exibicao
-- mantem debug existente
+- /machine/status passa a resolver cliente_id usando X-API-Key, depois m['cliente_id'], e so entao session (se parecer UUID)
+- evita tenant divergente no scoped machine_id e destrava np_por_hora_24 na UI
