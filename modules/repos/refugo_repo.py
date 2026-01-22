@@ -1,4 +1,6 @@
-# modules/repos/refugo_repo.py
+# Caminho: modules/repos/refugo_repo.py
+# Último recode: 2026-01-22 21:10 (America/Bahia)
+# Motivo: Refugo deve acumular por hora (não sobrescrever nem perder histórico)
 
 from modules.db_indflow import get_db
 
@@ -9,9 +11,10 @@ from modules.db_indflow import get_db
 
 def _split_scoped_machine_id(machine_id: str):
     """
-    Compatibilidade com formato "cliente_id::machine_id".
-    Retorna (cliente_id, raw_machine_id).
-    Se não estiver no formato, retorna (None, machine_id_normalizado).
+    Aceita:
+      - cliente_id::machine_id
+      - machine_id simples (legado)
+    Retorna (cliente_id|None, machine_id)
     """
     s = (machine_id or "").strip().lower()
     if not s:
@@ -19,42 +22,12 @@ def _split_scoped_machine_id(machine_id: str):
 
     if "::" in s:
         cid, mid = s.split("::", 1)
-        cid = (cid or "").strip()
-        mid = (mid or "").strip()
+        cid = cid.strip()
+        mid = mid.strip()
         if cid and mid:
             return (cid, mid)
 
     return (None, s)
-
-
-def _has_column(conn, table: str, col: str) -> bool:
-    try:
-        cur = conn.execute(f"PRAGMA table_info({table})")
-        cols = [r[1] for r in cur.fetchall()]
-        return col in cols
-    except Exception:
-        return False
-
-
-def _dedupe_keep_latest(conn, table: str):
-    """
-    Remove duplicados mantendo o maior id (mais recente) por:
-      - cliente_id (ou NULL)
-      - machine_id
-      - dia_ref
-      - hora_dia
-    """
-    try:
-        conn.execute(f"""
-            DELETE FROM {table}
-            WHERE id NOT IN (
-                SELECT MAX(id)
-                FROM {table}
-                GROUP BY COALESCE(cliente_id,'__NULL__'), machine_id, dia_ref, hora_dia
-            )
-        """)
-    except Exception:
-        pass
 
 
 # ============================================================
@@ -65,10 +38,10 @@ def ensure_refugo_table():
     conn = get_db()
     cur = conn.cursor()
 
-    # Tabela base (legado) + migração leve
     cur.execute("""
         CREATE TABLE IF NOT EXISTS refugo_horaria (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id TEXT,
             machine_id TEXT NOT NULL,
             dia_ref TEXT NOT NULL,
             hora_dia INTEGER NOT NULL,
@@ -77,39 +50,17 @@ def ensure_refugo_table():
         )
     """)
 
-    # Migração: adiciona cliente_id
-    if not _has_column(conn, "refugo_horaria", "cliente_id"):
-        try:
-            cur.execute("ALTER TABLE refugo_horaria ADD COLUMN cliente_id TEXT")
-        except Exception:
-            pass
+    cur.execute("DROP INDEX IF EXISTS ux_refugo_horaria")
 
-    # Dedup antes dos UNIQUE (evita crash ao criar índices)
-    _dedupe_keep_latest(conn, "refugo_horaria")
-
-    # Remove índice antigo que colide quando começarmos a separar por cliente
-    try:
-        cur.execute("DROP INDEX IF EXISTS ux_refugo_horaria")
-    except Exception:
-        pass
-
-    # UNIQUE multi-tenant
     cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_refugo_horaria_cliente
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_refugo_multi
         ON refugo_horaria(cliente_id, machine_id, dia_ref, hora_dia)
     """)
 
-    # UNIQUE legado parcial (somente registros antigos com cliente_id NULL)
     cur.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_refugo_horaria_legacy
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_refugo_legacy
         ON refugo_horaria(machine_id, dia_ref, hora_dia)
         WHERE cliente_id IS NULL
-    """)
-
-    # Índice para busca por cliente
-    cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_refugo_horaria_cliente_id
-        ON refugo_horaria(cliente_id)
     """)
 
     conn.commit()
@@ -117,95 +68,76 @@ def ensure_refugo_table():
 
 
 # ============================================================
-# API
+# LOAD
 # ============================================================
 
 def load_refugo_24(machine_id: str, dia_ref: str):
-    """
-    Retorna lista 24 (hora do dia 0..23) com refugo.
-
-    Multi-tenant nativo:
-      - se machine_id vier "cliente::maquina" -> filtra por cliente_id + machine_id
-      - senão -> legado (cliente_id IS NULL)
-    """
     out = [0] * 24
     cid, mid = _split_scoped_machine_id(machine_id)
     if not mid:
         return out
 
-    try:
-        ensure_refugo_table()
+    ensure_refugo_table()
+    conn = get_db()
+    cur = conn.cursor()
 
-        conn = get_db()
-        cur = conn.cursor()
+    if cid:
+        cur.execute("""
+            SELECT hora_dia, refugo
+            FROM refugo_horaria
+            WHERE cliente_id=? AND machine_id=? AND dia_ref=?
+        """, (cid, mid, dia_ref))
+    else:
+        cur.execute("""
+            SELECT hora_dia, refugo
+            FROM refugo_horaria
+            WHERE cliente_id IS NULL AND machine_id=? AND dia_ref=?
+        """, (mid, dia_ref))
 
-        if cid:
-            cur.execute("""
-                SELECT hora_dia, refugo
-                FROM refugo_horaria
-                WHERE cliente_id=? AND machine_id=? AND dia_ref=?
-            """, (cid, mid, dia_ref))
-        else:
-            cur.execute("""
-                SELECT hora_dia, refugo
-                FROM refugo_horaria
-                WHERE cliente_id IS NULL AND machine_id=? AND dia_ref=?
-            """, (mid, dia_ref))
+    for h, v in cur.fetchall():
+        if 0 <= h < 24:
+            out[h] = max(0, int(v))
 
-        rows = cur.fetchall() or []
-        conn.close()
-
-        for r in rows:
-            try:
-                h = int(r[0])
-                v = int(r[1])
-                if 0 <= h < 24:
-                    out[h] = max(0, v)
-            except Exception:
-                continue
-    except Exception:
-        pass
-
+    conn.close()
     return out
 
 
+# ============================================================
+# UPSERT (ACUMULATIVO)
+# ============================================================
+
 def upsert_refugo(machine_id: str, dia_ref: str, hora_dia: int, refugo: int, updated_at_iso: str):
-    """
-    Upsert por:
-      - multi-tenant: (cliente_id, machine_id, dia_ref, hora_dia)
-      - legado: (machine_id, dia_ref, hora_dia) quando cliente_id IS NULL
-    """
     cid, mid = _split_scoped_machine_id(machine_id)
     if not mid:
         return False
 
     try:
         ensure_refugo_table()
-
         conn = get_db()
         cur = conn.cursor()
 
-        if cid:
-            cur.execute("""
-                INSERT INTO refugo_horaria (cliente_id, machine_id, dia_ref, hora_dia, refugo, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(cliente_id, machine_id, dia_ref, hora_dia)
-                DO UPDATE SET
-                    refugo=excluded.refugo,
-                    updated_at=excluded.updated_at
-            """, (cid, mid, dia_ref, int(hora_dia), int(refugo), updated_at_iso))
-        else:
-            cur.execute("""
-                INSERT INTO refugo_horaria (cliente_id, machine_id, dia_ref, hora_dia, refugo, updated_at)
-                VALUES (NULL, ?, ?, ?, ?, ?)
-                ON CONFLICT(machine_id, dia_ref, hora_dia)
-                DO UPDATE SET
-                    refugo=excluded.refugo,
-                    updated_at=excluded.updated_at
-            """, (mid, dia_ref, int(hora_dia), int(refugo), updated_at_iso))
+        # ACUMULA refugo ao invés de sobrescrever
+        cur.execute("""
+            INSERT INTO refugo_horaria (
+                cliente_id, machine_id, dia_ref, hora_dia, refugo, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cliente_id, machine_id, dia_ref, hora_dia)
+            DO UPDATE SET
+                refugo = refugo_horaria.refugo + excluded.refugo,
+                updated_at = excluded.updated_at
+        """, (
+            cid,
+            mid,
+            dia_ref,
+            int(hora_dia),
+            int(refugo),
+            updated_at_iso
+        ))
 
         conn.commit()
         conn.close()
         return True
+
     except Exception:
         return False
