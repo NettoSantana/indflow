@@ -1,6 +1,6 @@
-﻿fix(np): reancora baseline ao entrar em fora-do-turno (opcao A)
+﻿debug(np): expor falha de persistencia do NP no status
 
-- Reancora np_hour_baseline e np_hour_ref quando NP entra ou estado NP esta inconsistente
-- Sincroniza _np_last_esp no momento da entrada para evitar delta falso
-- Recarrega np_por_hora_24 do DB na entrada para catch-up calcular corretamente
-- Sem remover linhas; apenas adicao pontual em machine_service.py
+- Adiciona _np_repo_ok, _np_persist_stage, _np_persist_error no estado m
+- Captura excecoes de load/persist sem quebrar update
+- Mantem OPCAO A de reancoragem ao entrar em fora-do-turno
+- Sem remover linhas; apenas adicao e ajuste pontual em machine_service.py
