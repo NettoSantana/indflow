@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\repos\nao_programado_horaria_repo.py
-# Último recode: 2026-01-21 17:34 (America/Bahia)
-# Motivo: Isolar persistência do "Não Programado" (hora extra) em um repo: garantir criação de tabela, upsert de delta por hora e leitura np_por_hora_24.
+# Último recode: 2026-01-22 07:40 (America/Bahia)
+# Motivo: Corrigir NP horaria que nao atualiza apesar de upsert/load "OK": detectar schema antigo e migrar tabela nao_programado_horaria automaticamente, evitando falha silenciosa e garantindo coluna produzido/hora_dia.
 
 from __future__ import annotations
 
@@ -44,12 +44,169 @@ def _safe_int(v, default: int = 0) -> int:
         return default
 
 
+def _table_columns(conn, table_name: str) -> List[str]:
+    """
+    Lista colunas da tabela via PRAGMA table_info.
+    """
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table_name})")
+        cols = []
+        for row in cur.fetchall():
+            # row: (cid, name, type, notnull, dflt_value, pk)
+            try:
+                cols.append(str(row[1]))
+            except Exception:
+                pass
+        return cols
+    except Exception:
+        return []
+
+
+def _pick_first_existing(cols: List[str], candidates: List[str]) -> Optional[str]:
+    s = {c.lower(): c for c in cols}
+    for cand in candidates:
+        key = cand.lower()
+        if key in s:
+            return s[key]
+    return None
+
+
+def _migrate_nao_programado_horaria_if_needed(conn) -> None:
+    """
+    Se a tabela existir com schema antigo (sem colunas esperadas), migra para o schema atual.
+
+    A causa do problema observado (upsert/load "OK" mas np_por_hora_24 nao muda) normalmente e:
+    - tabela ja existia com outro nome de coluna (ex: "producao" ao inves de "produzido")
+    - ou hora_dia como TEXT / coluna ausente
+    - e o repo engole excecoes, entao nao aparece erro no service
+    """
+    cols = _table_columns(conn, "nao_programado_horaria")
+    if not cols:
+        return
+
+    required = {"machine_id", "data_ref", "hora_dia", "produzido", "updated_at"}
+    cols_lower = {c.lower() for c in cols}
+
+    if required.issubset(cols_lower):
+        return
+
+    src_produzido = _pick_first_existing(
+        cols,
+        ["produzido", "producao", "valor", "qtd", "quantidade", "np_produzido"],
+    )
+    src_updated_at = _pick_first_existing(
+        cols,
+        ["updated_at", "atualizado_em", "updated", "updatedat"],
+    )
+
+    # Se nao achar coluna de produzido, copia como 0 (nao quebra)
+    if not src_produzido:
+        src_produzido = None
+
+    if not src_updated_at:
+        src_updated_at = None
+
+    # Migra: renomeia tabela antiga, cria nova no schema correto, copia dados e dropa a antiga
+    try:
+        conn.execute("ALTER TABLE nao_programado_horaria RENAME TO nao_programado_horaria_old")
+    except Exception:
+        # Se falhar renome, nao tenta prosseguir
+        return
+
+    try:
+        # cria nova tabela no schema correto (sem IF NOT EXISTS)
+        conn.execute("""
+        CREATE TABLE nao_programado_horaria (
+            machine_id   TEXT    NOT NULL,
+            data_ref     TEXT    NOT NULL,
+            hora_dia     INTEGER NOT NULL,
+            produzido    INTEGER NOT NULL DEFAULT 0,
+            updated_at   TEXT,
+            PRIMARY KEY (machine_id, data_ref, hora_dia)
+        );
+        """)
+
+        if src_produzido and src_updated_at:
+            conn.execute(
+                f"""
+                INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+                SELECT
+                    machine_id,
+                    data_ref,
+                    CAST(hora_dia AS INTEGER),
+                    COALESCE(CAST({src_produzido} AS INTEGER), 0),
+                    {src_updated_at}
+                FROM nao_programado_horaria_old
+                """
+            )
+        elif src_produzido and not src_updated_at:
+            conn.execute(
+                f"""
+                INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+                SELECT
+                    machine_id,
+                    data_ref,
+                    CAST(hora_dia AS INTEGER),
+                    COALESCE(CAST({src_produzido} AS INTEGER), 0),
+                    NULL
+                FROM nao_programado_horaria_old
+                """
+            )
+        elif (not src_produzido) and src_updated_at:
+            conn.execute(
+                f"""
+                INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+                SELECT
+                    machine_id,
+                    data_ref,
+                    CAST(hora_dia AS INTEGER),
+                    0,
+                    {src_updated_at}
+                FROM nao_programado_horaria_old
+                """
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO nao_programado_horaria (machine_id, data_ref, hora_dia, produzido, updated_at)
+                SELECT
+                    machine_id,
+                    data_ref,
+                    CAST(hora_dia AS INTEGER),
+                    0,
+                    NULL
+                FROM nao_programado_horaria_old
+                """
+            )
+
+        # remove tabela antiga
+        conn.execute("DROP TABLE IF EXISTS nao_programado_horaria_old")
+        conn.commit()
+    except Exception:
+        # Se der ruim no meio, tenta pelo menos nao travar o sistema:
+        # - mantem a tabela antiga para nao perder dados
+        try:
+            conn.execute("DROP TABLE IF EXISTS nao_programado_horaria")
+        except Exception:
+            pass
+        try:
+            conn.execute("ALTER TABLE nao_programado_horaria_old RENAME TO nao_programado_horaria")
+        except Exception:
+            pass
+        conn.commit()
+        return
+
+
 def ensure_table(conn) -> None:
     """
     Garante que a tabela nao_programado_horaria existe.
+    Tambem valida/migra schema antigo para evitar falha silenciosa no upsert.
     """
     conn.execute(DDL_NAO_PROGRAMADO_HORARIA)
     conn.commit()
+
+    # Se ja existia com schema antigo, migra para o schema esperado
+    _migrate_nao_programado_horaria_if_needed(conn)
 
 
 def upsert_delta(
