@@ -1,4 +1,4 @@
-﻿fix(status): priorizar m.cliente_id na leitura do NP (opcao 1)
+﻿feat(parada): contar minutos parados apenas dentro do horario programado
 
-- /machine/status passa a resolver cliente_id usando X-API-Key, depois m['cliente_id'], e so entao session (se parecer UUID)
-- evita tenant divergente no scoped machine_id e destrava np_por_hora_24 na UI
+- /machine/status agora calcula parado_min somente dentro do turno (turno_inicio..turno_fim)
+- fora do turno nao soma minutos de parada
