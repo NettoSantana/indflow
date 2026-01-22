@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_service.py
-# Último recode: 2026-01-21 19:45 (America/Bahia)
-# Motivo: Corrigir bootstrap do Não Programado para nunca gravar delta gigante (esp_absoluto - 0). Ao entrar em NP, ancorar _np_last_esp=esp e só gravar a partir do próximo update (delta real).
+# Último recode: 2026-01-21 23:20 (America/Bahia)
+# Motivo: Fazer NP horária sempre atualizar: além do delta por update, aplicar "catch-up" para gravar no DB a diferença entre (esp - np_hour_baseline) e o total já persistido na hora. Evita travar em valor antigo (ex: 596) quando perde updates/bootstraps.
 
 from __future__ import annotations
 
@@ -414,14 +414,39 @@ def processar_nao_programado(
             m["_np_first_ts"] = a.isoformat()
         return
 
-    # Persistência (só delta real)
+    # =====================================================
+    # ✅ CATCH-UP: total real da hora (esp - baseline_hora)
+    # e grava no DB a diferença para não "travar" em valor antigo.
+    # =====================================================
+    base_hora = _safe_int(m.get("np_hour_baseline", esp), esp)
+    np_hora_total = max(0, esp - base_hora)
+
+    # valor já conhecido do DB (ou do último load)
+    try:
+        db_total_hora = _safe_int((m.get("np_por_hora_24") or [0] * 24)[hora_dia], 0)
+    except Exception:
+        db_total_hora = 0
+
+    # delta que precisamos gravar para o DB alcançar o total real da hora
+    catchup_delta = max(0, int(np_hora_total - db_total_hora))
+
+    # Persistência (delta real + catch-up)
+    delta_to_persist = 0
     if delta > 0:
+        delta_to_persist += int(delta)
+    if catchup_delta > 0:
+        # evita dupla contagem: se delta já cobre parte, mantém o maior ganho
+        # (na prática, catchup já considera o db_total; somar delta pode duplicar)
+        # então aqui escolhemos persistir o MAIOR entre delta e catchup, não a soma.
+        delta_to_persist = max(int(delta), int(catchup_delta))
+
+    if delta_to_persist > 0:
         try:
             if np_upsert_delta is not None and np_ensure_table is not None:
                 conn = get_db()
                 try:
                     np_ensure_table(conn)
-                    np_upsert_delta(conn, mid, data_ref, hora_dia, delta, updated_at)
+                    np_upsert_delta(conn, mid, data_ref, hora_dia, int(delta_to_persist), updated_at)
                     if np_load_np_por_hora_24 is not None:
                         m["np_por_hora_24"] = np_load_np_por_hora_24(conn, mid, data_ref)
                 finally:
@@ -436,11 +461,8 @@ def processar_nao_programado(
         m["_np_first_ts"] = a.isoformat()
 
     # Métrica: NP da hora atual = esp - baseline da hora
-    base_hora = _safe_int(m.get("np_hour_baseline", esp), esp)
-    np_hora = max(0, esp - base_hora)
-
-    m["np_producao_hora"] = np_hora
-    m["np_producao"] = np_hora
+    m["np_producao_hora"] = np_hora_total
+    m["np_producao"] = np_hora_total
 
     try:
         first = datetime.fromisoformat(m["_np_first_ts"])
