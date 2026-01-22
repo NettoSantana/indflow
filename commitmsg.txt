@@ -1,4 +1,4 @@
-﻿fix(machine_routes): restaurar contagem de ociosidade somente no turno
+﻿fix(machine_routes): manter producao por hora apos deploy e corrigir parado_min
 
-- importa TZ_BAHIA para corrigir NameError no calculo de parado_min
-- parado_min so conta dentro do turno (producao programada); fora do turno retorna None
+- importa TZ_BAHIA para evitar falha no calculo de parado_min
+- no /machine/status, seta m['cliente_id'] (tenant) antes de atualizar_producao_hora para carregar registros scoped
