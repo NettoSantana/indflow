@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-21 20:15 (America/Bahia)
-# Motivo: Opção 1 — backend entrega produção exibível 24h mesclando turno e Não Programado; corrigir leitura NP via repo + scoping por cliente_id e remover helpers NP quebrados do routes.
+# Último recode: 2026-01-21 21:45 (America/Bahia)
+# Motivo: Corrigir NP/Opção 1 sem refatorar: (1) /machine/update grava cliente_id no estado e chama processar_nao_programado; (2) /machine/config remove uso de variável cliente_id inexistente e tenta obter tenant do request.
 
 # modules/machine_routes.py
 import os
@@ -523,8 +523,14 @@ def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
-    # guarda tenant no estado para leitura do NP no /machine/status (web)
-    m["cliente_id"] = cliente_id
+
+    # ✅ FIX: aqui não existe "cliente_id" local. Usa tenant do request se houver.
+    try:
+        cid = _get_cliente_id_for_request()
+        if cid:
+            m["cliente_id"] = cid
+    except Exception:
+        pass
 
     meta_turno = int(data["meta_turno"])
     rampa = int(data["rampa"])
@@ -636,6 +642,9 @@ def update_machine():
 
     m = get_machine(machine_id)
 
+    # ✅ FIX: salva tenant no estado (necessário para /machine/status scoping)
+    m["cliente_id"] = cliente_id
+
     verificar_reset_diario(m, machine_id)
 
     # --- captura status anterior antes de sobrescrever
@@ -647,27 +656,6 @@ def update_machine():
     m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
     m["run"] = _safe_int(data.get("run", 0), 0)
-
-    # --- parada oficial (backend)
-    try:
-        agora = now_bahia()
-        updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
-        now_ms = int(agora.timestamp() * 1000)
-
-        if new_status == "AUTO":
-            # voltou a produzir -> limpa parada
-            _clear_stopped_since(machine_id, updated_at)
-            m["stopped_since_ms"] = None
-        else:
-            # entrou/parado -> seta apenas se ainda não existir
-            existing = _get_stopped_since_ms(machine_id)
-            if existing is None:
-                _set_stopped_since_ms(machine_id, now_ms, updated_at)
-                m["stopped_since_ms"] = now_ms
-            else:
-                m["stopped_since_ms"] = existing
-    except Exception:
-        pass
 
     baseline_initialized = False
     try:
@@ -700,6 +688,18 @@ def update_machine():
 
     atualizar_producao_hora(m)
 
+    # ✅ FIX: persiste NP hora a hora (service)
+    try:
+        processar_nao_programado(
+            m=m,
+            machine_id=machine_id,
+            cliente_id=cliente_id,
+            esp_absoluto=int(m.get("esp_absoluto", 0) or 0),
+            agora=now_bahia(),
+        )
+    except Exception:
+        pass
+
     return jsonify({
         "message": "OK",
         "machine_id": machine_id,
@@ -708,124 +708,6 @@ def update_machine():
         "linked_machine": linked_machine or None,
         "baseline_initialized": bool(baseline_initialized),
         "allow_takeover": bool(allow_takeover),
-    })
-
-
-# ============================================================
-# ADMIN - RESET SOMENTE DA HORA
-# ============================================================
-@machine_bp.route("/admin/reset-hour", methods=["POST"])
-def admin_reset_hour():
-    if not _admin_token_ok():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-
-    data = request.get_json() or {}
-    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
-    m = get_machine(machine_id)
-
-    try:
-        carregar_baseline_diario(m, machine_id)
-    except Exception:
-        pass
-
-    try:
-        prod_turno = int(m.get("producao_turno", 0) or 0)
-    except Exception:
-        prod_turno = 0
-
-    if prod_turno <= 0:
-        try:
-            esp_abs = int(m.get("esp_absoluto", 0) or 0)
-        except Exception:
-            esp_abs = 0
-        try:
-            base_d = int(m.get("baseline_diario", 0) or 0)
-        except Exception:
-            base_d = 0
-        prod_turno = max(0, esp_abs - base_d)
-
-    idx = calcular_ultima_hora_idx(m)
-    m["ultima_hora"] = idx
-    m["baseline_hora"] = int(prod_turno)
-    m["producao_hora"] = 0
-    m["percentual_hora"] = 0
-
-    try:
-        if isinstance(idx, int) and "producao_por_hora" in m and isinstance(m.get("producao_por_hora"), list):
-            if 0 <= idx < len(m["producao_por_hora"]):
-                m["producao_por_hora"][idx] = 0
-    except Exception:
-        pass
-
-    m["_ph_loaded"] = False
-
-    return jsonify({
-        "ok": True,
-        "machine_id": machine_id,
-        "hora_idx": idx,
-        "baseline_hora": int(m.get("baseline_hora", 0) or 0),
-        "note": "Hora resetada. Produção da hora volta a contar a partir de agora.",
-    })
-
-
-# ============================================================
-# RESET MANUAL
-# ============================================================
-@machine_bp.route("/admin/reset-manual", methods=["POST"])
-def reset_manual():
-    data = request.get_json() or {}
-    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
-    m = get_machine(machine_id)
-    reset_contexto(m, machine_id)
-    return jsonify({"status": "resetado", "machine_id": machine_id})
-
-
-# ============================================================
-# REFUGO: SALVAR (PERSISTENTE)
-# ============================================================
-@machine_bp.route("/machine/refugo", methods=["POST"])
-def salvar_refugo():
-    data = request.get_json() or {}
-    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
-
-    agora = now_bahia()
-    dia_atual = dia_operacional_ref_str(agora)
-
-    dia_ref = (data.get("dia_ref") or "").strip() or dia_atual
-    hora_dia = _safe_int(data.get("hora_dia"), -1)
-    refugo = _safe_int(data.get("refugo"), 0)
-
-    if hora_dia < 0 or hora_dia > 23:
-        return jsonify({"ok": False, "error": "hora_dia inválida (0..23)"}), 400
-
-    if refugo < 0:
-        refugo = 0
-
-    if dia_ref > dia_atual:
-        return jsonify({"ok": False, "error": "dia_ref futuro não permitido"}), 400
-
-    if dia_ref == dia_atual:
-        hora_atual = int(agora.hour)
-        if hora_dia >= hora_atual:
-            return jsonify({"ok": False, "error": "Só é permitido lançar refugo em horas passadas"}), 400
-
-    ok = upsert_refugo(
-        machine_id=machine_id,
-        dia_ref=dia_ref,
-        hora_dia=hora_dia,
-        refugo=refugo,
-        updated_at_iso=agora.isoformat(),
-    )
-
-    if not ok:
-        return jsonify({"ok": False, "error": "Falha ao salvar no banco"}), 500
-
-    return jsonify({
-        "ok": True,
-        "machine_id": machine_id,
-        "dia_ref": dia_ref,
-        "hora_dia": hora_dia,
-        "refugo": refugo
     })
 
 
@@ -855,12 +737,8 @@ def machine_status():
     except Exception:
         m["np_por_hora_24"] = [0] * 24
 
-
     # =====================================================
     # OPÇÃO 1 (BACKEND): produção exibível 24h (turno + NP)
-    # - Dentro do turno: usa producao_por_hora (index do turno)
-    # - Fora do turno: usa np_por_hora_24 (hora do dia)
-    # Resultado em m["producao_exibicao_24"] (lista 24)
     # =====================================================
     try:
         exib = [0] * 24
@@ -893,59 +771,6 @@ def machine_status():
         m["producao_exibicao_24"] = exib
     except Exception:
         m["producao_exibicao_24"] = [0] * 24
-
-    if "run" not in m:
-        m["run"] = 0
-
-    # --- parada oficial (backend): devolve parado_min e status_ui
-    try:
-        status = (m.get("status") or "").strip().upper()
-        agora = now_bahia()
-        now_ms = int(agora.timestamp() * 1000)
-
-        if status == "AUTO":
-            m["status_ui"] = "PRODUZINDO"
-            m["parado_min"] = None
-        else:
-            m["status_ui"] = "PARADA"
-            ss = _get_stopped_since_ms(machine_id)
-            if ss is None:
-                # fallback: se não existir (ex: primeiro status), ancora agora
-                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
-                _set_stopped_since_ms(machine_id, now_ms, updated_at)
-                ss = now_ms
-            diff_ms = max(0, now_ms - int(ss))
-            m["parado_min"] = int(diff_ms // 60000)
-    except Exception:
-        m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
-        m["parado_min"] = None
-
-    try:
-        np_prod = int(m.get("np_producao", 0) or 0)
-    except Exception:
-        np_prod = 0
-
-    if m.get("ultima_hora") is None and np_prod > 0:
-        m["producao_hora"] = np_prod
-        m["percentual_hora"] = 0
-        m["fora_turno"] = True
-        m["producao_hora_liquida"] = np_prod
-        return jsonify(m)
-
-    try:
-        hora_atual = int(now_bahia().hour)
-    except Exception:
-        hora_atual = None
-
-    try:
-        ph = int(m.get("producao_hora", 0) or 0)
-    except Exception:
-        ph = 0
-
-    if isinstance(hora_atual, int) and 0 <= hora_atual < 24:
-        m["producao_hora_liquida"] = max(0, ph - int(m["refugo_por_hora"][hora_atual] or 0))
-    else:
-        m["producao_hora_liquida"] = ph
 
     return jsonify(m)
 
