@@ -1,5 +1,5 @@
-﻿fix(ui): usar producao_exibicao_24 (opção 1) e parar de recalcular turno/NP no front
+﻿fix(ui): tabela 24h usa producao_exibicao_24 (opção 1) como fonte única
 
-- Tabela 24h passa a usar somente producao_exibicao_24 vindo do backend
+- Remove decisão duplicada (turno vs NP) para o produzido/hora
 - Mantém destaque visual do turno e refugo editável
-- Hora futura continua exibindo '—'
+- Fallback controlado para np_por_hora_24 quando backend ainda não enviar o campo
