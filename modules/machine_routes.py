@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-21 23:45 (America/Bahia)
-# Motivo: OPÇÃO A — Garantir chamada de processar_nao_programado() no /machine/update (sem remover linhas), usando timestamp único por update para persistir NP hora a hora.
+# Último recode: 2026-01-22 08:15 (America/Bahia)
+# Motivo: OPCAO 1 — Corrigir leitura do NP no /machine/status priorizando m["cliente_id"] (do update do ESP) antes da session, evitando tenant divergente e np_por_hora_24 zerado.
 
 # modules/machine_routes.py
 import os
@@ -86,13 +86,36 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
 #   - IMPORTANTE: routes não deve ter SQL nem lógica de delta do NP
 # ============================================================
 
+def _looks_like_uuid(v: str) -> bool:
+    """
+    Validacao simples para evitar usar session['cliente_id'] errado (ex: id de usuario).
+    Aceita UUID no formato 8-4-4-4-12 (36 chars, 4 hifens).
+    """
+    s = (v or "").strip()
+    if len(s) != 36:
+        return False
+    if s.count("-") != 4:
+        return False
+    parts = s.split("-")
+    if len(parts) != 5:
+        return False
+    sizes = [8, 4, 4, 4, 12]
+    for i, p in enumerate(parts):
+        if len(p) != sizes[i]:
+            return False
+        for ch in p:
+            if ch not in "0123456789abcdefABCDEF":
+                return False
+    return True
+
+
 def _resolve_cliente_id_for_status(m: dict) -> str | None:
     """
     Resolve tenant para leitura do NP no /machine/status.
-    Ordem:
+    Ordem (OPCAO 1):
       1) X-API-Key (se existir)
-      2) session['cliente_id'] (web)
-      3) m['cliente_id'] (gravado no update do ESP)
+      2) m['cliente_id'] (gravado no update do ESP)
+      3) session['cliente_id'] (web) somente se parecer UUID valido
     """
     try:
         c = _get_cliente_from_api_key()
@@ -102,17 +125,20 @@ def _resolve_cliente_id_for_status(m: dict) -> str | None:
         pass
 
     try:
-        cid = (session.get("cliente_id") or "").strip()
-        if cid:
-            return cid
+        cid_m = (m.get("cliente_id") or "").strip()
+        if cid_m:
+            return cid_m
     except Exception:
         pass
 
     try:
-        cid = (m.get("cliente_id") or "").strip()
-        return cid or None
+        cid_sess = (session.get("cliente_id") or "").strip()
+        if cid_sess and _looks_like_uuid(cid_sess):
+            return cid_sess
     except Exception:
-        return None
+        pass
+
+    return None
 
 
 def _machine_id_scoped(cliente_id: str | None, machine_id: str) -> str:
