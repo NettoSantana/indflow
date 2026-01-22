@@ -1,4 +1,6 @@
-﻿fix(np): OPÇÃO A - chamar processar_nao_programado no /machine/update
+﻿fix(np): reancora baseline ao entrar em fora-do-turno (opcao A)
 
-- Garante execução do orquestrador de Não Programado a cada update do ESP
-- Usa timestamp único (agora_np) por update para consistência
+- Reancora np_hour_baseline e np_hour_ref quando NP entra ou estado NP esta inconsistente
+- Sincroniza _np_last_esp no momento da entrada para evitar delta falso
+- Recarrega np_por_hora_24 do DB na entrada para catch-up calcular corretamente
+- Sem remover linhas; apenas adicao pontual em machine_service.py
