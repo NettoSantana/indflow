@@ -1,5 +1,6 @@
-﻿fix(np-repo): migrar schema antigo de nao_programado_horaria para garantir coluna produzido
+﻿debug(np): readback do DB apos upsert para validar chave/hora/data
 
-- ensure_table agora valida colunas existentes via PRAGMA table_info
-- se schema antigo for detectado, migra dados para tabela no schema atual
-- evita falha silenciosa onde upsert/load "passam" mas np_por_hora_24 nao atualiza
+- Adiciona _np_persist_params e _np_db_value_after_upsert no estado m
+- Faz SELECT direto em nao_programado_horaria apos upsert_delta
+- Mantem debug anterior e opcao A
+- Sem remover linhas; apenas adicao pontual em machine_service.py
