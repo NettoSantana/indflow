@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-22 19:25 (America/Bahia)
-# Motivo: Corrigir parado_min e preservar contagem de producao por hora apos deploy: setar m['cliente_id'] no /machine/status antes de atualizar_producao_hora; manter contagem apenas no turno.
+# Último recode: 2026-01-22 23:09 (America/Bahia)
+# Motivo: Corrigir tenant no /machine/status apos deploy: aceitar cliente_id numerico na sessao para recuperar producao por hora; manter ociosidade somente no turno.
 
 # modules/machine_routes.py
 import os
@@ -22,7 +22,6 @@ from modules.machine_calc import (
     carregar_baseline_diario,
     now_bahia,
     dia_operacional_ref_str,
-    TZ_BAHIA,
 )
 
 from modules.machine_service import processar_nao_programado
@@ -123,10 +122,21 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
 
 def _looks_like_uuid(v: str) -> bool:
     """
-    Validacao simples para evitar usar session['cliente_id'] errado (ex: id de usuario).
-    Aceita UUID no formato 8-4-4-4-12 (36 chars, 4 hifens).
+    Validacao simples para evitar usar session['cliente_id'] errado.
+
+    Aceita:
+      - UUID no formato 8-4-4-4-12 (36 chars, 4 hifens)
+      - ID numerico (apenas digitos), usado em alguns logins/sessoes
     """
     s = (v or "").strip()
+    if not s:
+        return False
+
+    # id numerico (ex: "1", "23")
+    if s.isdigit():
+        return True
+
+    # uuid 8-4-4-4-12
     if len(s) != 36:
         return False
     if s.count("-") != 4:
@@ -926,14 +936,6 @@ def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
-    # tenant: importante para carregar producao_horaria (scoped) apos restart/deploy
-    try:
-        cid_tmp = _resolve_cliente_id_for_status(m)
-        if cid_tmp:
-            m["cliente_id"] = cid_tmp
-    except Exception:
-        pass
-
     carregar_baseline_diario(m, machine_id)
 
     atualizar_producao_hora(m)
@@ -951,6 +953,7 @@ def machine_status():
         m["np_por_hora_24"] = _load_np_por_hora_24_scoped(machine_id, dia_ref, cid)
     except Exception:
         m["np_por_hora_24"] = [0] * 24
+
 
     # =====================================================
     # OPÇÃO 1 (BACKEND): produção exibível 24h (turno + NP)
@@ -1015,7 +1018,8 @@ def machine_status():
             if turno_inicio and turno_fim:
                 m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
             else:
-                m["parado_min"] = None
+                diff_ms = max(0, now_ms - int(ss))
+                m["parado_min"] = int(diff_ms // 60000)
     except Exception:
         m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
         m["parado_min"] = None
