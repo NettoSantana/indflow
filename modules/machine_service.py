@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_service.py
-# Último recode: 2026-01-21 23:20 (America/Bahia)
-# Motivo: Fazer NP horária sempre atualizar: além do delta por update, aplicar "catch-up" para gravar no DB a diferença entre (esp - np_hour_baseline) e o total já persistido na hora. Evita travar em valor antigo (ex: 596) quando perde updates/bootstraps.
+# Último recode: 2026-01-22 06:55 (America/Bahia)
+# Motivo: OPÇÃO A — Reancorar baseline do NP ao entrar em fora-do-turno quando estado NP estiver inativo ou inconsistente, evitando travas por baseline fantasma.
 
 from __future__ import annotations
 
@@ -328,6 +328,8 @@ def processar_nao_programado(
 
     fora_turno = is_fora_do_turno(m, a)
 
+    was_active = bool(m.get("_np_active", False))
+
     if "np_por_hora_24" not in m or not isinstance(m.get("np_por_hora_24"), list) or len(m.get("np_por_hora_24")) != 24:
         m["np_por_hora_24"] = [0] * 24
 
@@ -346,6 +348,34 @@ def processar_nao_programado(
         return
 
     # Fora do turno => NP ativo
+
+    # OPÇÃO A: ao entrar em NP (fora do turno), reancorar baseline da hora quando
+    # o estado anterior estiver inativo ou inconsistente. Isso evita travar em valor
+    # antigo quando perder updates/bootstraps e o baseline ficar "fantasma".
+    entering_np = (not was_active) or (m.get("np_hour_ref") is None) or (m.get("np_hour_baseline") is None)
+    if entering_np:
+        m["_np_data_ref"] = data_ref
+        m["_np_last_esp"] = esp
+        m["_np_last_ts"] = a.isoformat()
+        if not m.get("_np_first_ts"):
+            m["_np_first_ts"] = a.isoformat()
+
+        m["np_hour_ref"] = hora_dia
+        m["np_hour_baseline"] = esp
+        m["np_producao_hora"] = 0
+        m["np_producao"] = 0
+        m["np_minutos"] = 0
+
+        try:
+            if np_load_np_por_hora_24 is not None:
+                conn = get_db()
+                try:
+                    m["np_por_hora_24"] = np_load_np_por_hora_24(conn, mid, data_ref)
+                finally:
+                    conn.close()
+        except Exception:
+            pass
+
     m["_np_active"] = True
 
     np_data_ref = (m.get("_np_data_ref") or "").strip()
