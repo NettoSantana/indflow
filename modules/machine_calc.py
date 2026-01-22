@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc.py
-# Último recode: 2026-01-20 21:25 (America/Bahia)
-# Motivo: Persistir hora (inclusive zero) e fechar/persistir a última hora ao sair do turno (idx=None) para não perder registros na tabela/DB.
+# Último recode: 2026-01-22 16:05 (America/Bahia)
+# Motivo: Implementar modo robusto (Opção C) na produção por hora: acumulador dedicado + validação por delta/anti-explosão na virada de hora.
 
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -35,14 +35,14 @@ def _dia_operacional_ref(agora: datetime) -> str:
 
 
 # ============================================================
-# ✅ MULTI-TENANT: machine_id interno com namespace
+# MULTI-TENANT: machine_id interno com namespace
 # ============================================================
 def _scoped_machine_id(m, machine_id: str) -> str:
     """
     Isola dados por cliente sem mudar o contrato externo.
     Internamente usamos: <cliente_id>::<machine_id>
 
-    ✅ FIX: normaliza machine_id (strip/lower) para não gerar chaves diferentes
+    FIX: normaliza machine_id (strip/lower) para não gerar chaves diferentes
     por variação de caixa/espaco, e evita None quebrando.
     """
     mid = (machine_id or "").strip().lower()
@@ -56,7 +56,7 @@ def _scoped_machine_id(m, machine_id: str) -> str:
 
 
 # ============================================================
-# ✅ compatibilidade para imports (machine_state)
+# compatibilidade para imports (machine_state)
 # ============================================================
 def dia_operacional_ref_dt(agora: datetime):
     """
@@ -148,7 +148,7 @@ def _turno_data_ref(m, agora):
 
 def calcular_ultima_hora_idx(m):
     """
-    ✅ FIX DO BUG:
+    FIX DO BUG:
     - Se agora estiver fora da janela do turno => None
     - Se dentro => 0..len(horas)-1
     """
@@ -192,7 +192,7 @@ def carregar_baseline_diario(m, machine_id):
     # import local para evitar circular
     from modules.repos.baseline_repo import carregar_baseline_diario as _repo_carregar
 
-    # ✅ multi-tenant: isola baseline por cliente
+    # multi-tenant: isola baseline por cliente
     scoped = _scoped_machine_id(m, (machine_id or "").strip().lower() or "maquina01")
     _repo_carregar(m, scoped)
 
@@ -239,7 +239,7 @@ def atualizar_producao_hora(m):
     )
 
     # ============================================================
-    # ✅ NOVO: acumular "não programado" (fora do turno)
+    # NOVO: acumular "não programado" (fora do turno)
     # ============================================================
     agora = now_bahia()
     idx = calcular_ultima_hora_idx(m)
@@ -256,14 +256,27 @@ def atualizar_producao_hora(m):
     raw_machine_id = _get_machine_id_from_m(m)
     machine_id = _scoped_machine_id(m, raw_machine_id) if raw_machine_id else None
 
-    # ✅ CHAVE CERTA: dia operacional (vira 23:59)
+    # CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
 
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
     prev_idx = m.get("ultima_hora")
 
     # ============================================================
-    # ✅ FIX: AO SAIR DO TURNO (idx=None), FECHAR E PERSISTIR A ÚLTIMA HORA
+    # MODO ROBUSTO (Opção C)
+    # - Mantém um acumulador dedicado por hora baseado em delta de esp_absoluto
+    # - Valida contra o método de baseline (esp_abs - baseline_hora)
+    # - Se detectar "explosão" (baseline incoerente), confia no acumulador e realinha baseline_hora
+    # ============================================================
+    if "_ph_acc_idx" not in m:
+        m["_ph_acc_idx"] = None
+    if "_ph_acc" not in m:
+        m["_ph_acc"] = 0
+    if "_ph_esp_last_seen" not in m:
+        m["_ph_esp_last_seen"] = None
+
+    # ============================================================
+    # FIX: AO SAIR DO TURNO (idx=None), FECHAR E PERSISTIR A ÚLTIMA HORA
     # Isso evita "sumir" da tabela/DB quando a hora vira e o sistema retorna cedo.
     # ============================================================
     if idx is None:
@@ -271,16 +284,23 @@ def atualizar_producao_hora(m):
         if machine_id and isinstance(prev_idx, int) and prev_idx >= 0:
             try:
                 ensure_producao_horaria_table()
-                base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
-                prod_prev = esp_abs - base_prev
-                if prod_prev < 0:
-                    prod_prev = 0
-                prod_prev = int(prod_prev)
+                # prioridade: acumulador dedicado (se estiver alinhado com a última hora)
+                acc_idx = m.get("_ph_acc_idx")
+                acc_val = int(m.get("_ph_acc", 0) or 0)
+                if isinstance(acc_idx, int) and acc_idx == prev_idx and acc_val >= 0:
+                    prod_prev = int(acc_val)
+                    base_prev = int(esp_abs - prod_prev)
+                else:
+                    base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
+                    prod_prev = esp_abs - base_prev
+                    if prod_prev < 0:
+                        prod_prev = 0
+                    prod_prev = int(prod_prev)
 
                 meta_prev = _meta_by_idx(m, prev_idx)
                 pct_prev = _percentual(prod_prev, meta_prev)
 
-                # mantém array coerente (não deixa "—")
+                # mantém array coerente (não deixa "-")
                 try:
                     if isinstance(m.get("producao_por_hora"), list) and 0 <= prev_idx < len(m["producao_por_hora"]):
                         m["producao_por_hora"][prev_idx] = prod_prev
@@ -304,6 +324,11 @@ def atualizar_producao_hora(m):
         m["ultima_hora"] = None
         m["producao_hora"] = 0
         m["percentual_hora"] = 0
+
+        # reset de rastreadores do modo robusto
+        m["_ph_acc_idx"] = None
+        m["_ph_acc"] = 0
+        m["_ph_esp_last_seen"] = None
         return
 
     horas = m.get("horas_turno") or []
@@ -331,7 +356,7 @@ def atualizar_producao_hora(m):
             m["_ph_loaded"] = False
 
     # ============================================================
-    # ✅ FIX OFFLINE/WIFI: se a hora "pulou" (ficou sem update),
+    # FIX OFFLINE/WIFI: se a hora "pulou" (ficou sem update),
     # não perder produção. Joga o delta acumulado na hora atual.
     # ============================================================
     if isinstance(prev_idx, int) and prev_idx >= 0 and prev_idx < idx:
@@ -344,7 +369,7 @@ def atualizar_producao_hora(m):
                 delta_total = 0
             delta_total = int(delta_total)
 
-            # horas intermediárias: marca 0 no array e no banco (para não ficar "—")
+            # horas intermediárias: marca 0 no array e no banco (para não ficar "-")
             for h in range(prev_idx, idx):
                 try:
                     if 0 <= h < len(m["producao_por_hora"]):
@@ -371,8 +396,14 @@ def atualizar_producao_hora(m):
 
             # hora atual recebe todo o delta
             m["ultima_hora"] = idx
-            m["baseline_hora"] = base_prev
-            m["producao_hora"] = delta_total
+            # realinha baseline para garantir coerência (baseline = esp_abs - produzido)
+            m["baseline_hora"] = int(esp_abs - int(delta_total))
+            m["producao_hora"] = int(delta_total)
+
+            # rastreadores do modo robusto
+            m["_ph_acc_idx"] = idx
+            m["_ph_acc"] = int(delta_total)
+            m["_ph_esp_last_seen"] = esp_abs
 
             meta_now = _meta_by_idx(m, idx)
             m["percentual_hora"] = _percentual(delta_total, meta_now)
@@ -390,7 +421,7 @@ def atualizar_producao_hora(m):
                         machine_id=machine_id,
                         data_ref=data_ref,
                         hora_idx=idx,
-                        baseline_esp=base_prev,
+                        baseline_esp=int(m["baseline_hora"]),
                         esp_last=esp_abs,
                         produzido=int(delta_total),
                         meta=meta_now,
@@ -407,11 +438,18 @@ def atualizar_producao_hora(m):
     if prev_idx is None or prev_idx != idx:
         # fecha a hora anterior (se existia)
         if isinstance(prev_idx, int) and prev_idx >= 0:
-            base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
-            prod_prev = esp_abs - base_prev
-            if prod_prev < 0:
-                prod_prev = 0
-            prod_prev = int(prod_prev)
+            # prioridade: acumulador dedicado (se estiver alinhado com a hora anterior)
+            acc_idx = m.get("_ph_acc_idx")
+            acc_val = int(m.get("_ph_acc", 0) or 0)
+            if isinstance(acc_idx, int) and acc_idx == prev_idx and acc_val >= 0:
+                prod_prev = int(acc_val)
+                base_prev = int(esp_abs - prod_prev)
+            else:
+                base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
+                prod_prev = esp_abs - base_prev
+                if prod_prev < 0:
+                    prod_prev = 0
+                prod_prev = int(prod_prev)
 
             meta_prev = _meta_by_idx(m, prev_idx)
             pct_prev = _percentual(prod_prev, meta_prev)
@@ -456,11 +494,16 @@ def atualizar_producao_hora(m):
         m["producao_hora"] = 0
         m["percentual_hora"] = 0
 
+        # rastreadores do modo robusto
+        m["_ph_acc_idx"] = idx
+        m["_ph_acc"] = 0
+        m["_ph_esp_last_seen"] = esp_abs
+
         if machine_id:
             try:
                 meta_now = _meta_by_idx(m, idx)
                 ensure_producao_horaria_table()
-                # ✅ IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
+                # IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
                 upsert_hora(
                     machine_id=machine_id,
                     data_ref=data_ref,
@@ -477,13 +520,71 @@ def atualizar_producao_hora(m):
         return
 
     # mesma hora: atualiza parcial (e persiste mesmo se for 0)
+    # ============================================================
+    # MODO ROBUSTO (Opção C)
+    # 1) Atualiza acumulador por delta (esp_abs - esp_last_seen)
+    # 2) Compara com cálculo por baseline
+    # 3) Se detectar explosão, confia no acumulador e realinha baseline_hora
+    # ============================================================
+    last_seen = m.get("_ph_esp_last_seen")
+    if last_seen is None:
+        last_seen = esp_abs
+
+    try:
+        last_seen = int(last_seen or 0)
+    except Exception:
+        last_seen = esp_abs
+
+    delta = esp_abs - last_seen
+    if delta < 0:
+        # contador voltou (reset no ESP / troca de device / overflow)
+        delta = 0
+
+    try:
+        acc = int(m.get("_ph_acc", 0) or 0)
+    except Exception:
+        acc = 0
+
+    acc = max(acc + int(delta), 0)
+
+    m["_ph_acc_idx"] = idx
+    m["_ph_acc"] = acc
+    m["_ph_esp_last_seen"] = esp_abs
+
+    # cálculo por baseline (método antigo)
     base_h = int(m.get("baseline_hora", esp_abs) or esp_abs)
-    prod_h = esp_abs - base_h
-    if prod_h < 0:
-        prod_h = 0
-    m["producao_hora"] = int(prod_h)
+    prod_base = esp_abs - base_h
+    if prod_base < 0:
+        prod_base = 0
+    prod_base = int(prod_base)
+
+    prod_acc = int(acc)
 
     meta_h = _meta_by_idx(m, idx)
+
+    # anti-explosão:
+    # - se baseline estiver muito maior que o acumulador e exceder um limite alto, é bug de baseline
+    limiar_abs = 100000
+    try:
+        limiar_meta = int(meta_h or 0) * 10
+    except Exception:
+        limiar_meta = 0
+
+    limiar_explosao = max(limiar_abs, limiar_meta)
+
+    diff = prod_base - prod_acc
+    limiar_diff = max(int(meta_h or 0) * 2, 5000)
+
+    if diff > limiar_diff and prod_base > limiar_explosao:
+        # baseline incoerente -> confia no acumulador e realinha baseline
+        prod_final = prod_acc
+        m["baseline_hora"] = int(esp_abs - prod_final)
+    else:
+        # baseline ok -> usa o maior valor (acumulador pode atrasar em casos de backfill/primeira leitura)
+        prod_final = max(prod_base, prod_acc)
+
+    m["producao_hora"] = int(prod_final)
+
     m["percentual_hora"] = _percentual(m["producao_hora"], meta_h)
 
     try:
@@ -499,7 +600,7 @@ def atualizar_producao_hora(m):
                 machine_id=machine_id,
                 data_ref=data_ref,
                 hora_idx=idx,
-                baseline_esp=base_h,
+                baseline_esp=int(m.get("baseline_hora", base_h) or base_h),
                 esp_last=esp_abs,
                 produzido=int(m["producao_hora"]),
                 meta=meta_h,
@@ -520,7 +621,7 @@ def reset_contexto(m, machine_id):
 
     from modules.db_indflow import get_db  # import local (só aqui)
 
-    # ✅ FIX: FECHAMENTO DIÁRIO IDEMPOTENTE
+    # FIX: FECHAMENTO DIÁRIO IDEMPOTENTE
     dia_ref = str(m.get("ultimo_dia") or "").strip()
 
     conn = get_db()
@@ -563,14 +664,14 @@ def reset_contexto(m, machine_id):
     m["_bd_dia_ref"] = None
     m["_bd_esp_last"] = None
 
-    # ✅ NOVO: reset também das métricas não programadas (mantém simples e previsível)
+    # NOVO: reset também das métricas não programadas (mantém simples e previsível)
     m["np_producao"] = 0
     m["np_minutos"] = 0
     m["_np_active"] = False
     m["_np_last_ts"] = None
     m["_np_last_esp"] = int(m.get("esp_absoluto", 0) or 0)
 
-    # ✅ persistir baseline do dia operacional no reset manual (isolado por cliente)
+    # persistir baseline do dia operacional no reset manual (isolado por cliente)
     _persistir_baseline_diario(scoped_machine_id, int(m.get("esp_absoluto", 0) or 0))
 
     try:
@@ -593,7 +694,7 @@ def verificar_reset_diario(m, machine_id):
 def calcular_tempo_medio(m):
     """
     Ritmo médio (min/peça) do card.
-    ✅ Agora considera:
+    Agora considera:
       - produção programada (producao_turno)
       - + produção não programada (np_producao)
       - minutos desde início do turno (quando houver turno_inicio)
