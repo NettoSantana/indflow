@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_service.py
-# Último recode: 2026-01-22 07:40 (America/Bahia)
-# Motivo: Debug NP - adicionar readback direto do DB apos upsert e expor parametros de persistencia para identificar chave/hora/data divergente.
+# Último recode: 2026-01-22 08:05 (America/Bahia)
+# Motivo: NP - usar SELECT direto no DB para db_total_hora antes do catch-up (nao confiar em m["np_por_hora_24"]), evitando delta_to_persist=0 por valor fantasma e destravando a hora 07-08.
 
 from __future__ import annotations
 
@@ -74,6 +74,29 @@ def _safe_int(v, default: int = 0) -> int:
 def _fmt_updated_at(agora: Optional[datetime] = None) -> str:
     a = agora or now_bahia()
     return a.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _np_db_total_hora(conn, mid: str, data_ref: str, hora_dia: int) -> int:
+    """
+    Leitura direta do DB para o total NP da hora (chave exata).
+    Retorna 0 se nao existir.
+    """
+    try:
+        cur = conn.execute(
+            """
+            SELECT produzido
+            FROM nao_programado_horaria
+            WHERE machine_id = ? AND data_ref = ? AND hora_dia = ?
+            LIMIT 1
+            """,
+            (mid, (data_ref or "").strip(), int(hora_dia)),
+        )
+        row = cur.fetchone()
+        if not row:
+            return 0
+        return _safe_int(row[0], 0)
+    except Exception:
+        return 0
 
 
 # ============================================================
@@ -336,6 +359,8 @@ def processar_nao_programado(
     m["_np_persist_stage"] = None
     m["_np_persist_params"] = None
     m["_np_db_value_after_upsert"] = None
+    m["_np_db_total_hora_real"] = None
+    m["_np_baseline_reanchored"] = False
 
     if "np_por_hora_24" not in m or not isinstance(m.get("np_por_hora_24"), list) or len(m.get("np_por_hora_24")) != 24:
         m["np_por_hora_24"] = [0] * 24
@@ -452,11 +477,26 @@ def processar_nao_programado(
     base_hora = _safe_int(m.get("np_hour_baseline", esp), esp)
     np_hora_total = max(0, esp - base_hora)
 
-    # valor já conhecido do DB (ou do último load)
-    try:
-        db_total_hora = _safe_int((m.get("np_por_hora_24") or [0] * 24)[hora_dia], 0)
-    except Exception:
-        db_total_hora = 0
+    # DB total REAL da hora: SELECT direto no banco (nao usar lista em memoria)
+    db_total_hora = 0
+    if np_ensure_table is not None:
+        try:
+            conn = get_db()
+            try:
+                np_ensure_table(conn)
+                db_total_hora = _np_db_total_hora(conn, mid, data_ref, hora_dia)
+                m["_np_db_total_hora_real"] = int(db_total_hora)
+            finally:
+                conn.close()
+        except Exception as e:
+            m["_np_persist_error"] = repr(e)
+            db_total_hora = 0
+
+    # Se o DB tiver mais do que a metrica calculada, reancora baseline para alinhar metrica ao DB
+    if db_total_hora > np_hora_total and db_total_hora > 0:
+        m["np_hour_baseline"] = max(0, int(esp - db_total_hora))
+        np_hora_total = int(db_total_hora)
+        m["_np_baseline_reanchored"] = True
 
     catchup_delta = max(0, int(np_hora_total - db_total_hora))
 
@@ -492,23 +532,9 @@ def processar_nao_programado(
 
                     # Readback direto do DB para a chave exata (mata duvida de chave/hora/data)
                     try:
-                        cur = conn.execute(
-                            """
-                            SELECT produzido
-                            FROM nao_programado_horaria
-                            WHERE machine_id = ? AND data_ref = ? AND hora_dia = ?
-                            LIMIT 1
-                            """,
-                            (mid, data_ref, int(hora_dia)),
-                        )
-                        row = cur.fetchone()
-                        if row:
-                            m["_np_db_value_after_upsert"] = _safe_int(row[0], 0)
-                        else:
-                            m["_np_db_value_after_upsert"] = None
-                    except Exception as e:
+                        m["_np_db_value_after_upsert"] = int(_np_db_total_hora(conn, mid, data_ref, hora_dia))
+                    except Exception:
                         m["_np_db_value_after_upsert"] = None
-                        m["_np_persist_error"] = repr(e)
 
                     if np_load_np_por_hora_24 is not None:
                         m["_np_persist_stage"] = "load_24_after_upsert"
@@ -518,6 +544,8 @@ def processar_nao_programado(
             except Exception as e:
                 m["_np_persist_stage"] = "persist_exception"
                 m["_np_persist_error"] = repr(e)
+    else:
+        m["_np_persist_stage"] = "no_persist_needed"
 
     # Atualiza trackers
     m["_np_last_esp"] = esp
