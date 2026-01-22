@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc_nao_programado.py
-# Último recode: 2026-01-20 21:10 (America/Bahia)
-# Motivo: Persistir hora extra por HORA: criar tabela nao_programado_horaria e salvar np_producao_hora por hora do dia, evitando perder valor ao virar a hora.
+# Último recode: 2026-01-21 22:55 (America/Bahia)
+# Motivo: Corrigir baseline do NP por hora: np_hour_baseline deve ancorar no esp_absoluto (contador real), não no acumulado np_producao. Evita explosão (baseline pequeno tipo 3071) e garante np_producao_hora consistente.
 
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -231,6 +231,11 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
     ✅ Agora também persiste por hora em nao_programado_horaria:
       - np_producao_hora é gravado em (data_ref, hora_dia)
       - assim o valor fica "na tabela" e não some ao virar a hora
+
+    🔥 RECODE (2026-01-21):
+      - np_hour_baseline passa a ser ancorado no esp_absoluto (contador real) ao virar a hora,
+        e np_producao_hora vira (esp_absoluto - np_hour_baseline).
+      - Isso elimina explosões quando baseline vem pequeno (ex: 3071).
     """
     if agora is None:
         agora = now_bahia()
@@ -317,10 +322,10 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
     # =========================
     hora_ref = int(agora.hour)
 
-    # se hora mudou, ancora baseline da np_producao atual (zera hora)
+    # se hora mudou, ancora baseline no contador real (esp_absoluto) e zera hora
     if m.get("np_hour_ref") is None or _safe_int(m.get("np_hour_ref"), -1) != hora_ref:
         m["np_hour_ref"] = hora_ref
-        m["np_hour_baseline"] = int(_safe_int(m.get("np_producao", 0), 0))
+        m["np_hour_baseline"] = int(curr_esp)  # ✅ RECODE: baseline por hora = esp_absoluto atual
         m["np_producao_hora"] = 0
 
     was_active = _get_bool(m.get("_np_active"))
@@ -341,14 +346,17 @@ def update_nao_programado(m: dict, dentro_turno: bool, agora: datetime | None = 
         except Exception:
             pass
 
-    # produção NP (dia)
+    # produção NP (dia): soma deltas fora do turno
     if delta > 0:
         m["np_producao"] = _safe_int(m.get("np_producao", 0), 0) + int(delta)
 
-    # produção NP (hora): dia - baseline da hora
-    base = _safe_int(m.get("np_hour_baseline", 0), 0)
-    cur_np = _safe_int(m.get("np_producao", 0), 0)
-    m["np_producao_hora"] = max(0, int(cur_np - base))
+    # ✅ produção NP (hora): esp_absoluto - baseline_esp da hora
+    base_esp = m.get("np_hour_baseline")
+    if base_esp is None:
+        base_esp = curr_esp
+        m["np_hour_baseline"] = int(base_esp)
+    base_esp = _safe_int(base_esp, curr_esp)
+    m["np_producao_hora"] = max(0, int(curr_esp - base_esp))
 
     m["_np_active"] = bool(run_flag or (delta > 0))
     m["_np_last_ts"] = agora.isoformat()
