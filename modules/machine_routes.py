@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-22 23:30 (America/Bahia)
-# Motivo: Persistir no_count_stop_sec no /machine/config sem alterar demais rotas.
+# Último recode: 2026-01-23 04:50 (America/Bahia)
+# Motivo: Corrigir historico vazio: quando a tela filtra por machine_id, incluir registros legados (cliente_id IS NULL) desta maquina, sem alterar o resto.
 
 # modules/machine_routes.py
 import os
@@ -612,14 +612,6 @@ def configurar_maquina():
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = rampa
 
-    # no_count_stop_sec: alerta de parada por inatividade (segundos sem producao)
-    try:
-        ncss = int(data.get("no_count_stop_sec", 0) or 0)
-        if ncss >= 5:
-            m["no_count_stop_sec"] = ncss
-    except Exception:
-        pass
-
     aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
     salvar_conversao(m, data)
 
@@ -1084,6 +1076,8 @@ def historico_producao_api():
     inicio = request.args.get("inicio")
     fim = request.args.get("fim")
 
+    # Historico: preferencialmente multi-tenant. Se a tela informar machine_id,
+    # tambem aceita registros legados (cliente_id IS NULL) para esta maquina.
     query = """
         SELECT machine_id, data, produzido, meta, percentual
         FROM producao_diaria
@@ -1094,8 +1088,13 @@ def historico_producao_api():
     if machine_id:
         raw_mid = _norm_machine_id(machine_id)
         scoped_mid = f"{cliente_id}::{raw_mid}"
-        query += " AND (machine_id = ? OR machine_id = ?)"
-        params.extend([raw_mid, scoped_mid])
+        query = """
+            SELECT machine_id, data, produzido, meta, percentual
+            FROM producao_diaria
+            WHERE (cliente_id = ? OR cliente_id IS NULL)
+              AND (machine_id = ? OR machine_id = ?)
+        """
+        params = [cliente_id, raw_mid, scoped_mid]
 
     if inicio:
         query += " AND data >= ?"
