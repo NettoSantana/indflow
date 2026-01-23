@@ -1,4 +1,6 @@
-﻿fix(machine_routes): historico mostra legado quando filtra por machine_id
+﻿fix(machine_routes): parada por inatividade (no_count_stop_sec) e contagem de parado_min no turno
 
-- em /api/producao/historico, quando houver machine_id, inclui registros com cliente_id IS NULL desta maquina
-- mantem comportamento original quando nao houver machine_id
+- salva no_count_stop_sec no POST /machine/config
+- se ESP ficar em AUTO mas sem aumento de contagem por X segundos, status_ui vira PARADA
+- ancora stopped_since_ms no ultimo pulso e calcula parado_min somente dentro do turno
+- importa TZ_BAHIA para nao quebrar o calculo
