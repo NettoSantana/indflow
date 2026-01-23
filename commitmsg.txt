@@ -1,4 +1,4 @@
-﻿fix(machine_routes): persistir no_count_stop_sec no /machine/config
+﻿fix(machine_routes): historico mostra legado quando filtra por machine_id
 
-- le no_count_stop_sec do POST /machine/config e grava em m['no_count_stop_sec'] (>= 5)
-- nenhuma outra rota ou logica alterada
+- em /api/producao/historico, quando houver machine_id, inclui registros com cliente_id IS NULL desta maquina
+- mantem comportamento original quando nao houver machine_id
