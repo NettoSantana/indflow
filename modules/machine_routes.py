@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-22 23:09 (America/Bahia)
-# Motivo: Corrigir tenant no /machine/status apos deploy: aceitar cliente_id numerico na sessao para recuperar producao por hora; manter ociosidade somente no turno.
+# Último recode: 2026-01-22 23:30 (America/Bahia)
+# Motivo: Persistir no_count_stop_sec no /machine/config sem alterar demais rotas.
 
 # modules/machine_routes.py
 import os
@@ -611,6 +611,14 @@ def configurar_maquina():
     m["turno_inicio"] = data["inicio"]
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = rampa
+
+    # no_count_stop_sec: alerta de parada por inatividade (segundos sem producao)
+    try:
+        ncss = int(data.get("no_count_stop_sec", 0) or 0)
+        if ncss >= 5:
+            m["no_count_stop_sec"] = ncss
+    except Exception:
+        pass
 
     aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
     salvar_conversao(m, data)
