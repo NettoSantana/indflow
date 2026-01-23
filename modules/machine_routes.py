@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-23 04:50 (America/Bahia)
-# Motivo: Corrigir historico vazio: quando a tela filtra por machine_id, incluir registros legados (cliente_id IS NULL) desta maquina, sem alterar o resto.
+# Último recode: 2026-01-23 21:30 (America/Bahia)
+# Motivo: Implementar parada por inatividade (no_count_stop_sec): se o ESP continuar em AUTO mas nao houver aumento de contagem por X segundos, considerar PARADA e contar parado_min somente dentro do turno.
 
 # modules/machine_routes.py
 import os
@@ -22,6 +22,7 @@ from modules.machine_calc import (
     carregar_baseline_diario,
     now_bahia,
     dia_operacional_ref_str,
+    TZ_BAHIA,
 )
 
 from modules.machine_service import processar_nao_programado
@@ -122,21 +123,10 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
 
 def _looks_like_uuid(v: str) -> bool:
     """
-    Validacao simples para evitar usar session['cliente_id'] errado.
-
-    Aceita:
-      - UUID no formato 8-4-4-4-12 (36 chars, 4 hifens)
-      - ID numerico (apenas digitos), usado em alguns logins/sessoes
+    Validacao simples para evitar usar session['cliente_id'] errado (ex: id de usuario).
+    Aceita UUID no formato 8-4-4-4-12 (36 chars, 4 hifens).
     """
     s = (v or "").strip()
-    if not s:
-        return False
-
-    # id numerico (ex: "1", "23")
-    if s.isdigit():
-        return True
-
-    # uuid 8-4-4-4-12
     if len(s) != 36:
         return False
     if s.count("-") != 4:
@@ -612,6 +602,15 @@ def configurar_maquina():
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = rampa
 
+    # no_count_stop_sec: alerta de parada por inatividade (segundos sem producao)
+    try:
+        ncss = int(data.get("no_count_stop_sec", 0) or 0)
+        if ncss >= 5:
+            m["no_count_stop_sec"] = ncss
+    except Exception:
+        pass
+
+
     aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
     salvar_conversao(m, data)
 
@@ -727,6 +726,25 @@ def update_machine():
 
     m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
+
+    # inatividade: marca o ultimo momento em que houve aumento de contagem
+    # (permite considerar PARADA mesmo se o ESP continuar enviando status AUTO)
+    try:
+        agora_lc = now_bahia()
+        now_ms_lc = int(agora_lc.timestamp() * 1000)
+        esp_now = int(m.get("esp_absoluto", 0) or 0)
+        esp_prev = m.get("_last_esp_abs_seen")
+        if esp_prev is None:
+            esp_prev = esp_now
+        esp_prev = int(esp_prev)
+        if esp_now != esp_prev:
+            m["_last_count_ts_ms"] = now_ms_lc
+        elif m.get("_last_count_ts_ms") is None:
+            m["_last_count_ts_ms"] = now_ms_lc
+        m["_last_esp_abs_seen"] = esp_now
+    except Exception:
+        pass
+
     m["run"] = _safe_int(data.get("run", 0), 0)
 
     # --- parada oficial (backend)
@@ -1002,7 +1020,41 @@ def machine_status():
         agora = now_bahia()
         now_ms = int(agora.timestamp() * 1000)
 
-        if status == "AUTO":
+        # regra: se status do ESP for AUTO, mas ficar sem aumento de contagem por no_count_stop_sec, considerar PARADA
+        thr = 0
+        try:
+            thr = int(m.get("no_count_stop_sec", 0) or 0)
+        except Exception:
+            thr = 0
+        try:
+            agora_i = now_bahia()
+            now_ms_i = int(agora_i.timestamp() * 1000)
+            last_ts = m.get("_last_count_ts_ms")
+            if last_ts is None:
+                last_ts = now_ms_i
+                m["_last_count_ts_ms"] = last_ts
+            last_ts = int(last_ts)
+            sem_contar = (now_ms_i - last_ts) // 1000
+        except Exception:
+            sem_contar = 0
+        
+        if status == "AUTO" and thr >= 5 and sem_contar >= thr:
+            m["status_ui"] = "PARADA"
+            ss = _get_stopped_since_ms(machine_id)
+            if ss is None:
+                try:
+                    updated_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
+                    _set_stopped_since_ms(machine_id, int(m.get("_last_count_ts_ms", now_ms)), updated_at)
+                except Exception:
+                    pass
+                ss = _get_stopped_since_ms(machine_id)
+            turno_inicio = (m.get("turno_inicio") or "").strip()
+            turno_fim = (m.get("turno_fim") or "").strip()
+            if turno_inicio and turno_fim:
+                m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss or now_ms), now_ms, turno_inicio, turno_fim)
+            else:
+                m["parado_min"] = None
+        elif status == "AUTO":
             m["status_ui"] = "PRODUZINDO"
             m["parado_min"] = None
         else:
@@ -1076,8 +1128,6 @@ def historico_producao_api():
     inicio = request.args.get("inicio")
     fim = request.args.get("fim")
 
-    # Historico: preferencialmente multi-tenant. Se a tela informar machine_id,
-    # tambem aceita registros legados (cliente_id IS NULL) para esta maquina.
     query = """
         SELECT machine_id, data, produzido, meta, percentual
         FROM producao_diaria
@@ -1088,13 +1138,8 @@ def historico_producao_api():
     if machine_id:
         raw_mid = _norm_machine_id(machine_id)
         scoped_mid = f"{cliente_id}::{raw_mid}"
-        query = """
-            SELECT machine_id, data, produzido, meta, percentual
-            FROM producao_diaria
-            WHERE (cliente_id = ? OR cliente_id IS NULL)
-              AND (machine_id = ? OR machine_id = ?)
-        """
-        params = [cliente_id, raw_mid, scoped_mid]
+        query += " AND (machine_id = ? OR machine_id = ?)"
+        params.extend([raw_mid, scoped_mid])
 
     if inicio:
         query += " AND data >= ?"
