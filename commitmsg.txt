@@ -1,4 +1,4 @@
-﻿fix(refugo_repo): corrigir salvamento legacy sem quebrar multi-tenant
+﻿fix(machine_routes): persistir no_count_stop_sec no /machine/config
 
-- remove ON CONFLICT do caminho legacy (cliente_id IS NULL) por incompatibilidade com indice parcial
-- aplica UPDATE + INSERT quando necessario, mantendo resto do arquivo intacto
+- le no_count_stop_sec do POST /machine/config e grava em m['no_count_stop_sec'] (>= 5)
+- nenhuma outra rota ou logica alterada
