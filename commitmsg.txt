@@ -1,6 +1,6 @@
-﻿fix(machine_routes): parada por inatividade (no_count_stop_sec) e contagem de parado_min no turno
+﻿fix(producao): criar API /api/producao/historico e endpoint de salvar diaria no SQLite
 
-- salva no_count_stop_sec no POST /machine/config
-- se ESP ficar em AUTO mas sem aumento de contagem por X segundos, status_ui vira PARADA
-- ancora stopped_since_ms no ultimo pulso e calcula parado_min somente dentro do turno
-- importa TZ_BAHIA para nao quebrar o calculo
+- inicializa SQLite via init_db ao carregar routes
+- adiciona pagina /producao/historico e rota JSON /api/producao/historico
+- adiciona /api/producao/salvar_diaria para persistir produzido/meta
+- adapta campos para o front (pecas_boas=produzido, refugo_total=0)
