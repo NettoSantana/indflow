@@ -1,7 +1,8 @@
 <!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\base.html
-LAST_RECODE: 2026-01-28 20:45 America/Bahia
-MOTIVO: Ajustar menu por role (admin/viewer) para desmembramento de clientes; cliente vê apenas Producao e Admin (quando admin) e Sair.
+Arquivo: templates/base.html
+Alterado em: 2026-01-15 22:58
+Por: ChatGPT
+Motivo: inclusão do módulo Clientes no menu principal
 -->
 
 <!DOCTYPE html>
@@ -88,12 +89,13 @@ MOTIVO: Ajustar menu por role (admin/viewer) para desmembramento de clientes; cl
 
     <div class="nav-links">
       {% if session.get("user_id") %}
-        <a href="/producao">Producao</a>
-
-        {% if session.get("role") == "admin" %}
-          <a href="/admin">Admin</a>
-        {% endif %}
-
+        <a href="/producao">Produção</a>
+        <a href="/manutencao">Manutenção</a>
+        <a href="/ativos">Ativos</a>
+        <a href="/devices/">Dispositivos</a>
+        <a href="/clientes">Clientes</a>
+        <a href="/utilidades">Utilidades</a>
+        <a href="/admin">Admin</a>
         <a href="/admin/logout">Sair</a>
       {% else %}
         <a href="/admin/login">Login</a>
