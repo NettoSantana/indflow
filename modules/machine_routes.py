@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-27 19:45 (America/Bahia)
-# Motivo: Garantir fechamento diario (opcao A) via /machine/status e corrigir cliente_id no producao_diaria para aparecer no historico.
+# Último recode: 2026-01-28 12:41 (America/Bahia)
+# Motivo: Backfill retroativo de cliente_id em producao_diaria (historico legado) + fechamento diario continua via /machine/status sem remover funcionalidades.
 
 # modules/machine_routes.py
 import os
@@ -251,6 +251,39 @@ def _get_cliente_id_for_request() -> str | None:
     cid = (session.get("cliente_id") or "").strip()
     return cid or None
 
+
+
+def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -> None:
+    '''
+    Backfill retroativo:
+    - Preenche cliente_id em TODOS os registros de producao_diaria dessa maquina
+      onde cliente_id esteja NULL ou vazio.
+    - Faz match tanto no machine_id raw quanto no scoped (cliente_id::machine_id).
+
+    Objetivo:
+    - A API /api/producao/historico filtra por cliente_id. Registros antigos sem cliente_id ficam invisiveis.
+    '''
+    cid = (cliente_id or "").strip()
+    if not cid:
+        return
+
+    raw_mid = _norm_machine_id(machine_id)
+    scoped_mid = f"{cid}::{raw_mid}"
+
+    conn = get_db()
+    try:
+        conn.execute(
+            '''
+            UPDATE producao_diaria
+               SET cliente_id = ?
+             WHERE (cliente_id IS NULL OR TRIM(cliente_id) = '')
+               AND (machine_id = ? OR machine_id = ?)
+            ''',
+            (cid, raw_mid, scoped_mid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 # ============================================================
 # MULTI-TENANT (DEVICES) — helpers locais
@@ -970,6 +1003,14 @@ def machine_status():
 
     if cid_req:
         m["cliente_id"] = cid_req
+
+        # Backfill retroativo (uma vez por processo): corrige historico legado sem cliente_id
+        if not m.get("_pd_backfill_done"):
+            try:
+                _backfill_producao_diaria_cliente_id_all(machine_id, cid_req)
+                m["_pd_backfill_done"] = True
+            except Exception:
+                pass
 
     dia_ref_before = str(m.get("ultimo_dia") or "").strip()
     try:
