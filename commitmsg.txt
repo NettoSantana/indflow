@@ -1,6 +1,4 @@
-﻿fix(producao): criar API /api/producao/historico e endpoint de salvar diaria no SQLite
+﻿fix(machine_status): fechar dia via /machine/status e garantir cliente_id no historico
 
-- inicializa SQLite via init_db ao carregar routes
-- adiciona pagina /producao/historico e rota JSON /api/producao/historico
-- adiciona /api/producao/salvar_diaria para persistir produzido/meta
-- adapta campos para o front (pecas_boas=produzido, refugo_total=0)
+- chama verificar_reset_diario no /machine/status para nao depender do ESP na virada 23:59
+- quando houver reset, atualiza producao_diaria do dia fechado para preencher cliente_id
