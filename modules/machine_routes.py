@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-23 21:30 (America/Bahia)
-# Motivo: Implementar parada por inatividade (no_count_stop_sec): se o ESP continuar em AUTO mas nao houver aumento de contagem por X segundos, considerar PARADA e contar parado_min somente dentro do turno.
+# Último recode: 2026-01-27 19:45 (America/Bahia)
+# Motivo: Garantir fechamento diario (opcao A) via /machine/status e corrigir cliente_id no producao_diaria para aparecer no historico.
 
 # modules/machine_routes.py
 import os
@@ -954,6 +954,50 @@ def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
+
+    # =====================================================
+    # FECHAMENTO DIARIO (OPCAO A) TAMBEM NO /machine/status
+    # - Se o ESP nao enviar /machine/update na virada (23:59),
+    #   o reset nao roda e o historico diario fica vazio.
+    # - Garantimos que o registro diario fique com cliente_id,
+    #   pois a API de historico filtra por cliente_id.
+    # =====================================================
+    cid_req = None
+    try:
+        cid_req = _get_cliente_id_for_request()
+    except Exception:
+        cid_req = None
+
+    if cid_req:
+        m["cliente_id"] = cid_req
+
+    dia_ref_before = str(m.get("ultimo_dia") or "").strip()
+    try:
+        verificar_reset_diario(m, machine_id)
+    except Exception:
+        pass
+    dia_ref_after = str(m.get("ultimo_dia") or "").strip()
+
+    # Se houve virada e reset, o reset_contexto gravou producao_diaria para dia_ref_before.
+    # Em algumas versoes, esse insert nao popula a coluna cliente_id. Garantimos aqui.
+    if cid_req and dia_ref_before and dia_ref_after and dia_ref_before != dia_ref_after:
+        try:
+            raw_mid = _norm_machine_id(machine_id)
+            scoped_mid = f"{cid_req}::{raw_mid}"
+            conn = get_db()
+            try:
+                conn.execute(
+                    "UPDATE producao_diaria SET cliente_id=? "
+                    "WHERE (cliente_id IS NULL OR cliente_id='') "
+                    "AND data=? AND (machine_id=? OR machine_id=?)",
+                    (cid_req, dia_ref_before, raw_mid, scoped_mid),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
     carregar_baseline_diario(m, machine_id)
 
     atualizar_producao_hora(m)
@@ -1177,4 +1221,3 @@ def historico_producao_api():
         out.append(d)
 
     return jsonify(out)
-#nada
