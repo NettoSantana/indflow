@@ -1,5 +1,5 @@
-﻿fix(historico): backfill retroativo de cliente_id em producao_diaria para registros legados aparecerem no historico
+﻿chore(menu): aplicar menu por role (admin/viewer) para clientes
 
-- adiciona helper _backfill_producao_diaria_cliente_id_all
-- executa backfill 1 vez no /machine/status quando houver cliente_id (session/api key)
-- nao remove nenhuma funcionalidade existente
+- base.html agora mostra apenas Producao e Sair para viewer
+- admin ve Producao, Admin e Sair
+- remove links globais do menu para evitar exposicao ao cliente
