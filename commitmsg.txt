@@ -1,4 +1,5 @@
-﻿fix(machine_status): fechar dia via /machine/status e garantir cliente_id no historico
+﻿fix(historico): backfill retroativo de cliente_id em producao_diaria para registros legados aparecerem no historico
 
-- chama verificar_reset_diario no /machine/status para nao depender do ESP na virada 23:59
-- quando houver reset, atualiza producao_diaria do dia fechado para preencher cliente_id
+- adiciona helper _backfill_producao_diaria_cliente_id_all
+- executa backfill 1 vez no /machine/status quando houver cliente_id (session/api key)
+- nao remove nenhuma funcionalidade existente
