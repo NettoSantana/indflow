@@ -1,5 +1,5 @@
-﻿chore(menu): aplicar menu por role (admin/viewer) para clientes
+﻿feat(auth): promover Admin@admin para superadmin
 
-- base.html agora mostra apenas Producao e Sair para viewer
-- admin ve Producao, Admin e Sair
-- remove links globais do menu para evitar exposicao ao cliente
+- login promove role para superadmin quando email = admin@admin
+- atualiza role no banco para manter consistencia
+- admin_required passa a aceitar admin e superadmin
