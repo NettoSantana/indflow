@@ -1,5 +1,5 @@
-﻿chore(menu): aplicar menu por role (admin/viewer) para clientes
+﻿feat(admin): adicionar telas de Usuarios e Dispositivos no /admin (por cliente_id)
 
-- base.html agora mostra apenas Producao e Sair para viewer
-- admin ve Producao, Admin e Sair
-- remove links globais do menu para evitar exposicao ao cliente
+- /admin agora mostra atalhos para Usuarios e Dispositivos
+- /admin/usuarios: criar usuario (admin/viewer) e ativar/desativar, sempre por cliente_id
+- /admin/dispositivos: listar e vincular device_id ao machine_id e alias, sempre por cliente_id
