@@ -1,13 +1,13 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\clientes\routes.py
-# LAST_RECODE: 2026-01-16 14:00 America/Bahia
-# MOTIVO: Padronizar cabeçalho (rastreabilidade por caminho + data/hora + motivo)
+# LAST_RECODE: 2026-01-28 22:10 America/Bahia
+# MOTIVO: Permitir acesso do superadmin (Admin@admin) ao modulo Clientes, mantendo admin para clientes.
 #
 # CODED_AT: 2026-01-15 23:00:54 America/Bahia
 #
 # Objetivo:
 # - Cadastro de clientes (multi-tenant) com API Key própria (armazenada como hash)
 # - Mostrar a API Key apenas no momento da criação (não persistimos a chave em texto)
-# - Acesso: somente usuário logado com role=admin (via session)
+# - Acesso: usuario logado com role=admin ou role=superadmin (via session)
 
 from flask import Blueprint, request, redirect, url_for, session, jsonify
 from flask import render_template_string
@@ -31,12 +31,13 @@ def _utc_iso() -> str:
 
 
 def _is_admin() -> bool:
-    return (session.get("role") or "").strip().lower() == "admin"
+    role = (session.get("role") or "").strip().lower()
+    return role in ("admin", "superadmin")
 
 
 def _require_admin_or_403():
     if not _is_admin():
-        return ("Acesso negado (admin).", 403)
+        return ("Acesso negado (admin/superadmin).", 403)
     return None
 
 
@@ -361,4 +362,3 @@ def api_list_clientes():
             "created_at": r["created_at"],
         })
     return jsonify(out)
-
