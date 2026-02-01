@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-01 18:20 America/Bahia
-# MOTIVO: Opcao 3 - garantir dia atual no historico mesmo com zero; OP aparece no historico apenas no dia de inicio (started_at).
+# LAST_RECODE: 2026-02-01 18:35 America/Bahia
+# MOTIVO: Remover caractere invisivel U+0002 que derrubava o deploy; restaurar chamada listar_historico() no /api/producao/historico.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -477,7 +477,8 @@ def api_historico():
     except Exception:
         pass
 
-(machine_id=machine_id, limit=limit)
+    try:
+        rows = listar_historico(machine_id=machine_id, limit=limit)
     except Exception:
         rows = []
 
