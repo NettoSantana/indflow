@@ -1,1 +1,1 @@
-﻿fix(historico-op): listar OP somente no dia de inicio (started_at) no /api/producao/historico
+﻿fix(historico): opcao 3 - garantir dia atual no historico (mesmo zero) e anexar OP no dia de inicio
