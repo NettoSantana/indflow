@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-01 09:25 (America/Bahia)
-Motivo: Adicionar seletor de maquina e botao Novo OP ao lado de Historico (UI e chamadas de API), sem alterar a logica existente.
+Ultimo recode: 2026-02-01 10:10 (America/Bahia)
+Motivo: Remover seletor de maquina do topo; OP fica vinculada a maquina da pagina.
 -->
 
 {% extends "base.html" %}
@@ -56,20 +56,75 @@ Motivo: Adicionar seletor de maquina e botao Novo OP ao lado de Historico (UI e 
     margin-top: 6px;
     line-height: 1.3;
   }
-  .machine-jump{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;}
-  .machine-jump-label{font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;letter-spacing:0.03em;}
-  .machine-jump-input{width:140px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:12px;font-size:14px;outline:none;}
-  .machine-jump-input:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.20);}
-  .op-ativo-box{border:1px solid #e5e7eb;border-radius:14px;padding:8px 10px;background:#f8fafc;min-width:220px;}
-  .op-ativo-title{font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:2px;}
-  .op-ativo-info{font-size:13px;font-weight:900;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.35);display:flex;align-items:center;justify-content:center;padding:18px;z-index:50;}
-  .modal{width:100%;max-width:640px;background:#fff;border-radius:18px;border:1px solid #e5e7eb;box-shadow:0 18px 40px rgba(0,0,0,0.18);overflow:hidden;}
-  .modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;}
-  .modal-title{font-size:14px;font-weight:900;color:#0f172a;}
-  .modal-close{border:1px solid #e5e7eb;background:#fff;border-radius:10px;width:34px;height:34px;font-size:16px;line-height:32px;text-align:center;cursor:pointer;}
-  .modal-body{padding:16px;}
 
+  .op-ativo-box{
+    border:1px solid #e5e7eb;
+    border-radius:14px;
+    padding:8px 10px;
+    background:#f8fafc;
+    min-width:220px;
+  }
+  .op-ativo-title{
+    font-size:12px;
+    font-weight:900;
+    color:#334155;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    margin-bottom:2px;
+  }
+  .op-ativo-info{
+    font-size:13px;
+    font-weight:900;
+    color:#0f172a;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.35);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+    z-index:50;
+  }
+  .modal{
+    width:100%;
+    max-width:640px;
+    background:#fff;
+    border-radius:18px;
+    border:1px solid #e5e7eb;
+    box-shadow:0 18px 40px rgba(0,0,0,0.18);
+    overflow:hidden;
+  }
+  .modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#f8fafc;
+  }
+  .modal-title{
+    font-size:14px;
+    font-weight:900;
+    color:#0f172a;
+  }
+  .modal-close{
+    border:1px solid #e5e7eb;
+    background:#fff;
+    border-radius:10px;
+    width:34px;
+    height:34px;
+    font-size:16px;
+    line-height:32px;
+    text-align:center;
+    cursor:pointer;
+  }
+  .modal-body{ padding:16px; }
 </style>
 
 <div class="container">
@@ -79,13 +134,6 @@ Motivo: Adicionar seletor de maquina e botao Novo OP ao lado de Historico (UI e 
 
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
-
-      <div class="machine-jump">
-        <span class="machine-jump-label">Maquina</span>
-        <input id="machine_jump" class="machine-jump-input" type="text" placeholder="Ex: corpo01" autocomplete="off" list="machine_jump_list">
-        <datalist id="machine_jump_list"></datalist>
-        <button id="btn-open-machine" type="button" class="btn btn-secondary">Abrir</button>
-      </div>
 
       <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
       <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
@@ -225,29 +273,85 @@ document.getElementById("titulo-maquina").textContent =
 document.getElementById("btn-historico").href =
   `/producao/historico?machine_id=${machine_id}`;
 
-function _normMid(v){return String(v||"").trim().replace(/[^a-zA-Z0-9_-]/g,"");}
-function _loadRecent(){try{const a=JSON.parse(localStorage.getItem("indflow_recent_machines")||"[]");return Array.isArray(a)?a:[];}catch(e){return [];}}
-function _saveRecent(a){try{localStorage.setItem("indflow_recent_machines",JSON.stringify(a));}catch(e){}}
-function _addRecent(id){const m=_normMid(id);if(!m)return;const a=_loadRecent().filter(x=>x!==m);a.unshift(m);_saveRecent(a.slice(0,15));}
-function _renderRecent(){const dl=document.getElementById("machine_jump_list");if(!dl)return;dl.innerHTML="";for(const m of _loadRecent()){const o=document.createElement("option");o.value=m;dl.appendChild(o);}}
-function initMachineJump(){_addRecent(machine_id);_renderRecent();const inp=document.getElementById("machine_jump");if(inp)inp.value=machine_id;const b=document.getElementById("btn-open-machine");if(b)b.addEventListener("click",()=>{const v=_normMid(inp?inp.value:"");if(!v){alert("Informe o ID da maquina.");return;} _addRecent(v);window.location.href=`/producao/config/${v}`;});}
-
 let opAtiva=null;
-function _showOp(info){const box=document.getElementById("op-ativo-box"),i=document.getElementById("op-ativo-info"),bn=document.getElementById("btn-op-new"),be=document.getElementById("btn-op-end");if(box)box.style.display="block";if(i)i.textContent=info||"-";if(bn)bn.style.display="none";if(be)be.style.display="inline-block";}
-function _showNoOp(){const box=document.getElementById("op-ativo-box"),i=document.getElementById("op-ativo-info"),bn=document.getElementById("btn-op-new"),be=document.getElementById("btn-op-end");if(box)box.style.display="none";if(i)i.textContent="-";if(bn)bn.style.display="inline-block";if(be)be.style.display="none";}
-async function _getJson(url){try{const r=await fetch(url);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
-async function carregarOpUI(){const d=await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);if(!d){_showNoOp();return;} if(d.active){opAtiva=d;const info=`OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;_showOp(info);}else{opAtiva=null;_showNoOp();}}
-function openOpModal(){const bd=document.getElementById("opModalBackdrop");if(bd)bd.style.display="flex";}
-function closeOpModal(){const bd=document.getElementById("opModalBackdrop");if(bd)bd.style.display="none";}
-async function _postJson(url,p){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});let j=null;try{j=await r.json();}catch(e){} if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");} return j;}
+function _showOp(info){
+  const box=document.getElementById("op-ativo-box"),
+        i=document.getElementById("op-ativo-info"),
+        bn=document.getElementById("btn-op-new"),
+        be=document.getElementById("btn-op-end");
+  if(box)box.style.display="block";
+  if(i)i.textContent=info||"-";
+  if(bn)bn.style.display="none";
+  if(be)be.style.display="inline-block";
+}
+function _showNoOp(){
+  const box=document.getElementById("op-ativo-box"),
+        i=document.getElementById("op-ativo-info"),
+        bn=document.getElementById("btn-op-new"),
+        be=document.getElementById("btn-op-end");
+  if(box)box.style.display="none";
+  if(i)i.textContent="-";
+  if(bn)bn.style.display="inline-block";
+  if(be)be.style.display="none";
+}
+async function _getJson(url){
+  try{
+    const r=await fetch(url);
+    if(!r.ok)return null;
+    return await r.json();
+  }catch(e){
+    return null;
+  }
+}
+async function carregarOpUI(){
+  const d=await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
+  if(!d){_showNoOp();return;}
+  if(d.active){
+    opAtiva=d;
+    const info=`OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
+    _showOp(info);
+  }else{
+    opAtiva=null;
+    _showNoOp();
+  }
+}
+function openOpModal(){
+  const bd=document.getElementById("opModalBackdrop");
+  if(bd)bd.style.display="flex";
+}
+function closeOpModal(){
+  const bd=document.getElementById("opModalBackdrop");
+  if(bd)bd.style.display="none";
+}
+async function _postJson(url,p){
+  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+  let j=null;
+  try{j=await r.json();}catch(e){}
+  if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");}
+  return j;
+}
 function initOpUI(){
-  const bn=document.getElementById("btn-op-new"),be=document.getElementById("btn-op-end");
+  const bn=document.getElementById("btn-op-new"),
+        be=document.getElementById("btn-op-end");
   if(bn)bn.addEventListener("click",openOpModal);
-  if(be)be.addEventListener("click",async()=>{if(!confirm("Confirmar encerramento da OP ativa?"))return;try{await _postJson("/producao/op/encerrar",{machine_id:machine_id});await carregarOpUI();}catch(err){alert(String(err&&err.message?err.message:err));}});
-  const bd=document.getElementById("opModalBackdrop"),bc=document.getElementById("btnCloseOpModal"),bx=document.getElementById("btnCancelOp");
+
+  if(be)be.addEventListener("click",async()=>{
+    if(!confirm("Confirmar encerramento da OP ativa?"))return;
+    try{
+      await _postJson("/producao/op/encerrar",{machine_id:machine_id});
+      await carregarOpUI();
+    }catch(err){
+      alert(String(err&&err.message?err.message:err));
+    }
+  });
+
+  const bd=document.getElementById("opModalBackdrop"),
+        bc=document.getElementById("btnCloseOpModal"),
+        bx=document.getElementById("btnCancelOp");
   if(bc)bc.addEventListener("click",closeOpModal);
   if(bx)bx.addEventListener("click",closeOpModal);
   if(bd)bd.addEventListener("click",(e)=>{if(e&&e.target===bd)closeOpModal();});
+
   const f=document.getElementById("op-form");
   if(f)f.addEventListener("submit",async(e)=>{
     e.preventDefault();
@@ -255,16 +359,26 @@ function initOpUI(){
     const lote=String(document.getElementById("op_lote").value||"").trim();
     const oper=String(document.getElementById("op_operador").value||"").trim();
     if(!os||!lote||!oper){alert("Preencha OS, Lote e Operador.");return;}
-    const payload={machine_id:machine_id,os:os,lote:lote,operador:oper,
+    const payload={
+      machine_id:machine_id,
+      os:os,
+      lote:lote,
+      operador:oper,
       bobina:String(document.getElementById("op_bobina").value||"").trim(),
       gr_fio:String(document.getElementById("op_gr_fio").value||"").trim(),
       observacoes:String(document.getElementById("op_obs").value||"").trim()
     };
-    try{await _postJson("/producao/op/iniciar",payload);closeOpModal();await carregarOpUI();}
-    catch(err){alert(String(err&&err.message?err.message:err));}
+    try{
+      await _postJson("/producao/op/iniciar",payload);
+      closeOpModal();
+      await carregarOpUI();
+    }catch(err){
+      alert(String(err&&err.message?err.message:err));
+    }
   });
 }
-initMachineJump();initOpUI();carregarOpUI();
+initOpUI();
+carregarOpUI();
 
 // ===============================
 // TABELA FIXA 24H
@@ -397,7 +511,7 @@ document.getElementById("btn-reset").addEventListener("click", function(){
 });
 
 // ===============================
-// UNIDADES: não permitir duplicado
+// UNIDADES: nao permitir duplicado
 // ===============================
 function garantirSemDuplicar(){
   const u1 = document.getElementById("unidade_1");
