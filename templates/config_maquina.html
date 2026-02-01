@@ -1,7 +1,7 @@
 <!--
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Último recode: 2026-01-21 21:25 (America/Bahia)
-Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do backend (fonte única). Mantém meta/refugo e destaque visual do turno.
+Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
+Ultimo recode: 2026-02-01 09:25 (America/Bahia)
+Motivo: Adicionar seletor de maquina e botao Novo OP ao lado de Historico (UI e chamadas de API), sem alterar a logica existente.
 -->
 
 {% extends "base.html" %}
@@ -15,7 +15,7 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
   #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
   #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
 
-  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo início->fim)
+  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim)
      Azul claro + branco, com "duas faixas" (topo mais claro / base mais azul). */
   #tabela-horas tbody tr.turno-ativo{
     background-color:#e0f2fe; /* fallback */
@@ -28,7 +28,7 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
     background-image:linear-gradient(180deg, #f0f9ff 0%, #bae6fd 100%);
   }
 
-  /* REFUGO EDITÁVEL */
+  /* REFUGO EDITAVEL */
   .refugo-input{
     width: 90px;
     padding: 6px 8px;
@@ -56,6 +56,20 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
     margin-top: 6px;
     line-height: 1.3;
   }
+  .machine-jump{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:14px;background:#fff;}
+  .machine-jump-label{font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;letter-spacing:0.03em;}
+  .machine-jump-input{width:140px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:12px;font-size:14px;outline:none;}
+  .machine-jump-input:focus{border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.20);}
+  .op-ativo-box{border:1px solid #e5e7eb;border-radius:14px;padding:8px 10px;background:#f8fafc;min-width:220px;}
+  .op-ativo-title{font-size:12px;font-weight:900;color:#334155;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:2px;}
+  .op-ativo-info{font-size:13px;font-weight:900;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.35);display:flex;align-items:center;justify-content:center;padding:18px;z-index:50;}
+  .modal{width:100%;max-width:640px;background:#fff;border-radius:18px;border:1px solid #e5e7eb;box-shadow:0 18px 40px rgba(0,0,0,0.18);overflow:hidden;}
+  .modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;}
+  .modal-title{font-size:14px;font-weight:900;color:#0f172a;}
+  .modal-close{border:1px solid #e5e7eb;background:#fff;border-radius:10px;width:34px;height:34px;font-size:16px;line-height:32px;text-align:center;cursor:pointer;}
+  .modal-body{padding:16px;}
+
 </style>
 
 <div class="container">
@@ -63,12 +77,25 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
   <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
     <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
 
-    <div style="display:flex; gap:10px;">
-      <a id="btn-historico" href="#" class="btn btn-secondary">Histórico</a>
+    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+      <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
 
-      <button id="btn-reset" class="btn" style="background:#dc2626;color:#fff;">
-        Zerar Produção
-      </button>
+      <div class="machine-jump">
+        <span class="machine-jump-label">Maquina</span>
+        <input id="machine_jump" class="machine-jump-input" type="text" placeholder="Ex: corpo01" autocomplete="off" list="machine_jump_list">
+        <datalist id="machine_jump_list"></datalist>
+        <button id="btn-open-machine" type="button" class="btn btn-secondary">Abrir</button>
+      </div>
+
+      <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
+      <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
+
+      <div id="op-ativo-box" class="op-ativo-box" style="display:none;">
+        <div class="op-ativo-title">OP ativa</div>
+        <div id="op-ativo-info" class="op-ativo-info">-</div>
+      </div>
+
+      <button id="btn-reset" type="button" class="btn" style="background:#dc2626;color:#fff;">Zerar Producao</button>
     </div>
   </div>
 
@@ -83,19 +110,19 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
       <div class="row">
         <div class="col">
           <select id="unidade_1" class="input">
-            <option value="">—</option>
+            <option value="">-</option>
             <option value="pcs">Unidade (pcs)</option>
             <option value="m">Metro linear (m)</option>
-            <option value="m2">Metro quadrado (m²)</option>
+            <option value="m2">Metro quadrado (m2)</option>
           </select>
         </div>
 
         <div class="col">
           <select id="unidade_2" class="input">
-            <option value="">—</option>
+            <option value="">-</option>
             <option value="pcs">Unidade (pcs)</option>
             <option value="m">Metro linear (m)</option>
-            <option value="m2">Metro quadrado (m²)</option>
+            <option value="m2">Metro quadrado (m2)</option>
           </select>
         </div>
       </div>
@@ -126,7 +153,6 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
       <label class="mt-20">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
 
-      <!-- ✅ NOVO: ALERTA DE PARADA POR INATIVIDADE -->
       <label class="mt-20">Alerta de Parada por Inatividade (segundos sem produção):</label>
       <input
         type="number"
@@ -138,7 +164,7 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
         required
       >
       <div class="help-text">
-        Mesmo que a máquina esteja em AUTO/PRODUZINDO, se não houver aumento de contagem por este tempo,
+        Mesmo que a maquina esteja em AUTO/PRODUZINDO, se nao houver aumento de contagem por este tempo,
         o sistema considera PARADA. Use valores maiores para ciclos longos (ex: 180s).
       </div>
 
@@ -148,7 +174,31 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
     </form>
   </div>
 
-  <h2 class="section-title mt-30">Distribuição da Meta por Hora</h2>
+  <div class="modal-backdrop" id="opModalBackdrop" style="display:none;">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Nova Ordem de Producao (OP)</div>
+        <button class="modal-close" id="btnCloseOpModal" type="button" aria-label="Fechar">x</button>
+      </div>
+      <div class="modal-body">
+        <form id="op-form">
+          <label>OS:</label><input type="text" id="op_os" class="input" required>
+          <label class="mt-20">Lote:</label><input type="text" id="op_lote" class="input" required>
+          <label class="mt-20">Operador:</label><input type="text" id="op_operador" class="input" required>
+          <label class="mt-20">Bobina (opcional):</label><input type="text" id="op_bobina" class="input">
+          <label class="mt-20">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
+          <label class="mt-20">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
+          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+            <button type="button" class="btn btn-secondary" id="btnCancelOp">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnStartOp">Iniciar OP</button>
+          </div>
+        </form>
+        <div class="help-text" style="margin-top:10px;">Inicio e fim da OP sao automaticos (ao iniciar e encerrar).</div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title mt-30">Distribuicao da Meta por Hora</h2>
 
   <div class="card">
     <table class="table" id="tabela-horas">
@@ -170,10 +220,51 @@ Motivo: OPÇÃO 1 — Tabela 24h passa a usar producao_exibicao_24 vindo do back
 const machine_id = window.location.pathname.split("/").pop();
 
 document.getElementById("titulo-maquina").textContent =
-  "Configuração da Máquina — " + machine_id.toUpperCase();
+  "Configuração da Máquina - " + machine_id.toUpperCase();
 
 document.getElementById("btn-historico").href =
   `/producao/historico?machine_id=${machine_id}`;
+
+function _normMid(v){return String(v||"").trim().replace(/[^a-zA-Z0-9_-]/g,"");}
+function _loadRecent(){try{const a=JSON.parse(localStorage.getItem("indflow_recent_machines")||"[]");return Array.isArray(a)?a:[];}catch(e){return [];}}
+function _saveRecent(a){try{localStorage.setItem("indflow_recent_machines",JSON.stringify(a));}catch(e){}}
+function _addRecent(id){const m=_normMid(id);if(!m)return;const a=_loadRecent().filter(x=>x!==m);a.unshift(m);_saveRecent(a.slice(0,15));}
+function _renderRecent(){const dl=document.getElementById("machine_jump_list");if(!dl)return;dl.innerHTML="";for(const m of _loadRecent()){const o=document.createElement("option");o.value=m;dl.appendChild(o);}}
+function initMachineJump(){_addRecent(machine_id);_renderRecent();const inp=document.getElementById("machine_jump");if(inp)inp.value=machine_id;const b=document.getElementById("btn-open-machine");if(b)b.addEventListener("click",()=>{const v=_normMid(inp?inp.value:"");if(!v){alert("Informe o ID da maquina.");return;} _addRecent(v);window.location.href=`/producao/config/${v}`;});}
+
+let opAtiva=null;
+function _showOp(info){const box=document.getElementById("op-ativo-box"),i=document.getElementById("op-ativo-info"),bn=document.getElementById("btn-op-new"),be=document.getElementById("btn-op-end");if(box)box.style.display="block";if(i)i.textContent=info||"-";if(bn)bn.style.display="none";if(be)be.style.display="inline-block";}
+function _showNoOp(){const box=document.getElementById("op-ativo-box"),i=document.getElementById("op-ativo-info"),bn=document.getElementById("btn-op-new"),be=document.getElementById("btn-op-end");if(box)box.style.display="none";if(i)i.textContent="-";if(bn)bn.style.display="inline-block";if(be)be.style.display="none";}
+async function _getJson(url){try{const r=await fetch(url);if(!r.ok)return null;return await r.json();}catch(e){return null;}}
+async function carregarOpUI(){const d=await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);if(!d){_showNoOp();return;} if(d.active){opAtiva=d;const info=`OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;_showOp(info);}else{opAtiva=null;_showNoOp();}}
+function openOpModal(){const bd=document.getElementById("opModalBackdrop");if(bd)bd.style.display="flex";}
+function closeOpModal(){const bd=document.getElementById("opModalBackdrop");if(bd)bd.style.display="none";}
+async function _postJson(url,p){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});let j=null;try{j=await r.json();}catch(e){} if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");} return j;}
+function initOpUI(){
+  const bn=document.getElementById("btn-op-new"),be=document.getElementById("btn-op-end");
+  if(bn)bn.addEventListener("click",openOpModal);
+  if(be)be.addEventListener("click",async()=>{if(!confirm("Confirmar encerramento da OP ativa?"))return;try{await _postJson("/producao/op/encerrar",{machine_id:machine_id});await carregarOpUI();}catch(err){alert(String(err&&err.message?err.message:err));}});
+  const bd=document.getElementById("opModalBackdrop"),bc=document.getElementById("btnCloseOpModal"),bx=document.getElementById("btnCancelOp");
+  if(bc)bc.addEventListener("click",closeOpModal);
+  if(bx)bx.addEventListener("click",closeOpModal);
+  if(bd)bd.addEventListener("click",(e)=>{if(e&&e.target===bd)closeOpModal();});
+  const f=document.getElementById("op-form");
+  if(f)f.addEventListener("submit",async(e)=>{
+    e.preventDefault();
+    const os=String(document.getElementById("op_os").value||"").trim();
+    const lote=String(document.getElementById("op_lote").value||"").trim();
+    const oper=String(document.getElementById("op_operador").value||"").trim();
+    if(!os||!lote||!oper){alert("Preencha OS, Lote e Operador.");return;}
+    const payload={machine_id:machine_id,os:os,lote:lote,operador:oper,
+      bobina:String(document.getElementById("op_bobina").value||"").trim(),
+      gr_fio:String(document.getElementById("op_gr_fio").value||"").trim(),
+      observacoes:String(document.getElementById("op_obs").value||"").trim()
+    };
+    try{await _postJson("/producao/op/iniciar",payload);closeOpModal();await carregarOpUI();}
+    catch(err){alert(String(err&&err.message?err.message:err));}
+  });
+}
+initMachineJump();initOpUI();carregarOpUI();
 
 // ===============================
 // TABELA FIXA 24H
@@ -184,7 +275,7 @@ function buildFaixas24(){
   const out = [];
   for(let h = 0; h < 24; h++){
     const h2 = (h + 1) % 24;
-    out.push(`${pad2(h)}:00–${pad2(h2)}:00`);
+    out.push(`${pad2(h)}:00-${pad2(h2)}:00`);
   }
   return out;
 }
@@ -289,7 +380,7 @@ function salvarRefugoAPI(machineId, diaRef, horaDia, refugo){
 // RESET MANUAL
 // ===============================
 document.getElementById("btn-reset").addEventListener("click", function(){
-  if(!confirm("CONFIRMAR RESET DA PRODUÇÃO?\nEssa ação grava histórico e zera os contadores.")){
+  if(!confirm("CONFIRMAR RESET DA PRODUCAO?\nEssa acao grava historico e zera os contadores.")){
     return;
   }
 
@@ -300,7 +391,7 @@ document.getElementById("btn-reset").addEventListener("click", function(){
   })
   .then(r => r.json())
   .then(() => {
-    alert("Produção zerada com sucesso.");
+    alert("Producao zerada com sucesso.");
     carregarTabela();
   });
 });
@@ -319,7 +410,7 @@ document.getElementById("unidade_1").addEventListener("change", garantirSemDupli
 document.getElementById("unidade_2").addEventListener("change", garantirSemDuplicar);
 
 // ===============================
-// SUBMIT DO FORMULÁRIO
+// SUBMIT DO FORMULARIO
 // ===============================
 document.getElementById("config-form").addEventListener("submit", function(e){
   e.preventDefault();
@@ -328,13 +419,13 @@ document.getElementById("config-form").addEventListener("submit", function(e){
 
   const conv = Number(document.getElementById("conv_m_por_pcs").value);
   if(!Number.isFinite(conv) || conv <= 0){
-    alert("Conversão inválida. Use um número maior que zero. Ex: 0.85");
+    alert("Conversao invalida. Use um numero maior que zero. Ex: 0.85");
     return;
   }
 
   const stopSec = Number(document.getElementById("no_count_stop_sec").value);
   if(!Number.isFinite(stopSec) || stopSec < 5){
-    alert("Alerta de parada por inatividade inválido. Use um valor >= 5 segundos.");
+    alert("Alerta de parada por inatividade invalido. Use um valor >= 5 segundos.");
     return;
   }
 
@@ -350,8 +441,6 @@ document.getElementById("config-form").addEventListener("submit", function(e){
       unidade_1: document.getElementById("unidade_1").value,
       unidade_2: document.getElementById("unidade_2").value,
       conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value,
-
-      // ✅ NOVO
       no_count_stop_sec: Math.floor(stopSec)
     })
   })
@@ -361,11 +450,11 @@ document.getElementById("config-form").addEventListener("submit", function(e){
       alert(resp.error);
       return;
     }
-    alert("Configuração salva com sucesso!");
+    alert("Configuracao salva com sucesso!");
     carregarTabela();
   })
   .catch(() => {
-    alert("Erro ao salvar configuração.");
+    alert("Erro ao salvar configuracao.");
   });
 });
 
@@ -388,7 +477,6 @@ function carregarTabela(){
       if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
       if(data.rampa_percentual !== undefined && data.rampa_percentual !== null) document.getElementById("rampa").value = data.rampa_percentual;
 
-      // ✅ NOVO: carrega do backend quando existir; fallback 60
       const stopSec = Number(
         data.no_count_stop_sec ?? data.no_count_stop_threshold_sec ?? data.no_count_stop ?? 60
       );
@@ -400,17 +488,13 @@ function carregarTabela(){
 
       const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
 
-      // ✅ OPÇÃO 1: backend manda a produção 24h pronta (turno + não programado)
-      // Fonte única para a tabela.
       const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length === 24)
         ? data.producao_exibicao_24
         : null;
 
-      // Fallback controlado: se o backend ainda não enviar producao_exibicao_24,
-      // mantém compatibilidade usando np_por_hora_24 (evita tabela zerada).
       const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
       if(!exibicao24){
-        console.warn("[config_maquina] backend não enviou producao_exibicao_24; usando np_por_hora_24 como fallback. Atualize o backend (OPÇÃO 1) para enviar o campo.");
+        console.warn("[config_maquina] backend nao enviou producao_exibicao_24; usando np_por_hora_24 como fallback.");
       }
 
       const horaDiaAtual =
@@ -427,7 +511,6 @@ function carregarTabela(){
       for(let i = 0; i < 24; i++){
         const tr = document.createElement("tr");
 
-        // Mantém destaque visual do turno (apenas visual)
         const dentroTurno = horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr);
         if(dentroTurno){
           tr.classList.add("turno-ativo");
@@ -439,16 +522,10 @@ function carregarTabela(){
         const tdMeta = document.createElement("td");
         tdMeta.textContent = meta24[i] ?? 0;
 
-        // =====================================================
-        // ✅ Produzido Hora (OPÇÃO 1):
-        //   - usa SOMENTE (producao_exibicao_24) vindo do backend (24 posições)
-        //   - fallback: np_por_hora_24 (compatibilidade)
-        //   - hora futura: "—"
-        // =====================================================
         let baseVal = 0;
 
         if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
-          baseVal = null; // futuro
+          baseVal = null;
         } else {
           const fonte = exibicao24 ? exibicao24 : np24;
           const v = Number(fonte[i] ?? 0);
@@ -459,7 +536,7 @@ function carregarTabela(){
 
         const tdProduzidoHora = document.createElement("td");
         if(baseVal === null){
-          tdProduzidoHora.textContent = "—";
+          tdProduzidoHora.textContent = "-";
         }else{
           tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - ref);
         }
@@ -496,7 +573,7 @@ function carregarTabela(){
             refugo24[i] = novo;
 
             if(baseVal === null){
-              tdProduzidoHora.textContent = "—";
+              tdProduzidoHora.textContent = "-";
             }else{
               tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - novo);
             }
@@ -507,7 +584,7 @@ function carregarTabela(){
 
             input.value = anterior;
             if(baseVal === null){
-              tdProduzidoHora.textContent = "—";
+              tdProduzidoHora.textContent = "-";
             }else{
               tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - anterior);
             }
