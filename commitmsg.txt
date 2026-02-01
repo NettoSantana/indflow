@@ -1,1 +1,1 @@
-﻿feat(producao): anexar lista de OPs por dia na API /api/producao/historico
+﻿feat(historico): exibir Ordens de Producao (OPs) abaixo de cada dia no Historico
