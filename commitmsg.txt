@@ -1,1 +1,1 @@
-﻿fix(historico): opcao 3 - garantir dia atual no historico (mesmo zero) e anexar OP no dia de inicio
+﻿fix(producao): remover caractere invisivel U+0002 e restaurar listar_historico no api_historico
