@@ -1,1 +1,1 @@
-﻿feat(op): criar endpoints de OP (status/iniciar/encerrar) com persistencia em SQLite
+﻿feat(producao): anexar lista de OPs por dia na API /api/producao/historico
