@@ -1,1 +1,1 @@
-﻿feat(historico): mostrar OPs por dia abaixo da linha do historico, sem remover nada do template
+﻿fix(historico-op): listar OP somente no dia de inicio (started_at) no /api/producao/historico

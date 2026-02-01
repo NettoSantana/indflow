@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-01 18:30 America/Bahia
-# MOTIVO: Historico diario deve listar OPs apenas no dia de inicio (started_at), sem remover nada do arquivo.
+# LAST_RECODE: 2026-02-01 18:20 America/Bahia
+# MOTIVO: Opcao 3 - garantir dia atual no historico mesmo com zero; OP aparece no historico apenas no dia de inicio (started_at).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -60,6 +60,133 @@ def get_machine(machine_id: str):
 # OP (ORDEM DE PRODUCAO) - SQLITE + MEMORIA
 # =====================================================
 DB_PATH = Path("indflow.db")
+# =====================================================
+# HISTORICO DIARIO - GARANTIR DIA ATUAL (OPCAO 3)
+#   Objetivo: o Historico deve sempre conter o dia corrente,
+#   mesmo com producao zero, para permitir listar OPs do dia.
+# =====================================================
+def _hoje_iso():
+    return datetime.now().date().isoformat()
+
+def _buscar_meta_mais_recente(conn, machine_id: str) -> int:
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT meta
+            FROM producao_diaria
+            WHERE machine_id = ?
+            ORDER BY data DESC
+            LIMIT 1
+            """,
+            (machine_id,),
+        )
+        row = cur.fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+    except Exception:
+        pass
+    return 0
+
+def _garantir_dia_atual_no_historico(machine_id: str):
+    """Cria linha em producao_diaria para hoje (produzido=0) se nao existir."""
+    mid = (machine_id or "").strip()
+    if not mid:
+        return
+
+    hoje = _hoje_iso()
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT 1
+            FROM producao_diaria
+            WHERE machine_id = ? AND data = ?
+            LIMIT 1
+            """,
+            (mid, hoje),
+        )
+        exists = cur.fetchone() is not None
+        if exists:
+            return
+
+        meta = _buscar_meta_mais_recente(conn, mid)
+        cur.execute(
+            """
+            INSERT INTO producao_diaria (machine_id, data, produzido, meta)
+            VALUES (?, ?, ?, ?)
+            """,
+            (mid, hoje, 0, meta),
+        )
+        conn.commit()
+    except Exception:
+        # Nao derrubar a pagina por conta do historico
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+def _garantir_dia_atual_para_todas_maquinas():
+    """Cria linha diaria para hoje (0) para todas as maquinas ja existentes no banco."""
+    hoje = _hoje_iso()
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT machine_id
+            FROM producao_diaria
+            """
+        )
+        mids = [r[0] for r in (cur.fetchall() or []) if r and r[0]]
+        for mid in mids:
+            # para evitar abrir/fechar varias conexoes, reutiliza a mesma
+            try:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM producao_diaria
+                    WHERE machine_id = ? AND data = ?
+                    LIMIT 1
+                    """,
+                    (mid, hoje),
+                )
+                exists = cur.fetchone() is not None
+                if exists:
+                    continue
+                meta = _buscar_meta_mais_recente(conn, mid)
+                cur.execute(
+                    """
+                    INSERT INTO producao_diaria (machine_id, data, produzido, meta)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (mid, hoje, 0, meta),
+                )
+            except Exception:
+                continue
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 _op_lock = Lock()
 
 # Uma OP ativa por maquina (em memoria):
@@ -337,8 +464,20 @@ def api_historico():
     if limit > 365:
         limit = 365
 
+
+    # -------------------------------------------------
+    # OPCAO 3: garantir que o dia de hoje exista no historico
+    # (mesmo com producao zero), para permitir anexar OPs.
+    # -------------------------------------------------
     try:
-        rows = listar_historico(machine_id=machine_id, limit=limit)
+        if machine_id:
+            _garantir_dia_atual_no_historico(machine_id)
+        else:
+            _garantir_dia_atual_para_todas_maquinas()
+    except Exception:
+        pass
+
+(machine_id=machine_id, limit=limit)
     except Exception:
         rows = []
 
@@ -358,10 +497,6 @@ def api_historico():
                 ed = _safe_date_only(op.get("ended_at")) or sd
                 if not mid or not sd:
                     continue
-                # REGRa: Historico deve mostrar OP somente no dia de inicio (started_at).
-                # Mantemos o codigo antigo comentado para referencia/auditoria.
-                # for d in _iter_days_inclusive(sd, ed):
-                #     ops_map.setdefault((mid, d), []).append(op)
                 ops_map.setdefault((mid, sd), []).append(op)
     except Exception:
         ops_map = {}
