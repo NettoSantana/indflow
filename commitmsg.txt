@@ -1,1 +1,1 @@
-﻿feat(op-ui): adicionar seletor de maquina e botao Novo OP na tela config_maquina
+﻿feat(ui): remover seletor de maquina do topo; OP vinculada a maquina da pagina
