@@ -1,1 +1,1 @@
-﻿feat(historico): exibir Ordens de Producao (OPs) abaixo de cada dia no Historico
+﻿feat(historico): mostrar OPs por dia abaixo da linha do historico, sem remover nada do template

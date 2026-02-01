@@ -1,3 +1,9 @@
+<!--
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\historico.html
+LAST_RECODE: 2026-02-01 12:10 America/Bahia
+MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada do arquivo original.
+-->
+
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
@@ -110,6 +116,45 @@
     text-align:center;
     color:#64748b;
   }
+
+  /* ===============================
+     OPs no historico (adicao)
+     =============================== */
+  .op-row td{
+    background:#f8fafc;
+    color:#334155;
+    font-size:13px;
+    font-weight:700;
+    border-bottom:1px solid #e5e7eb;
+  }
+
+  .op-pill{
+    display:inline-block;
+    padding:3px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:900;
+    margin-right:8px;
+    vertical-align:middle;
+  }
+
+  .op-pill-ativa{
+    background:#dcfce7;
+    color:#166534;
+    border:1px solid #bbf7d0;
+  }
+
+  .op-pill-encerrada{
+    background:#e5e7eb;
+    color:#374151;
+    border:1px solid #d1d5db;
+  }
+
+  .op-pill-unk{
+    background:#f1f5f9;
+    color:#334155;
+    border:1px solid #e2e8f0;
+  }
 </style>
 
 <div class="page">
@@ -163,6 +208,27 @@
     return new URLSearchParams(window.location.search).get(name) || "";
   }
 
+  // ===============================
+  // OPs helpers (adicao)
+  // ===============================
+  function safeStr(v){
+    return String(v === undefined || v === null ? "" : v);
+  }
+
+  function fmtOpTime(s){
+    // esperado ISO: YYYY-MM-DDTHH:MM:SS
+    const t = safeStr(s).trim();
+    if(!t) return "—";
+    return t.replace("T", " ");
+  }
+
+  function opPillClass(status){
+    const st = safeStr(status).trim().toUpperCase();
+    if(st === "ATIVA") return "op-pill op-pill-ativa";
+    if(st === "ENCERRADA") return "op-pill op-pill-encerrada";
+    return "op-pill op-pill-unk";
+  }
+
   function renderRows(rows, filtroData){
     const tbody = document.getElementById("historico-body");
     tbody.innerHTML = "";
@@ -197,6 +263,34 @@
           <td class="r">${refugo}</td>
         </tr>
       `;
+
+      // ===============================
+      // OPs abaixo do dia (adicao)
+      // ===============================
+      const ops = Array.isArray(r?.ops) ? r.ops : [];
+      for(const op of ops){
+        const st = safeStr(op?.status).trim().toUpperCase();
+        const pillCls = opPillClass(st);
+        const os = safeStr(op?.os).trim() || "—";
+        const lote = safeStr(op?.lote).trim() || "—";
+        const operador = safeStr(op?.operador).trim() || "—";
+        const ini = fmtOpTime(op?.started_at);
+        const fimRaw = safeStr(op?.ended_at).trim();
+        const fim = fimRaw ? fmtOpTime(fimRaw) : "—";
+
+        const periodo = (st === "ATIVA")
+          ? `${ini} ate agora`
+          : `${ini} ate ${fim}`;
+
+        tbody.innerHTML += `
+          <tr class="op-row">
+            <td colspan="4">
+              <span class="${pillCls}">${st || "OP"}</span>
+              OP ${os} | Lote ${lote} | Operador ${operador} | ${periodo}
+            </td>
+          </tr>
+        `;
+      }
     }
   }
 
