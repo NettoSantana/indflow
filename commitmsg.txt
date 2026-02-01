@@ -1,4 +1,1 @@
-﻿fix(clientes): permitir superadmin acessar modulo Clientes
-
-- _is_admin agora aceita admin e superadmin
-- acesso ao /clientes deixa de bloquear superadmin
+﻿feat(op-ui): adicionar seletor de maquina e botao Novo OP na tela config_maquina
