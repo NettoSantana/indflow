@@ -1,1 +1,1 @@
-﻿feat(ui): remover seletor de maquina do topo; OP vinculada a maquina da pagina
+﻿feat(op): criar endpoints de OP (status/iniciar/encerrar) com persistencia em SQLite

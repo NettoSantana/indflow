@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-01 17:20 America/Bahia
-# MOTIVO: Criar backend de Ordem de Producao (OP) com endpoints status/iniciar/encerrar e persistencia em SQLite (tabela ordens_producao), mantendo compatibilidade com historico existente.
+# LAST_RECODE: 2026-02-01 10:45 America/Bahia
+# MOTIVO: Anexar lista de OPs (ordens_producao) por dia na API /api/producao/historico para exibicao no Historico diario.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -194,6 +194,99 @@ def _close_op_row(op_id: int, ended_at: str):
 
 
 # =====================================================
+# OP -> HISTORICO: montar lista de OPs por dia
+# =====================================================
+def _safe_date_only(dt_str: str):
+    s = _as_str(dt_str)
+    if not s:
+        return None
+    # ISO: YYYY-MM-DDTHH:MM:SS
+    return s[:10] if len(s) >= 10 else None
+
+
+def _iter_days_inclusive(start_day: str, end_day: str, max_days: int = 7):
+    """Gera dias YYYY-MM-DD do intervalo [start_day, end_day]."""
+    try:
+        d0 = datetime.fromisoformat(start_day).date()
+        d1 = datetime.fromisoformat(end_day).date()
+    except Exception:
+        return []
+
+    if d1 < d0:
+        d0, d1 = d1, d0
+
+    out = []
+    cur = d0
+    steps = 0
+    while cur <= d1 and steps < max_days:
+        out.append(cur.isoformat())
+        cur = cur + timedelta(days=1)
+        steps += 1
+
+    # Se estourou o limite, devolve pelo menos inicio e fim
+    if steps >= max_days and out:
+        last = d1.isoformat()
+        if out[-1] != last:
+            out.append(last)
+    return out
+
+
+def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
+    """
+    Busca OPs que cruzam o intervalo [day_min, day_max].
+    start_day <= day_max AND (end_day >= day_min OR end_day IS NULL).
+    """
+    conn = _get_conn()
+    cur = conn.cursor()
+
+    if machine_id:
+        cur.execute(
+            """
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status
+            FROM ordens_producao
+            WHERE machine_id = ?
+              AND substr(started_at, 1, 10) <= ?
+              AND (ended_at IS NULL OR substr(ended_at, 1, 10) >= ?)
+            ORDER BY started_at DESC
+            """,
+            (machine_id, day_max, day_min),
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status
+            FROM ordens_producao
+            WHERE substr(started_at, 1, 10) <= ?
+              AND (ended_at IS NULL OR substr(ended_at, 1, 10) >= ?)
+            ORDER BY started_at DESC
+            """,
+            (day_max, day_min),
+        )
+
+    rows = cur.fetchall()
+    conn.close()
+
+    ops = []
+    for r in rows:
+        ops.append(
+            {
+                "op_id": int(r[0]),
+                "machine_id": r[1] or "",
+                "os": r[2] or "",
+                "lote": r[3] or "",
+                "operador": r[4] or "",
+                "bobina": r[5] or "",
+                "gr_fio": r[6] or "",
+                "observacoes": r[7] or "",
+                "started_at": r[8] or "",
+                "ended_at": r[9] or "",
+                "status": r[10] or "",
+            }
+        )
+    return ops
+
+
+# =====================================================
 # REDIRECIONAR /producao PARA /
 # =====================================================
 @producao_bp.route("/")
@@ -249,9 +342,34 @@ def api_historico():
     except Exception:
         rows = []
 
+    # -------------------------------------------------
+    # Anexar OPs (ordens_producao) por dia no historico
+    # -------------------------------------------------
+    ops_map = {}
+    try:
+        days = [str(r.get("data", "") or "").strip() for r in rows if str(r.get("data", "") or "").strip()]
+        if days:
+            day_min = min(days)
+            day_max = max(days)
+            ops = _fetch_ops_for_range(machine_id=machine_id, day_min=day_min, day_max=day_max)
+            for op in ops:
+                mid = str(op.get("machine_id") or "").strip()
+                sd = _safe_date_only(op.get("started_at"))
+                ed = _safe_date_only(op.get("ended_at")) or sd
+                if not mid or not sd:
+                    continue
+                for d in _iter_days_inclusive(sd, ed):
+                    ops_map.setdefault((mid, d), []).append(op)
+    except Exception:
+        ops_map = {}
+
     out = []
     for r in rows:
         produzido = int(r.get("produzido", 0) or 0)
+        mid = str(r.get("machine_id", "") or "").strip()
+        dia = str(r.get("data", "") or "").strip()
+        ops_do_dia = ops_map.get((mid, dia), []) if (mid and dia) else []
+
         out.append(
             {
                 "machine_id": r.get("machine_id", ""),
@@ -261,6 +379,7 @@ def api_historico():
                 "refugo_total": 0,
                 "meta": int(r.get("meta", 0) or 0),
                 "percentual": int(r.get("percentual", 0) or 0),
+                "ops": ops_do_dia,
             }
         )
 
