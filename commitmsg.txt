@@ -1,7 +1,4 @@
-﻿feat(producao): endpoint op/editar e bobinas em metros (lista numerica)
+﻿fix(front): historico busca endpoint correto com prefixo /producao para listar OPs como subitem
 
-- adiciona POST /producao/op/editar
-- valida bobinas somente numeros (metros)
-- persiste lista em ordens_producao.bobina como CSV
-- op/status retorna bobinas (lista) para preencher modal de edicao
-- mantem compatibilidade com bobina unica
+- altera fetch de /api/producao/historico para /producao/api/producao/historico
+- permite renderizar r.ops abaixo de cada dia

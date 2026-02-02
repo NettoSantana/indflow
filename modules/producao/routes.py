@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-02 14:10 America/Bahia
-# MOTIVO: Adicionar endpoint /producao/op/editar e suporte a bobinas em metros (lista numerica) mantendo compatibilidade com bobina unica.
+# LAST_RECODE: 2026-02-02 16:35 America/Bahia
+# MOTIVO: Encerrar OP calculando op_metros (soma bobinas em metros) e op_pcs (floor por conversao 1 pcs = X metros), persistindo no historico sem remover codigo existente.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -230,12 +230,33 @@ def init_op_db():
             baseline_u1 REAL NOT NULL DEFAULT 0,
             baseline_u2 REAL NOT NULL DEFAULT 0,
 
+            -- Totais da OP (calculados no encerramento)
+            op_metros INTEGER NOT NULL DEFAULT 0,
+            op_pcs INTEGER NOT NULL DEFAULT 0,
+            op_conv_m_por_pcs REAL NOT NULL DEFAULT 0,
+
             unidade_1 TEXT,
             unidade_2 TEXT
         )
         """
     )
 
+
+
+    # Migracao simples: adicionar colunas novas se a tabela ja existia.
+    # SQLite nao tem "ADD COLUMN IF NOT EXISTS", entao usamos try/except.
+    try:
+        cur.execute("ALTER TABLE ordens_producao ADD COLUMN op_metros INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        cur.execute("ALTER TABLE ordens_producao ADD COLUMN op_pcs INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
+    try:
+        cur.execute("ALTER TABLE ordens_producao ADD COLUMN op_conv_m_por_pcs REAL NOT NULL DEFAULT 0")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -314,6 +335,66 @@ def _normalize_bobinas(data: dict):
 
 
 
+def _get_conv_m_por_pcs(machine_id: str) -> float:
+    """Busca conversao (1 pcs = X metros) da maquina. Tenta tabelas comuns."""
+    mid = _sanitize_mid(_as_str(machine_id))
+    if not mid:
+        return 0.0
+
+    # Tabelas/colunas candidatas (compatibilidade entre modulos)
+    candidates = [
+        ("machine_config", "conv_m_por_pcs"),
+        ("maquinas", "conv_m_por_pcs"),
+        ("machines", "conv_m_por_pcs"),
+        ("machine_settings", "conv_m_por_pcs"),
+        ("config_maquina", "conv_m_por_pcs"),
+    ]
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        for table, col in candidates:
+            try:
+                cur.execute(f"SELECT {col} FROM {table} WHERE machine_id = ? LIMIT 1", (mid,))
+                row = cur.fetchone()
+                if row and row[0] is not None:
+                    try:
+                        v = float(row[0])
+                    except Exception:
+                        v = 0.0
+                    if v > 0:
+                        return v
+            except Exception:
+                continue
+    except Exception:
+        pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+    return 0.0
+
+
+def _calc_pcs_from_metros(metros: int, conv_m_por_pcs: float) -> int:
+    """Retorna floor(metros / conv). Se conv invalida, retorna 0."""
+    try:
+        m = int(metros or 0)
+    except Exception:
+        m = 0
+    try:
+        conv = float(conv_m_por_pcs or 0)
+    except Exception:
+        conv = 0.0
+    if m <= 0 or conv <= 0:
+        return 0
+    # floor (arredondado pra menos)
+    return int(m // conv)
+
+
 def _insert_op_row(payload: dict) -> int:
     conn = _get_conn()
     cur = conn.cursor()
@@ -324,8 +405,9 @@ def _insert_op_row(payload: dict) -> int:
             machine_id, os, lote, operador, bobina, gr_fio, observacoes,
             started_at, ended_at, status,
             baseline_pcs, baseline_u1, baseline_u2,
+            op_metros, op_pcs, op_conv_m_por_pcs,
             unidade_1, unidade_2
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload.get("machine_id"),
@@ -341,6 +423,9 @@ def _insert_op_row(payload: dict) -> int:
             int(payload.get("baseline_pcs") or 0),
             float(payload.get("baseline_u1") or 0),
             float(payload.get("baseline_u2") or 0),
+            int(payload.get("op_metros") or 0),
+            int(payload.get("op_pcs") or 0),
+            float(payload.get("op_conv_m_por_pcs") or 0),
             payload.get("unidade_1"),
             payload.get("unidade_2"),
         ),
@@ -352,21 +437,27 @@ def _insert_op_row(payload: dict) -> int:
     return op_id
 
 
-def _close_op_row(op_id: int, ended_at: str):
+def _close_op_row_v2(op_id: int, ended_at: str, op_metros: int, op_pcs: int, op_conv_m_por_pcs: float):
     conn = _get_conn()
     cur = conn.cursor()
 
     cur.execute(
         """
         UPDATE ordens_producao
-        SET ended_at = ?, status = ?
+        SET ended_at = ?, status = ?, op_metros = ?, op_pcs = ?, op_conv_m_por_pcs = ?
         WHERE id = ?
         """,
-        (ended_at, "ENCERRADA", int(op_id)),
+        (ended_at, "ENCERRADA", int(op_metros or 0), int(op_pcs or 0), float(op_conv_m_por_pcs or 0), int(op_id)),
     )
 
     conn.commit()
     conn.close()
+
+
+def _close_op_row(op_id: int, ended_at: str):
+    # Wrapper para manter compatibilidade com chamadas antigas
+    return _close_op_row_v2(op_id, ended_at, 0, 0, 0.0)
+
 
 
 def _update_op_row(op_id: int, payload: dict):
@@ -451,7 +542,7 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     if machine_id:
         cur.execute(
             """
-            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs
             FROM ordens_producao
             WHERE machine_id = ?
               AND substr(started_at, 1, 10) <= ?
@@ -463,7 +554,7 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     else:
         cur.execute(
             """
-            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs
             FROM ordens_producao
             WHERE substr(started_at, 1, 10) <= ?
               AND (ended_at IS NULL OR substr(ended_at, 1, 10) >= ?)
@@ -757,6 +848,7 @@ def op_status():
             "baseline": op.get("baseline") or {},
             "unidade_1": op.get("unidade_1") or "",
             "unidade_2": op.get("unidade_2") or "",
+            "op_conv_m_por_pcs": op.get("op_conv_m_por_pcs") or 0,
         }
     )
 
@@ -838,8 +930,12 @@ def op_iniciar():
         "baseline_pcs": baseline_pcs,
         "baseline_u1": baseline_u1,
         "baseline_u2": baseline_u2,
+        "op_metros": 0,
+        "op_pcs": 0,
+        "op_conv_m_por_pcs": _get_conv_m_por_pcs(machine_id),
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
+        "op_conv_m_por_pcs": _get_conv_m_por_pcs(machine_id),
     }
 
     try:
@@ -965,13 +1061,34 @@ def op_encerrar():
     ended_at = _now_iso()
     op_id = int(op.get("op_id") or 0)
 
+    # Calculo da OP por regra: metros = soma das bobinas informadas (metros).
+    # pcs = floor(metros / conv_m_por_pcs da maquina).
+    bobinas = op.get("bobinas")
+    if not isinstance(bobinas, list) or bobinas is None:
+        bobinas = _parse_bobinas_from_str(op.get("bobina") or "") or []
+
+    try:
+        op_metros = int(sum(int(x or 0) for x in bobinas))
+    except Exception:
+        op_metros = 0
+
+    conv = 0.0
+    try:
+        conv = float(op.get("op_conv_m_por_pcs") or 0)
+    except Exception:
+        conv = 0.0
+    if conv <= 0:
+        conv = _get_conv_m_por_pcs(machine_id)
+
+    op_pcs = _calc_pcs_from_metros(op_metros, conv)
+
     try:
         if op_id > 0:
-            _close_op_row(op_id, ended_at)
+            _close_op_row_v2(op_id, ended_at, op_metros, op_pcs, conv)
     except Exception:
         return jsonify({"error": "Falha ao encerrar OP no banco"}), 500
 
     with _op_lock:
         op_active.pop(machine_id, None)
 
-    return jsonify({"status": "ok", "active": False, "machine_id": machine_id, "ended_at": ended_at})
+    return jsonify({"status": "ok", "active": False, "machine_id": machine_id, "ended_at": ended_at, "op_metros": op_metros, "op_pcs": op_pcs, "op_conv_m_por_pcs": conv})
