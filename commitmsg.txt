@@ -1,1 +1,1 @@
-﻿fix(producao): remover caractere invisivel U+0002 e restaurar listar_historico no api_historico
+﻿fix(ui): forcar layout desktop em mobile via meta viewport width=1200 no base.html

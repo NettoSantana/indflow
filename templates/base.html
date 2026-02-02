@@ -1,18 +1,25 @@
 <!--
 Arquivo: templates/base.html
-Alterado em: 2026-01-15 22:58
+Alterado em: 2026-02-01 18:55 (America/Bahia)
 Por: ChatGPT
-Motivo: inclusão do módulo Clientes no menu principal
+Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas iguais ao PC.
 -->
 
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=1200, initial-scale=1.0">
   <title>{% block title %}IndFlow — NettSan Technology{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css?v=2">
 
   <style>
+    /* ===== FORCAR LAYOUT DESKTOP EM MOBILE ===== */
+    html, body{
+      min-width:1200px;
+      overflow-x:auto;
+    }
+
     /* ===== NAVBAR INDUSTRIAL ===== */
     .navbar{
       width:100%;
@@ -63,7 +70,7 @@ Motivo: inclusão do módulo Clientes no menu principal
       color:#0f172a;
     }
 
-    /* ===== ÁREA DE CONTEÚDO ===== */
+    /* ===== AREA DE CONTEUDO ===== */
     .content-area{
       padding:24px;
       width:100%;
@@ -103,7 +110,7 @@ Motivo: inclusão do módulo Clientes no menu principal
     </div>
   </nav>
 
-  <!-- CONTEÚDO DA PÁGINA -->
+  <!-- CONTEUDO DA PAGINA -->
   <main class="content-area">
     <div class="container">
       {% block content %}{% endblock %}
