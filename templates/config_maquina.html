@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
 Ultimo recode: 2026-02-02 14:00 (America/Bahia)
-Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a lista de bobinas (front-end).
+Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a lista de bobinas (front-end). + barra de rolagem no modal de OP para caber em telas menores.
 -->
 
 {% extends "base.html" %}
@@ -127,7 +127,10 @@ Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a l
     text-align:center;
     cursor:pointer;
   }
-  .modal-body{ padding:16px; }
+  .modal-body{ padding:16px; 
+    max-height: 80vh;
+    overflow-y: auto;
+}
 </style>
 
 <div class="container">
