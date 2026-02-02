@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-02 16:35 America/Bahia
-# MOTIVO: Encerrar OP calculando op_metros (soma bobinas em metros) e op_pcs (floor por conversao 1 pcs = X metros), persistindo no historico sem remover codigo existente.
+# LAST_RECODE: 2026-02-02 17:05 America/Bahia
+# MOTIVO: RECODE sem remover codigo. Corrigir falha ao salvar OP (DB_PATH via env INDFLOW_DB_PATH e placeholders do INSERT), persistir totais por OP (op_metros/op_pcs) e anexar no historico.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -59,7 +59,7 @@ def get_machine(machine_id: str):
 # =====================================================
 # OP (ORDEM DE PRODUCAO) - SQLITE + MEMORIA
 # =====================================================
-DB_PATH = Path("indflow.db")
+DB_PATH = Path(__import__("os").environ.get("INDFLOW_DB_PATH", "indflow.db"))
 # =====================================================
 # HISTORICO DIARIO - GARANTIR DIA ATUAL (OPCAO 3)
 #   Objetivo: o Historico deve sempre conter o dia corrente,
@@ -195,7 +195,7 @@ op_active = {}
 
 
 def _get_conn():
-    return sqlite3.connect(DB_PATH)
+    return sqlite3.connect(DB_PATH, check_same_thread=False)
 
 
 def init_op_db():
@@ -407,7 +407,7 @@ def _insert_op_row(payload: dict) -> int:
             baseline_pcs, baseline_u1, baseline_u2,
             op_metros, op_pcs, op_conv_m_por_pcs,
             unidade_1, unidade_2
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload.get("machine_id"),
@@ -935,7 +935,6 @@ def op_iniciar():
         "op_conv_m_por_pcs": _get_conv_m_por_pcs(machine_id),
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
-        "op_conv_m_por_pcs": _get_conv_m_por_pcs(machine_id),
     }
 
     try:
@@ -950,12 +949,14 @@ def op_iniciar():
         "lote": lote,
         "operador": operador,
         "bobina": bobina,
+        "bobinas": bobinas_list,
         "gr_fio": gr_fio,
         "observacoes": observacoes,
         "started_at": started_at,
         "baseline": {"pcs": baseline_pcs, "u1": baseline_u1, "u2": baseline_u2},
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
+        "op_conv_m_por_pcs": row_payload.get("op_conv_m_por_pcs") or 0,
     }
 
     with _op_lock:
@@ -1092,3 +1093,4 @@ def op_encerrar():
         op_active.pop(machine_id, None)
 
     return jsonify({"status": "ok", "active": False, "machine_id": machine_id, "ended_at": ended_at, "op_metros": op_metros, "op_pcs": op_pcs, "op_conv_m_por_pcs": conv})
+

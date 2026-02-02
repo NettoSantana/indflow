@@ -1,4 +1,5 @@
-﻿fix(front): historico busca endpoint correto com prefixo /producao para listar OPs como subitem
+﻿feat(producao): registrar totais por OP (metros e pcs) no encerramento sem remover codigo
 
-- altera fetch de /api/producao/historico para /producao/api/producao/historico
-- permite renderizar r.ops abaixo de cada dia
+- adiciona colunas op_metros/op_pcs/op_conv_m_por_pcs em ordens_producao (com migracao)
+- encerra OP salvando metros (soma bobinas) e pcs = floor(metros/conv_m_por_pcs)
+- historico inclui esses campos por OP
