@@ -1,4 +1,9 @@
 <!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-02-02 15:25 (America/Bahia)
+Motivo: Ajustar endpoint do historico para usar o prefixo /producao e exibir sub-itens de OPs por dia.
+-->
+<!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\historico.html
 LAST_RECODE: 2026-02-01 12:10 America/Bahia
 MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada do arquivo original.
@@ -302,8 +307,8 @@ MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada
   // A tela (HTML) é /producao/historico
   // O JSON deve vir da API /api/producao/historico
   const url = machineId
-    ? `/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`
-    : "/api/producao/historico";
+    ? `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`
+    : "/producao/api/producao/historico";
 
   let cache = [];
 

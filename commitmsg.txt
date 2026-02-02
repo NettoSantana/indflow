@@ -1,4 +1,7 @@
-﻿feat(front): bobinas em metros com entrada numerica
+﻿feat(producao): endpoint op/editar e bobinas em metros (lista numerica)
 
-- campos de bobina agora sao numericos (metros)
-- valida somente numeros (type=number, min=0, step=1)
+- adiciona POST /producao/op/editar
+- valida bobinas somente numeros (metros)
+- persiste lista em ordens_producao.bobina como CSV
+- op/status retorna bobinas (lista) para preencher modal de edicao
+- mantem compatibilidade com bobina unica
