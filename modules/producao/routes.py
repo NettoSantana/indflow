@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-01 18:35 America/Bahia
-# MOTIVO: Remover caractere invisivel U+0002 que derrubava o deploy; restaurar chamada listar_historico() no /api/producao/historico.
+# LAST_RECODE: 2026-02-02 14:10 America/Bahia
+# MOTIVO: Adicionar endpoint /producao/op/editar e suporte a bobinas em metros (lista numerica) mantendo compatibilidade com bobina unica.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -265,6 +265,55 @@ def _as_str(v) -> str:
     return ("" if v is None else str(v)).strip()
 
 
+def _parse_bobinas_from_str(bobina_str: str):
+    s = _as_str(bobina_str)
+    if not s:
+        return []
+    parts = [p.strip() for p in s.replace(";", ",").split(",")]
+    out = []
+    for p in parts:
+        if not p:
+            continue
+        if not p.isdigit():
+            return None
+        out.append(int(p))
+    return out
+
+
+def _normalize_bobinas(data: dict):
+    """Retorna (bobinas_list_int, bobina_str). Se invalido, retorna (None, None)."""
+    bobinas_in = data.get("bobinas")
+    if bobinas_in is None:
+        b = _as_str(data.get("bobina"))
+        if not b:
+            return [], ""
+        if not b.isdigit():
+            return None, None
+        v = int(b)
+        return [v], str(v)
+
+    if bobinas_in == "":
+        return [], ""
+
+    if not isinstance(bobinas_in, list):
+        return None, None
+
+    out = []
+    for it in bobinas_in:
+        if it is None:
+            continue
+        s = str(it).strip()
+        if s == "":
+            continue
+        if not s.isdigit():
+            return None, None
+        out.append(int(s))
+
+    bobina_str = ",".join(str(x) for x in out) if out else ""
+    return out, bobina_str
+
+
+
 def _insert_op_row(payload: dict) -> int:
     conn = _get_conn()
     cur = conn.cursor()
@@ -318,6 +367,39 @@ def _close_op_row(op_id: int, ended_at: str):
 
     conn.commit()
     conn.close()
+
+
+def _update_op_row(op_id: int, payload: dict):
+    conn = _get_conn()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        UPDATE ordens_producao
+        SET os = ?,
+            lote = ?,
+            operador = ?,
+            bobina = ?,
+            gr_fio = ?,
+            observacoes = ?
+        WHERE id = ?
+          AND status = ?
+        """,
+        (
+            payload.get("os"),
+            payload.get("lote"),
+            payload.get("operador"),
+            payload.get("bobina"),
+            payload.get("gr_fio"),
+            payload.get("observacoes"),
+            int(op_id),
+            "ATIVA",
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
 
 
 # =====================================================
@@ -668,6 +750,7 @@ def op_status():
             "lote": op.get("lote"),
             "operador": op.get("operador"),
             "bobina": op.get("bobina") or "",
+            "bobinas": op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or [],
             "gr_fio": op.get("gr_fio") or "",
             "observacoes": op.get("observacoes") or "",
             "started_at": op.get("started_at"),
@@ -715,7 +798,9 @@ def op_iniciar():
         if machine_id in op_active:
             return jsonify({"error": "Ja existe uma OP ativa para esta maquina"}), 409
 
-    bobina = _as_str(data.get("bobina"))
+    bobinas_list, bobina = _normalize_bobinas(data)
+    if bobinas_list is None:
+        return jsonify({"error": "Bobinas devem ser numeros (metros)"}), 400
     gr_fio = _as_str(data.get("gr_fio"))
     observacoes = _as_str(data.get("observacoes"))
 
@@ -744,6 +829,7 @@ def op_iniciar():
         "lote": lote,
         "operador": operador,
         "bobina": bobina,
+        "bobinas": bobinas_list,
         "gr_fio": gr_fio,
         "observacoes": observacoes,
         "started_at": started_at,
@@ -781,6 +867,80 @@ def op_iniciar():
 
     return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id})
 
+
+
+
+# =====================================================
+# OP - EDITAR (JSON)
+# POST /producao/op/editar
+# Body:
+# {
+#   "machine_id": "corpo",
+#   "os": "98668",
+#   "lote": "126012560",
+#   "operador": "Ricardo",
+#   "bobinas": [1200, 800],
+#   "gr_fio": "",
+#   "observacoes": ""
+# }
+# =====================================================
+@producao_bp.route("/op/editar", methods=["POST"])
+@login_required
+def op_editar():
+    data = request.get_json(silent=True) or {}
+
+    machine_id = _sanitize_mid(_as_str(data.get("machine_id")))
+    os_ = _as_str(data.get("os"))
+    lote = _as_str(data.get("lote"))
+    operador = _as_str(data.get("operador"))
+
+    if not machine_id:
+        return jsonify({"error": "machine_id obrigatorio"}), 400
+    if not os_ or not lote or not operador:
+        return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
+
+    bobinas_list, bobina = _normalize_bobinas(data)
+    if bobinas_list is None:
+        return jsonify({"error": "Bobinas devem ser numeros (metros)"}), 400
+
+    gr_fio = _as_str(data.get("gr_fio"))
+    observacoes = _as_str(data.get("observacoes"))
+
+    with _op_lock:
+        op = op_active.get(machine_id)
+
+    if not op:
+        return jsonify({"error": "Nao existe OP ativa para esta maquina"}), 404
+
+    op_id = int(op.get("op_id") or 0)
+    if op_id <= 0:
+        return jsonify({"error": "OP ativa invalida"}), 500
+
+    payload = {
+        "os": os_,
+        "lote": lote,
+        "operador": operador,
+        "bobina": bobina,
+        "gr_fio": gr_fio,
+        "observacoes": observacoes,
+    }
+
+    try:
+        _update_op_row(op_id, payload)
+    except Exception:
+        return jsonify({"error": "Falha ao atualizar OP no banco"}), 500
+
+    with _op_lock:
+        op["os"] = os_
+        op["lote"] = lote
+        op["operador"] = operador
+        op["bobina"] = bobina
+        op["bobinas"] = bobinas_list
+        op["gr_fio"] = gr_fio
+        op["observacoes"] = observacoes
+        op_active[machine_id] = op
+
+    return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id})
 
 # =====================================================
 # OP - ENCERRAR (JSON)

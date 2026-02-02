@@ -1,4 +1,4 @@
-﻿feat(front): adicionar barra de rolagem no modal de OP
+﻿feat(front): bobinas em metros com entrada numerica
 
-- modal passa a respeitar max-height: 80vh
-- overflow-y: auto para rolar quando o conteudo ficar grande
+- campos de bobina agora sao numericos (metros)
+- valida somente numeros (type=number, min=0, step=1)
