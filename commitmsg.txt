@@ -1,1 +1,6 @@
-﻿fix(ui): forcar layout desktop em mobile via meta viewport width=1200 no base.html
+﻿feat(front): tornar OP ativa clicavel e editar no modal com lista de bobinas
+
+- OP ativa abre modal em modo editar (prefill dos dados atuais)
+- UI de multiplas bobinas com adicionar/remover
+- submit roteia: novo -> /producao/op/iniciar, editar -> /producao/op/editar
+- mantem compatibilidade via campo hidden op_bobina (primeira bobina)
