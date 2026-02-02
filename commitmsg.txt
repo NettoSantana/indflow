@@ -1,6 +1,4 @@
-﻿feat(front): tornar OP ativa clicavel e editar no modal com lista de bobinas
+﻿feat(front): adicionar barra de rolagem no modal de OP
 
-- OP ativa abre modal em modo editar (prefill dos dados atuais)
-- UI de multiplas bobinas com adicionar/remover
-- submit roteia: novo -> /producao/op/iniciar, editar -> /producao/op/editar
-- mantem compatibilidade via campo hidden op_bobina (primeira bobina)
+- modal passa a respeitar max-height: 80vh
+- overflow-y: auto para rolar quando o conteudo ficar grande

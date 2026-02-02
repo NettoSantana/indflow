@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-02 14:00 (America/Bahia)
-Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a lista de bobinas (front-end). + barra de rolagem no modal de OP para caber em telas menores.
+Ultimo recode: 2026-02-02 14:05 (America/Bahia)
+Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a lista de bobinas (front-end). + barra de rolagem no modal de OP para caber em telas menores. + bobinas em metros (campo numerico).
 -->
 
 {% extends "base.html" %}
@@ -240,7 +240,7 @@ Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a l
           <label class="mt-20">Lote:</label><input type="text" id="op_lote" class="input" required>
           <label class="mt-20">Operador:</label><input type="text" id="op_operador" class="input" required>
           <label class="mt-20">Bobinas (opcional):</label>
-          <div class="help-text">Adicione uma ou mais bobinas. Se ficar vazio, nenhuma bobina sera registrada.</div>
+          <div class="help-text">Adicione uma ou mais bobinas em metros (somente numeros). Se ficar vazio, nenhuma bobina sera registrada.</div>
           <div id="op_bobinas_list" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;"></div>
           <button id="btnAddBobina" type="button" class="btn btn-secondary" style="margin-top:10px;">Adicionar bobina</button>
           <input type="hidden" id="op_bobina" value="">
@@ -301,9 +301,11 @@ function _createBobinaRow(value){
   row.style.alignItems="center";
 
   const inp=document.createElement("input");
-  inp.type="text";
+  inp.type="number";
+  inp.min="0";
+  inp.step="1";
   inp.className="input";
-  inp.placeholder="Ex: B123";
+  inp.placeholder="Metros";
   inp.value=String(value||"");
   inp.style.flex="1";
 
