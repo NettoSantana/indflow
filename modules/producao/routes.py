@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-02 17:05 America/Bahia
-# MOTIVO: RECODE sem remover codigo. Corrigir falha ao salvar OP (DB_PATH via env INDFLOW_DB_PATH e placeholders do INSERT), persistir totais por OP (op_metros/op_pcs) e anexar no historico.
+# LAST_RECODE: 2026-02-02 20:15 America/Bahia
+# MOTIVO: Historico por UPSERT (30 dias): garantir linha diaria por maquina mesmo com zero, atualizar por upsert e anexar OPs como subitem em todos os dias do intervalo.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -67,6 +67,130 @@ DB_PATH = Path(__import__("os").environ.get("INDFLOW_DB_PATH", "indflow.db"))
 # =====================================================
 def _hoje_iso():
     return datetime.now().date().isoformat()
+
+def _last_n_days_iso(n: int):
+    """Retorna lista de datas YYYY-MM-DD dos ultimos n dias (inclui hoje), em ordem decrescente."""
+    try:
+        n = int(n or 0)
+    except Exception:
+        n = 0
+    if n <= 0:
+        n = 30
+    if n > 365:
+        n = 365
+
+    hoje = datetime.now().date()
+    out = []
+    for i in range(n):
+        out.append((hoje - timedelta(days=i)).isoformat())
+    return out
+
+
+def _ensure_range_rows(machine_id: str, days_desc: list[str]):
+    """Garante que exista 1 linha em producao_diaria para cada dia do intervalo (insert se faltar)."""
+    mid = (machine_id or "").strip()
+    if not mid:
+        return
+    if not isinstance(days_desc, list) or not days_desc:
+        return
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        meta_default = _buscar_meta_mais_recente(conn, mid)
+
+        placeholders = ",".join(["?"] * len(days_desc))
+        cur.execute(
+            f"""
+            SELECT data
+            FROM producao_diaria
+            WHERE machine_id = ?
+              AND data IN ({placeholders})
+            """,
+            [mid] + list(days_desc),
+        )
+        existing = set([r[0] for r in (cur.fetchall() or []) if r and r[0]])
+
+        for d in days_desc:
+            if d in existing:
+                continue
+            try:
+                cur.execute(
+                    """
+                    INSERT INTO producao_diaria (machine_id, data, produzido, meta)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (mid, d, 0, meta_default),
+                )
+            except Exception:
+                continue
+
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _fetch_producao_diaria_range(machine_id: str, days_desc: list[str]):
+    """Busca producao_diaria para os dias informados (retorna lista na mesma ordem days_desc)."""
+    mid = (machine_id or "").strip()
+    if not mid:
+        return []
+    if not isinstance(days_desc, list) or not days_desc:
+        return []
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        placeholders = ",".join(["?"] * len(days_desc))
+        cur.execute(
+            f"""
+            SELECT data, produzido, meta
+            FROM producao_diaria
+            WHERE machine_id = ?
+              AND data IN ({placeholders})
+            """,
+            [mid] + list(days_desc),
+        )
+        rows = cur.fetchall() or []
+        by_day = {}
+        for r in rows:
+            if not r:
+                continue
+            d = r[0]
+            by_day[d] = {
+                "machine_id": mid,
+                "data": d,
+                "produzido": int(r[1] or 0),
+                "meta": int(r[2] or 0),
+            }
+
+        out = []
+        for d in days_desc:
+            out.append(by_day.get(d, {"machine_id": mid, "data": d, "produzido": 0, "meta": 0}))
+        return out
+    except Exception:
+        return []
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
 
 def _buscar_meta_mais_recente(conn, machine_id: str) -> int:
     try:
@@ -504,7 +628,7 @@ def _safe_date_only(dt_str: str):
     return s[:10] if len(s) >= 10 else None
 
 
-def _iter_days_inclusive(start_day: str, end_day: str, max_days: int = 7):
+def _iter_days_inclusive(start_day: str, end_day: str, max_days: int = 40):
     """Gera dias YYYY-MM-DD do intervalo [start_day, end_day]."""
     try:
         d0 = datetime.fromisoformat(start_day).date()
@@ -581,6 +705,9 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 "started_at": r[8] or "",
                 "ended_at": r[9] or "",
                 "status": r[10] or "",
+                "op_metros": int(r[11] or 0),
+                "op_pcs": int(r[12] or 0),
+                "op_conv_m_por_pcs": float(r[13] or 0),
             }
         )
     return ops
@@ -649,29 +776,47 @@ def api_historico():
             _garantir_dia_atual_para_todas_maquinas()
     except Exception:
         pass
+    # Historico por UPSERT: sempre retornar os ultimos N dias, mesmo com produzido=0.
+    # Garante 1 linha por dia na tabela producao_diaria.
+    if not machine_id:
+        # Sem machine_id, mantemos comportamento antigo (lista resumida).
+        try:
+            rows = listar_historico(machine_id=machine_id, limit=limit)
+        except Exception:
+            rows = []
+    else:
+        days_desc = _last_n_days_iso(limit)
+        try:
+            _ensure_range_rows(machine_id, days_desc)
+        except Exception:
+            pass
 
-    try:
-        rows = listar_historico(machine_id=machine_id, limit=limit)
-    except Exception:
-        rows = []
+        rows = _fetch_producao_diaria_range(machine_id, days_desc)
 
     # -------------------------------------------------
     # Anexar OPs (ordens_producao) por dia no historico
     # -------------------------------------------------
+    
     ops_map = {}
     try:
         days = [str(r.get("data", "") or "").strip() for r in rows if str(r.get("data", "") or "").strip()]
         if days:
             day_min = min(days)
             day_max = max(days)
+
             ops = _fetch_ops_for_range(machine_id=machine_id, day_min=day_min, day_max=day_max)
+
             for op in ops:
                 mid = str(op.get("machine_id") or "").strip()
                 sd = _safe_date_only(op.get("started_at"))
                 ed = _safe_date_only(op.get("ended_at")) or sd
                 if not mid or not sd:
                     continue
-                ops_map.setdefault((mid, sd), []).append(op)
+
+                for d in _iter_days_inclusive(sd, ed, max_days=40):
+                    if d < day_min or d > day_max:
+                        continue
+                    ops_map.setdefault((mid, d), []).append(op)
     except Exception:
         ops_map = {}
 
@@ -690,7 +835,7 @@ def api_historico():
                 "pecas_boas": produzido,
                 "refugo_total": 0,
                 "meta": int(r.get("meta", 0) or 0),
-                "percentual": int(r.get("percentual", 0) or 0),
+                "percentual": (int((produzido * 100) / int(r.get("meta", 0) or 0)) if int(r.get("meta", 0) or 0) > 0 else 0),
                 "ops": ops_do_dia,
             }
         )

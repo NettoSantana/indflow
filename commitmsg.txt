@@ -1,5 +1,8 @@
-﻿feat(producao): registrar totais por OP (metros e pcs) no encerramento sem remover codigo
+﻿fix(producao): recode sem remover codigo; corrigir salvar OP e totais por OP
 
-- adiciona colunas op_metros/op_pcs/op_conv_m_por_pcs em ordens_producao (com migracao)
-- encerra OP salvando metros (soma bobinas) e pcs = floor(metros/conv_m_por_pcs)
-- historico inclui esses campos por OP
+- DB_PATH passa a usar INDFLOW_DB_PATH (/data/indflow.db)
+- sqlite connect com check_same_thread=False
+- corrige placeholders do INSERT de ordens_producao (18 colunas)
+- remove chave duplicada op_conv_m_por_pcs no payload
+- op_mem guarda bobinas e op_conv_m_por_pcs
+- historico passa a receber op_metros/op_pcs/op_conv_m_por_pcs nas OPs
