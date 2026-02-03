@@ -1,12 +1,10 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-02 22:40 (America/Bahia)
-Motivo: Corrigir UX do botao Ver JSON (modal com JSON do /machine/status e /producao/op/status). Exibir Hora Bahia em tempo real usando timeZone America/Bahia. Robustez no preload do formulario/tabela (tratamento de erros de fetch/JSON).
+Ultimo recode: 2026-02-02 23:30 (America/Bahia)
+Motivo: Ajustar front-end para aceitar resposta JSON aninhada (machine_status/op_status), adicionar botao Ver JSON e relogio Hora Bahia, e garantir preenchimento dos campos/tabela com timezone Bahia.
 -->
 
 {% extends "base.html" %}
-{% block title %}Configuração da Máquina{% endblock %}
-
 {% block content %}
 
 <style>
@@ -15,16 +13,15 @@ Motivo: Corrigir UX do botao Ver JSON (modal com JSON do /machine/status e /prod
   #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
   #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
 
-  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim)
-     Azul claro + branco, com "duas faixas" (topo mais claro / base mais azul). */
+  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim) */
   #tabela-horas tbody tr.turno-ativo{
-    background-color:#e0f2fe; /* fallback */
+    background-color:#e0f2fe;
     background-image:linear-gradient(180deg, #ffffff 0%, #e0f2fe 100%);
     border-top:1px solid #ffffff;
     border-bottom:1px solid #bfdbfe;
   }
   #tabela-horas tbody tr.turno-ativo:hover{
-    background-color:#bae6fd; /* fallback */
+    background-color:#bae6fd;
     background-image:linear-gradient(180deg, #f0f9ff 0%, #bae6fd 100%);
   }
 
@@ -132,26 +129,6 @@ Motivo: Corrigir UX do botao Ver JSON (modal com JSON do /machine/status e /prod
     max-height: 80vh;
     overflow-y: auto;
   }
-
-  .hora-pill{
-    border:1px solid #e5e7eb;
-    border-radius:999px;
-    padding:8px 12px;
-    background:#ffffff;
-    font-size:13px;
-    font-weight:900;
-    color:#0f172a;
-    user-select:none;
-  }
-  .json-pre{
-    margin:0;
-    white-space:pre-wrap;
-    word-break:break-word;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size:12px;
-    line-height:1.35;
-    color:#0f172a;
-  }
 </style>
 
 <div class="container">
@@ -161,10 +138,8 @@ Motivo: Corrigir UX do botao Ver JSON (modal com JSON do /machine/status e /prod
 
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
-
       <button id="btn-ver-json" type="button" class="btn btn-secondary">Ver JSON</button>
-
-      <div id="hora-bahia-pill" class="hora-pill" title="Hora atual na Bahia">Hora Bahia: <span id="hora-bahia">--:--</span></div>
+      <span id="hora-bahia" class="btn btn-secondary" style="cursor:default;">Hora Bahia: --:--:--</span>
 
       <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
       <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
@@ -281,14 +256,15 @@ Motivo: Corrigir UX do botao Ver JSON (modal com JSON do /machine/status e /prod
     </div>
   </div>
 
+
   <div class="modal-backdrop" id="jsonModalBackdrop" style="display:none;">
     <div class="modal" style="max-width:900px;">
       <div class="modal-header">
-        <div class="modal-title" id="jsonModalTitle">JSON</div>
+        <div class="modal-title">JSON (status da maquina)</div>
         <button class="modal-close" id="btnCloseJsonModal" type="button" aria-label="Fechar">x</button>
       </div>
       <div class="modal-body">
-        <pre class="json-pre" id="jsonModalPre">{}</pre>
+        <pre id="json-pre" style="white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.35; margin:0;"></pre>
       </div>
     </div>
   </div>
@@ -402,6 +378,7 @@ function _fillOpFormFromData(d){
   _setBobinasToUI(bobinas);
   _syncHiddenBobinaFirst();
 }
+
 function _showOp(info){
   const box=document.getElementById("op-ativo-box"),
         i=document.getElementById("op-ativo-info"),
@@ -422,6 +399,7 @@ function _showNoOp(){
   if(bn)bn.style.display="inline-block";
   if(be)be.style.display="none";
 }
+
 async function _getJson(url){
   try{
     const r=await fetch(url);
@@ -431,6 +409,7 @@ async function _getJson(url){
     return null;
   }
 }
+
 async function carregarOpUI(){
   const d=await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
   if(!d){_showNoOp();return;}
@@ -443,6 +422,7 @@ async function carregarOpUI(){
     _showNoOp();
   }
 }
+
 function openOpModal(mode){
   _setOpModalMode(mode);
   if(opModalMode==="edit"){
@@ -460,6 +440,7 @@ function closeOpModal(){
   const bd=document.getElementById("opModalBackdrop");
   if(bd)bd.style.display="none";
 }
+
 async function _postJson(url,p){
   const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
   let j=null;
@@ -467,6 +448,7 @@ async function _postJson(url,p){
   if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");}
   return j;
 }
+
 function initOpUI(){
   const bn=document.getElementById("btn-op-new"),
         be=document.getElementById("btn-op-end"),
@@ -539,70 +521,38 @@ function initOpUI(){
     }
   });
 }
+
 initOpUI();
 carregarOpUI();
 
-// ===============================
-// HORA BAHIA (TIMEZONE)
-// ===============================
-function _horaBahiaStr(){
-  try{
-    const fmt = new Intl.DateTimeFormat("pt-BR", {
-      timeZone: "America/Bahia",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    });
-    return fmt.format(new Date());
-  }catch(e){
-    const d = new Date();
-    return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
-  }
-}
-
-function atualizarHoraBahia(){
-  const el = document.getElementById("hora-bahia");
-  if(el) el.textContent = _horaBahiaStr();
-}
-atualizarHoraBahia();
-setInterval(atualizarHoraBahia, 10000);
+_initJsonUI();
+_startBahiaClock();
 
 // ===============================
-// MODAL JSON (DEBUG)
+// VER JSON (DEBUG)
 // ===============================
-function openJsonModal(title, obj){
+let __lastStatusPayload = null;
+
+function _openJsonModal(){
   const bd = document.getElementById("jsonModalBackdrop");
-  const t = document.getElementById("jsonModalTitle");
-  const p = document.getElementById("jsonModalPre");
-  if(t) t.textContent = title || "JSON";
-  if(p) p.textContent = JSON.stringify(obj, null, 2);
+  const pre = document.getElementById("json-pre");
+  if(pre) pre.textContent = JSON.stringify(__lastStatusPayload ?? {}, null, 2);
   if(bd) bd.style.display = "flex";
 }
 
-function closeJsonModal(){
+function _closeJsonModal(){
   const bd = document.getElementById("jsonModalBackdrop");
   if(bd) bd.style.display = "none";
 }
 
-(function initJsonUI(){
+function _initJsonUI(){
   const btn = document.getElementById("btn-ver-json");
   const bd = document.getElementById("jsonModalBackdrop");
   const bc = document.getElementById("btnCloseJsonModal");
-  if(bc) bc.addEventListener("click", closeJsonModal);
-  if(bd) bd.addEventListener("click", (e)=>{ if(e && e.target === bd) closeJsonModal(); });
-
-  if(btn){
-    btn.addEventListener("click", async ()=>{
-      try{
-        const status = await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
-        const op = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-        openJsonModal(`JSON - ${machine_id.toUpperCase()}`, { machine_status: status, op_status: op });
-      }catch(err){
-        alert(String(err && err.message ? err.message : err));
-      }
-    });
-  }
-})();
+  if(btn) btn.addEventListener("click", _openJsonModal);
+  if(bc) bc.addEventListener("click", _closeJsonModal);
+  if(bd) bd.addEventListener("click", (e)=>{ if(e && e.target === bd) _closeJsonModal(); });
+}
 
 // ===============================
 // TABELA FIXA 24H
@@ -619,6 +569,47 @@ function buildFaixas24(){
 }
 
 const HORAS_FIXAS_24 = buildFaixas24();
+
+// ===============================
+// RELOGIO: HORA BAHIA
+// ===============================
+function _bahiaParts(){
+  const d = new Date();
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Bahia",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    hour12: false
+  }).formatToParts(d);
+  const get = (t) => {
+    const p = parts.find(x => x.type === t);
+    return p ? p.value : "";
+  };
+  const y = get("year");
+  const m = get("month");
+  const da = get("day");
+  const hh = get("hour");
+  const mm = get("minute");
+  const ss = get("second");
+  return {
+    isoDate: `${y}-${m}-${da}`,
+    hour: Number(hh),
+    minute: Number(mm),
+    second: Number(ss),
+    label: `${hh}:${mm}:${ss}`
+  };
+}
+
+function _startBahiaClock(){
+  const el = document.getElementById("hora-bahia");
+  if(!el) return;
+  const tick = () => {
+    const p = _bahiaParts();
+    el.textContent = `Hora Bahia: ${p.label}`;
+  };
+  tick();
+  setInterval(tick, 1000);
+}
 
 // ===============================
 // TIME HELPERS
@@ -801,19 +792,11 @@ document.getElementById("config-form").addEventListener("submit", function(e){
 // ===============================
 function carregarTabela(){
   fetch(`/machine/status?machine_id=${machine_id}`)
-    .then(async (r) => {
-      const ct = (r.headers && r.headers.get) ? (r.headers.get("content-type") || "") : "";
-      if(!r.ok){
-        const txt = await r.text();
-        throw new Error(`Falha ao carregar status (HTTP ${r.status}). ${txt ? txt.slice(0,120) : ""}`);
-      }
-      if(!ct.includes("application/json")){
-        const txt = await r.text();
-        throw new Error(`Resposta nao e JSON. ${txt ? txt.slice(0,120) : ""}`);
-      }
-      return r.json();
-    })
-    .then(data => {
+    .then(r => r.json())
+    .then((payload) => {
+
+      __lastStatusPayload = payload;
+      const data = (payload && payload.machine_status) ? payload.machine_status : payload;
 
       document.getElementById("unidade_1").value = data.unidade_1 ?? "";
       document.getElementById("unidade_2").value = data.unidade_2 ?? "";
@@ -848,8 +831,8 @@ function carregarTabela(){
 
       const horaDiaAtual =
         (typeof data.ultima_hora === "number")
-          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
-          : new Date().getHours();
+          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? (_bahiaParts().hour))
+          : (_bahiaParts().hour);
 
       const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
       const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
@@ -949,10 +932,6 @@ function carregarTabela(){
 
         tbody.appendChild(tr);
       }
-    })
-    .catch((err) => {
-      console.error("[config_maquina] erro ao carregarTabela", err);
-      alert(String(err && err.message ? err.message : err));
     });
 }
 

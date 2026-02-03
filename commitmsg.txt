@@ -1,5 +1,5 @@
-﻿chore: config_maquina debug json + hora America/Bahia no front
+﻿fix(config_maquina): ver json e hora bahia + tratamento de erro
 
-- adiciona botao "Ver JSON" e modal mostrando retorno bruto de /machine/status
-- padroniza hora do front-end usando America/Bahia via Intl.DateTimeFormat
-- fallback de dia_ref para data da Bahia quando backend nao enviar
+- Botao Ver JSON abre modal e mostra JSON de /machine/status e /producao/op/status
+- Exibe Hora Bahia (America/Bahia) e atualiza a cada 10s
+- Melhor tratamento de erro quando backend nao retorna JSON
