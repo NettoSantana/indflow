@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 09:14 America/Bahia
-# MOTIVO: Adicionar registro de timestamp de producao (OPCAO 2) no /machine/update sem alterar logica existente.
-# INFO: lines_total=1336 lines_changed=~70
+# LAST_RECODE: 2026-02-03 14:35 America/Bahia
+# MOTIVO: Usar timestamp vindo do ESP (ts_ms) para registrar eventos de producao no /machine/update, mantendo fallback para now_bahia quando ts_ms nao vier, sem alterar logica existente.
+# INFO: lines_total=1336 lines_changed=~85
 
 # modules/machine_routes.py
 import os
@@ -244,6 +244,52 @@ def _get_cliente_id_for_request() -> str | None:
     cid = (session.get("cliente_id") or "").strip()
     return cid or None
 
+
+def _get_ts_ms_from_payload(data: dict) -> int | None:
+    """
+    Timestamp preferencial vindo do ESP (epoch ms).
+    Aceita chaves comuns:
+      - ts_ms
+      - timestamp_ms
+      - ts
+      - t_ms
+    Regras:
+      - retorna int(ms) se parecer valido
+      - senao retorna None (caller aplica fallback)
+    """
+    if not isinstance(data, dict):
+        return None
+
+    candidates = ["ts_ms", "timestamp_ms", "ts", "t_ms"]
+    v = None
+    for k in candidates:
+        if k in data:
+            v = data.get(k)
+            break
+
+    if v is None:
+        return None
+
+    try:
+        iv = int(v)
+    except Exception:
+        try:
+            iv = int(float(v))
+        except Exception:
+            return None
+
+    # valida simples: >= 2020-01-01 e <= now + 7 dias
+    try:
+        min_ok = 1577836800000  # 2020-01-01 00:00:00 UTC em ms
+        now_ms = int(now_bahia().timestamp() * 1000)
+        max_ok = now_ms + (7 * 24 * 60 * 60 * 1000)
+        if iv < min_ok or iv > max_ok:
+            return None
+    except Exception:
+        # se der erro na validacao, ainda assim nao confia
+        return None
+
+    return iv
 
 
 def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -> None:
@@ -652,7 +698,6 @@ def configurar_maquina():
     except Exception:
         pass
 
-
     aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
     salvar_conversao(m, data)
 
@@ -764,8 +809,19 @@ def update_machine():
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
 
     try:
+        # timestamp preferencial vindo do ESP (epoch ms)
+        ts_ms_in = _get_ts_ms_from_payload(data)
+
         agora_lc = now_bahia()
         now_ms_lc = int(agora_lc.timestamp() * 1000)
+
+        # fallback: se nao vier ts_ms do ESP, usa now do servidor (compatibilidade)
+        effective_ts_ms = int(ts_ms_in) if ts_ms_in is not None else int(now_ms_lc)
+
+        # guarda debug do ultimo ts visto (para diagnostico)
+        m["_last_esp_ts_ms_seen"] = effective_ts_ms
+        m["_last_esp_ts_source"] = "esp" if ts_ms_in is not None else "server_fallback"
+
         esp_now = int(m.get("esp_absoluto", 0) or 0)
         esp_prev = m.get("_last_esp_abs_seen")
         if esp_prev is None:
@@ -780,7 +836,7 @@ def update_machine():
                 _registrar_evento_producao(
                     cliente_id=str(cliente_id),
                     machine_id=str(machine_id),
-                    ts_ms=int(now_ms_lc),
+                    ts_ms=int(effective_ts_ms),
                     esp_absoluto=int(esp_now),
                     delta=int(delta_evt),
                     created_at=created_at_evt,
@@ -788,10 +844,12 @@ def update_machine():
         except Exception:
             pass
 
+        # _last_count_ts_ms deve acompanhar o timestamp do evento (preferencialmente do ESP)
         if esp_now != esp_prev:
-            m["_last_count_ts_ms"] = now_ms_lc
+            m["_last_count_ts_ms"] = int(effective_ts_ms)
         elif m.get("_last_count_ts_ms") is None:
-            m["_last_count_ts_ms"] = now_ms_lc
+            m["_last_count_ts_ms"] = int(effective_ts_ms)
+
         m["_last_esp_abs_seen"] = esp_now
     except Exception:
         pass
@@ -870,6 +928,8 @@ def update_machine():
         "linked_machine": linked_machine or None,
         "baseline_initialized": bool(baseline_initialized),
         "allow_takeover": bool(allow_takeover),
+        "ts_source": (m.get("_last_esp_ts_source") or None),
+        "ts_ms": (m.get("_last_esp_ts_ms_seen") or None),
     })
 
 
@@ -1087,7 +1147,6 @@ def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
-
     cid_req = None
     try:
         cid_req = _get_cliente_id_for_request()
@@ -1143,7 +1202,6 @@ def machine_status():
         m["np_por_hora_24"] = _load_np_por_hora_24_scoped(machine_id, dia_ref, cid)
     except Exception:
         m["np_por_hora_24"] = [0] * 24
-
 
     try:
         exib = [0] * 24
@@ -1335,5 +1393,5 @@ def historico_producao_api():
 
 # GIT:
 # git add -A
-# git commit -m "feat(machine_routes): registrar timestamp de producao no /machine/update (opcao 2)"
+# git commit -m "feat(machine_routes): usar ts_ms do ESP em producao_evento (fallback server)"
 # git push
