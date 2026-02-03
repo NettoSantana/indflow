@@ -1,5 +1,4 @@
-﻿fix(machine_routes): /admin/reset-hour agora zera DIA + HORA por padrao
+﻿feat(indflow): historico por cliente_id + eventos de producao
 
-- Mantem compatibilidade: payload {"scope":"hour"} faz reset apenas da hora
-- Padrao: reset_contexto + reancora ultimo_dia + zera acumuladores de hora
-- Reforca persistencia do baseline (raw e scoped) para evitar divergencia de leitura entre telas/rotas
+- indflow/modules/machine_routes.py: registrar eventos em producao_evento (ts_ms) no /machine/update e manter logica existente; /api/producao/historico filtra por cliente_id
+- modules/producao/routes.py: ajustes de historico/OPs (fallback e timezone) conforme ultimo recode

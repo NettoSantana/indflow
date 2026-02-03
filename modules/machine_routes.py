@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 14:35 America/Bahia
-# MOTIVO: Usar timestamp vindo do ESP (ts_ms) para registrar eventos de producao no /machine/update, mantendo fallback para now_bahia quando ts_ms nao vier, sem alterar logica existente.
-# INFO: lines_total=1336 lines_changed=~85
+# LAST_RECODE: 2026-02-03 19:10 America/Bahia
+# MOTIVO: Garantir uso do ts_ms do ESP no /machine/update (producao_evento.ts_ms e _last_count_ts_ms) com sanity-check e fallback server, e expor ts_source/ts_ms para debug.
+# INFO: lines_total=1404 lines_changed=~25
 
 # modules/machine_routes.py
 import os
@@ -822,6 +822,12 @@ def update_machine():
         m["_last_esp_ts_ms_seen"] = effective_ts_ms
         m["_last_esp_ts_source"] = "esp" if ts_ms_in is not None else "server_fallback"
 
+
+        try:
+            # debug humano: iso local (Bahia) derivado do timestamp efetivo usado no evento
+            m["_last_esp_ts_iso_local"] = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            m["_last_esp_ts_iso_local"] = None
         esp_now = int(m.get("esp_absoluto", 0) or 0)
         esp_prev = m.get("_last_esp_abs_seen")
         if esp_prev is None:
@@ -845,11 +851,12 @@ def update_machine():
             pass
 
         # _last_count_ts_ms deve acompanhar o timestamp do evento (preferencialmente do ESP)
-        if esp_now != esp_prev:
+        # Regra: só atualiza quando houve avanço real (delta > 0). Isso evita "pular" timestamp em reset/recuo do contador.
+        if delta_evt > 0:
             m["_last_count_ts_ms"] = int(effective_ts_ms)
         elif m.get("_last_count_ts_ms") is None:
+            # inicializa para evitar sem_contar negativo/bug em status
             m["_last_count_ts_ms"] = int(effective_ts_ms)
-
         m["_last_esp_abs_seen"] = esp_now
     except Exception:
         pass
