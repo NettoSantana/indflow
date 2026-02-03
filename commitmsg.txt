@@ -1,4 +1,5 @@
-﻿fix(producao): somar pcs da OP no historico diario ao encerrar
+﻿feat(producao): historico por upsert com contagem ao vivo + timezone Bahia
 
-- ao encerrar OP, faz upsert incremental em producao_diaria (produzido += op_pcs)
-- mantem historico por upsert 30 dias e OPs como subitem
+- padroniza datas/horas no backend em America/Bahia (env TZ ou default)
+- historico: garante 30 dias via upsert e sincroniza produzido do dia usando soma de producao_horaria
+- evita historico zerado enquanto a maquina esta produzindo (sem depender de fechamento do dia)

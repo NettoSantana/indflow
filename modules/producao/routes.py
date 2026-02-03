@@ -1,6 +1,6 @@
 # PATH: modules/producao/routes.py
-# LAST_RECODE: 2026-02-02 21:33 America/Bahia
-# MOTIVO: Historico por UPSERT (30 dias) com contagem ao vivo via producao_horaria e padronizacao de horario (America/Bahia).
+# LAST_RECODE: 2026-02-02 22:10 America/Bahia
+# MOTIVO: Corrigir timezone (America/Bahia) em datas/horas (ISO com -03:00) e garantir contagem ao vivo no historico via detecao automatica da tabela de producao; OP ativa retorna op_metros/op_pcs calculados na hora (bobinas + conversao, floor).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import sqlite3
 from pathlib import Path
 from threading import Lock
+import os
 
 # =====================================================
 # AUTH
@@ -93,10 +94,12 @@ DB_PATH = Path(__import__("os").environ.get("INDFLOW_DB_PATH", "indflow.db"))
 #   mesmo com producao zero, para permitir listar OPs do dia.
 # =====================================================
 def _hoje_iso():
-    return datetime.now().date().isoformat()
+    # Data local (Bahia) para virar o dia corretamente no Brasil
+    return _now_local().date().isoformat()
+
 
 def _last_n_days_iso(n: int):
-    """Retorna lista de datas YYYY-MM-DD dos ultimos n dias (inclui hoje), em ordem decrescente."""
+    """Retorna lista de datas YYYY-MM-DD dos ultimos n dias (inclui hoje), em ordem decrescente, no fuso local."""
     try:
         n = int(n or 0)
     except Exception:
@@ -105,6 +108,13 @@ def _last_n_days_iso(n: int):
         n = 30
     if n > 365:
         n = 365
+
+    hoje = _now_local().date()
+    out = []
+    for i in range(n):
+        out.append((hoje - timedelta(days=i)).isoformat())
+    return out
+
 
     hoje = datetime.now().date()
     out = []
@@ -222,24 +232,95 @@ def _fetch_producao_diaria_range(machine_id: str, days_desc: list[str]):
 
 def _sum_producao_horaria_pcs(conn, machine_id: str, dia_iso: str) -> int:
     """
-    Soma a producao (pcs) registrada na tabela producao_horaria para um dia.
-    Isso permite que o Historico reflita a contagem "ao vivo" (por hora),
-    sem depender do fechamento do dia.
+    Soma a producao (pcs) do dia a partir do banco INDFLOW.
+
+    O projeto evoluiu e os nomes de tabela/colunas podem variar entre ambientes.
+    Entao aqui tentamos, em ordem:
+      1) Tabela producao_horaria (colunas mais comuns)
+      2) Qualquer tabela que tenha machine_id + data (ou data_ref) + produzido (ou pecas_boas)
     """
+    mid = (machine_id or "").strip()
+    dia = (dia_iso or "").strip()
+    if not mid or not dia:
+        return 0
+
+    def _try_query(sql, params):
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            return int(row[0] or 0) if row else 0
+        except Exception:
+            return None
+
+    # 1) Candidatos diretos
+    direct_candidates = [
+        ("producao_horaria", "data_ref", "produzido"),
+        ("producao_horaria", "data", "produzido"),
+        ("producao_horaria", "dia", "produzido"),
+        ("producao_horaria", "data_ref", "pecas_boas"),
+        ("producao_horaria", "data", "pecas_boas"),
+    ]
+
+    for table, day_col, prod_col in direct_candidates:
+        val = _try_query(
+            f"SELECT COALESCE(SUM(COALESCE({prod_col}, 0)), 0) FROM {table} WHERE machine_id = ? AND {day_col} = ?",
+            (mid, dia),
+        )
+        if val is not None:
+            return int(val)
+
+    # 2) Heuristica: varrer schema procurando uma tabela compativel
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT COALESCE(SUM(COALESCE(produzido, 0)), 0)
-            FROM producao_horaria
-            WHERE machine_id = ? AND data_ref = ?
-            """,
-            (machine_id, dia_iso),
-        )
-        row = cur.fetchone()
-        return int(row[0] or 0) if row else 0
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [r[0] for r in (cur.fetchall() or []) if r and r[0]]
     except Exception:
-        return 0
+        tables = []
+
+    day_cols = ("data_ref", "data", "dia", "date")
+    prod_cols = ("produzido", "pecas_boas", "pcs", "count", "total")
+
+    for table in tables:
+        # ignora tabelas internas
+        if table.startswith("sqlite_"):
+            continue
+        try:
+            cur = conn.cursor()
+            cur.execute(f"PRAGMA table_info({table})")
+            cols = [c[1] for c in (cur.fetchall() or []) if c and len(c) > 1]
+            cols_l = [c.lower() for c in cols]
+        except Exception:
+            continue
+
+        if "machine_id" not in cols_l:
+            continue
+
+        day_col = None
+        for c in day_cols:
+            if c in cols_l:
+                # pega o nome original (case)
+                day_col = cols[cols_l.index(c)]
+                break
+        if not day_col:
+            continue
+
+        prod_col = None
+        for c in prod_cols:
+            if c in cols_l:
+                prod_col = cols[cols_l.index(c)]
+                break
+        if not prod_col:
+            continue
+
+        val = _try_query(
+            f"SELECT COALESCE(SUM(COALESCE({prod_col}, 0)), 0) FROM {table} WHERE machine_id = ? AND {day_col} = ?",
+            (mid, dia),
+        )
+        if val is not None:
+            return int(val)
+
+    return 0
 
 def _sync_producao_diaria_from_horaria_range(machine_id: str, days_desc: list[str]):
     """
@@ -490,7 +571,8 @@ except Exception:
 
 
 def _now_iso():
-    return datetime.now().isoformat(timespec="seconds")
+    # ISO com timezone (-03:00) no fuso local
+    return _now_local().isoformat(timespec="seconds")
 
 
 def _sanitize_mid(v: str) -> str:
@@ -810,6 +892,46 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     return ops
 
 
+
+
+def _enriquecer_op_para_json(op: dict) -> dict:
+    """
+    Garante que OP ATIVA sempre tenha op_metros/op_pcs calculados na hora (opcao B),
+    usando bobinas + conversao (conv_m_por_pcs), com floor.
+    """
+    if not isinstance(op, dict):
+        return op
+
+    status = str(op.get("status") or "").strip().upper()
+    if status != "ATIVA":
+        return op
+
+    # bobinas: preferir lista, senao parse do texto
+    bobinas = op.get("bobinas")
+    if not isinstance(bobinas, list) or bobinas is None:
+        bobinas = _parse_bobinas_from_str(op.get("bobina") or "") or []
+
+    try:
+        metros = int(sum(int(x or 0) for x in bobinas))
+    except Exception:
+        metros = 0
+
+    conv = 0.0
+    try:
+        conv = float(op.get("op_conv_m_por_pcs") or 0)
+    except Exception:
+        conv = 0.0
+    if conv <= 0:
+        conv = _get_conv_m_por_pcs(op.get("machine_id") or "")
+
+    pcs = _calc_pcs_from_metros(metros, conv)
+
+    op2 = dict(op)
+    op2["op_metros"] = int(metros or 0)
+    op2["op_pcs"] = int(pcs or 0)
+    op2["op_conv_m_por_pcs"] = float(conv or 0)
+    return op2
+
 # =====================================================
 # REDIRECIONAR /producao PARA /
 # =====================================================
@@ -930,7 +1052,8 @@ def api_historico():
         produzido = int(r.get("produzido", 0) or 0)
         mid = str(r.get("machine_id", "") or "").strip()
         dia = str(r.get("data", "") or "").strip()
-        ops_do_dia = ops_map.get((mid, dia), []) if (mid and dia) else []
+        ops_do_dia_raw = ops_map.get((mid, dia), []) if (mid and dia) else []
+        ops_do_dia = [_enriquecer_op_para_json(o) for o in (ops_do_dia_raw or [])]
 
         out.append(
             {
@@ -1154,7 +1277,9 @@ def op_status():
             "baseline": op.get("baseline") or {},
             "unidade_1": op.get("unidade_1") or "",
             "unidade_2": op.get("unidade_2") or "",
-            "op_conv_m_por_pcs": op.get("op_conv_m_por_pcs") or 0,
+            "op_metros": _enriquecer_op_para_json(op).get("op_metros", 0),
+            "op_pcs": _enriquecer_op_para_json(op).get("op_pcs", 0),
+            "op_conv_m_por_pcs": _enriquecer_op_para_json(op).get("op_conv_m_por_pcs", 0),
         }
     )
 
@@ -1236,8 +1361,8 @@ def op_iniciar():
         "baseline_pcs": baseline_pcs,
         "baseline_u1": baseline_u1,
         "baseline_u2": baseline_u2,
-        "op_metros": 0,
-        "op_pcs": 0,
+        "op_metros": int(sum(int(x or 0) for x in (bobinas_list or []))) if (bobinas_list or []) else 0,
+        "op_pcs": _calc_pcs_from_metros(int(sum(int(x or 0) for x in (bobinas_list or []))) if (bobinas_list or []) else 0, _get_conv_m_por_pcs(machine_id)),
         "op_conv_m_por_pcs": _get_conv_m_por_pcs(machine_id),
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
@@ -1262,6 +1387,8 @@ def op_iniciar():
         "baseline": {"pcs": baseline_pcs, "u1": baseline_u1, "u2": baseline_u2},
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
+        "op_metros": row_payload.get("op_metros") or 0,
+        "op_pcs": row_payload.get("op_pcs") or 0,
         "op_conv_m_por_pcs": row_payload.get("op_conv_m_por_pcs") or 0,
     }
 
@@ -1341,6 +1468,17 @@ def op_editar():
         op["bobinas"] = bobinas_list
         op["gr_fio"] = gr_fio
         op["observacoes"] = observacoes
+        # Recalcula totais da OP ativa (opcao B) para refletir no Historico/Status
+        try:
+            metros_tmp = int(sum(int(x or 0) for x in (bobinas_list or [])))
+        except Exception:
+            metros_tmp = 0
+        conv_tmp = _get_conv_m_por_pcs(machine_id)
+        pcs_tmp = _calc_pcs_from_metros(metros_tmp, conv_tmp)
+        op["op_metros"] = int(metros_tmp or 0)
+        op["op_pcs"] = int(pcs_tmp or 0)
+        op["op_conv_m_por_pcs"] = float(conv_tmp or 0)
+
         op_active[machine_id] = op
 
     return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id})
