@@ -1,6 +1,4 @@
-﻿fix(producao): historico com contagem ao vivo + timezone Bahia (-03:00) + OP ativa com totais
+﻿fix(producao): historico nao fica zerado + timezone Bahia no JSON
 
-- started_at/ended_at em ISO com timezone America/Bahia
-- historico soma producao do dia detectando automaticamente tabela/colunas no SQLite
-- OP ativa retorna op_metros/op_pcs calculados (bobinas + conversao, floor) no historico e no /op/status
-- adiciona import os (corrige _get_tz)
+- historico: se nao achar contagem real no DB, produzido/pecas_boas = soma(op_pcs das OPs do dia
+- started_at/ended_at convertidos para America/Bahia (-03:00), assumindo UTC quando naive

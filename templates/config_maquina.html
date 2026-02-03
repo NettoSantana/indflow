@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-02 14:05 (America/Bahia)
-Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a lista de bobinas (front-end). + barra de rolagem no modal de OP para caber em telas menores. + bobinas em metros (campo numerico).
+Ultimo recode: 2026-02-02 22:40 (America/Bahia)
+Motivo: Adicionar debug de JSON do /machine/status e padronizar hora do front-end para America/Bahia (sem depender do fuso do servidor).
 -->
 
 {% extends "base.html" %}
@@ -140,6 +140,8 @@ Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a l
 
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
+      <button id="btn-debug-json" type="button" class="btn btn-secondary">Ver JSON</button>
+      <div id="bahia-clock" style="font-size:12px; font-weight:700; color:#334155; padding:6px 10px; border:1px solid #e5e7eb; border-radius:12px; background:#ffffff;">Hora Bahia: --:--</div>
 
       <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
       <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
@@ -253,7 +255,24 @@ Motivo: OP ativa clicavel para editar no mesmo modal do Novo OP, com suporte a l
         </form>
         <div class="help-text" style="margin-top:10px;">Inicio e fim da OP sao automaticos (ao iniciar e encerrar).</div>
       </div>
+    
+  <div class="modal-backdrop" id="debugModalBackdrop" style="display:none;">
+    <div class="modal" style="max-width:980px;">
+      <div class="modal-header">
+        <div class="modal-title" id="debugModalTitle">Debug JSON</div>
+        <button class="modal-close" id="btnCloseDebugModal" type="button" aria-label="Fechar">x</button>
+      </div>
+      <div class="modal-body">
+        <div class="help-text" style="margin-bottom:10px;">
+          Este painel mostra o retorno bruto do endpoint /machine/status para a maquina atual.
+          Use para validar fuso horario, producao por hora e outros campos.
+        </div>
+        <pre id="debugJsonPre" style="white-space:pre-wrap; word-break:break-word; background:#0b1220; color:#e2e8f0; padding:12px; border-radius:12px; overflow:auto; max-height:60vh; font-size:12px; line-height:1.35;"></pre>
+      </div>
     </div>
+  </div>
+
+</div>
   </div>
 
   <h2 class="section-title mt-30">Distribuicao da Meta por Hora</h2>
@@ -442,6 +461,48 @@ function initOpUI(){
     try{
       await _postJson("/producao/op/encerrar",{machine_id:machine_id});
       await carregarOpUI();
+
+// ===============================
+// DEBUG JSON (/machine/status)
+// ===============================
+async function openDebugModal(){
+  try{
+    const bd = document.getElementById("debugModalBackdrop");
+    const pre = document.getElementById("debugJsonPre");
+    if(!bd || !pre) return;
+
+    pre.textContent = "Carregando...";
+    bd.style.display = "flex";
+
+    const payload = await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
+    if(!payload){
+      pre.textContent = "Falha ao carregar /machine/status (resposta vazia ou nao-OK).";
+      return;
+    }
+    pre.textContent = JSON.stringify(payload, null, 2);
+  }catch(err){
+    const pre = document.getElementById("debugJsonPre");
+    if(pre) pre.textContent = String(err && err.message ? err.message : err);
+  }
+}
+
+function closeDebugModal(){
+  const bd = document.getElementById("debugModalBackdrop");
+  if(bd) bd.style.display = "none";
+}
+
+(function initDebugUI(){
+  const btn = document.getElementById("btn-debug-json");
+  const bd  = document.getElementById("debugModalBackdrop");
+  const bc  = document.getElementById("btnCloseDebugModal");
+  if(btn) btn.addEventListener("click", openDebugModal);
+  if(bc) bc.addEventListener("click", closeDebugModal);
+  if(bd) bd.addEventListener("click", (e)=>{ if(e && e.target === bd) closeDebugModal(); });
+
+  refreshBahiaClock();
+  setInterval(refreshBahiaClock, 15000);
+})();
+
     }catch(err){
       alert(String(err&&err.message?err.message:err));
     }
@@ -524,6 +585,53 @@ const HORAS_FIXAS_24 = buildFaixas24();
 // ===============================
 // TIME HELPERS
 // ===============================
+function getBahiaNow(){
+  try{
+    const dtf = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Bahia",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false
+    });
+    const parts = dtf.formatToParts(new Date());
+    const map = {};
+    parts.forEach(p => { if(p && p.type) map[p.type] = p.value; });
+    const y = map.year || "1970";
+    const mo = map.month || "01";
+    const d = map.day || "01";
+    const h = map.hour || "00";
+    const mi = map.minute || "00";
+    const s = map.second || "00";
+    return {
+      isoDate: `${y}-${mo}-${d}`,
+      hour: Number(h),
+      minute: Number(mi),
+      second: Number(s),
+      hhmm: `${h}:${mi}`
+    };
+  }catch(e){
+    const now = new Date();
+    return {
+      isoDate: now.toISOString().slice(0,10),
+      hour: now.getHours(),
+      minute: now.getMinutes(),
+      second: now.getSeconds(),
+      hhmm: `${String(now.getHours()).padStart(2,"0")}:${String(now.getMinutes()).padStart(2,"0")}`
+    };
+  }
+}
+
+function refreshBahiaClock(){
+  const el = document.getElementById("bahia-clock");
+  if(!el) return;
+  const b = getBahiaNow();
+  el.textContent = `Hora Bahia: ${b.hhmm}`;
+}
+
 function parseHourFromTimeStr(s){
   if(!s || typeof s !== "string") return null;
   const parts = s.split(":");
@@ -738,10 +846,10 @@ function carregarTabela(){
 
       const horaDiaAtual =
         (typeof data.ultima_hora === "number")
-          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
-          : new Date().getHours();
+          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? getBahiaNow().hour)
+          : getBahiaNow().hour;
 
-      const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
+      const diaRef = data.ultimo_dia ?? (data.dia_ref ?? getBahiaNow().isoDate);
       const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
 
       const tbody = document.querySelector("#tabela-horas tbody");
