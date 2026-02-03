@@ -1,6 +1,4 @@
-﻿feat(producao): historico por upsert (30 dias) com dias vazios e OPs como subitem
+﻿fix(producao): somar pcs da OP no historico diario ao encerrar
 
-- historico retorna sempre ultimos 30 dias mesmo com produzido=0
-- garante linha diaria em producao_diaria para cada dia do intervalo (insert se faltar)
-- anexa OPs como subitem em todos os dias atravessados pela OP
-- inclui op_metros/op_pcs/op_conv_m_por_pcs nas OPs do historico
+- ao encerrar OP, faz upsert incremental em producao_diaria (produzido += op_pcs)
+- mantem historico por upsert 30 dias e OPs como subitem

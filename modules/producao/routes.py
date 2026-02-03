@@ -1,9 +1,10 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-02 20:55 America/Bahia
-# MOTIVO: Historico por UPSERT (30 dias) com OPs como subitem; ao encerrar OP, somar op_pcs na producao_diaria do dia via UPSERT incremental (produzido += op_pcs).
+# PATH: modules/producao/routes.py
+# LAST_RECODE: 2026-02-02 21:33 America/Bahia
+# MOTIVO: Historico por UPSERT (30 dias) com contagem ao vivo via producao_horaria e padronizacao de horario (America/Bahia).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import sqlite3
 from pathlib import Path
 from threading import Lock
@@ -35,6 +36,32 @@ except Exception:
 # BLUEPRINT
 # =====================================================
 producao_bp = Blueprint("producao", __name__, template_folder="templates")
+
+# ------------------------------------------------------------
+# TIMEZONE
+# ------------------------------------------------------------
+_TZ_CACHE = None
+
+def _get_tz():
+    """
+    Retorna o fuso horario usado no backend.
+    Padrao: America/Bahia (Horario da Bahia/Brasil).
+    Pode ser sobrescrito por env TZ (ex: America/Bahia).
+    """
+    global _TZ_CACHE
+    if _TZ_CACHE is not None:
+        return _TZ_CACHE
+    tz_name = (os.getenv("TZ") or "America/Bahia").strip() or "America/Bahia"
+    try:
+        _TZ_CACHE = ZoneInfo(tz_name)
+    except Exception:
+        _TZ_CACHE = ZoneInfo("America/Bahia")
+    return _TZ_CACHE
+
+def _now_local():
+    """Agora no fuso local."""
+    return datetime.now(_get_tz())
+
 
 # =====================================================
 # CONTEXTO EM MEMORIA (MESMO PADRAO DO SERVER)
@@ -191,6 +218,76 @@ def _fetch_producao_diaria_range(machine_id: str, days_desc: list[str]):
         except Exception:
             pass
 
+
+
+def _sum_producao_horaria_pcs(conn, machine_id: str, dia_iso: str) -> int:
+    """
+    Soma a producao (pcs) registrada na tabela producao_horaria para um dia.
+    Isso permite que o Historico reflita a contagem "ao vivo" (por hora),
+    sem depender do fechamento do dia.
+    """
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(COALESCE(produzido, 0)), 0)
+            FROM producao_horaria
+            WHERE machine_id = ? AND data_ref = ?
+            """,
+            (machine_id, dia_iso),
+        )
+        row = cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+
+def _sync_producao_diaria_from_horaria_range(machine_id: str, days_desc: list[str]):
+    """
+    Para cada dia em days_desc, faz UPSERT em producao_diaria usando a soma de producao_horaria.
+    Mantem a meta existente quando ja cadastrada (>0).
+    """
+    mid = (machine_id or "").strip()
+    if not mid or not days_desc:
+        return
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        meta_default = _buscar_meta_mais_recente(conn, mid)
+
+        for dia in days_desc:
+            pcs = _sum_producao_horaria_pcs(conn, mid, dia)
+
+            # UPSERT: produzido = pcs (valor absoluto do dia), preservando meta se ja existir.
+            cur.execute(
+                """
+                INSERT INTO producao_diaria (machine_id, data, produzido, meta)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(machine_id, data) DO UPDATE SET
+                    produzido = excluded.produzido,
+                    meta = CASE
+                        WHEN COALESCE(producao_diaria.meta, 0) > 0 THEN producao_diaria.meta
+                        ELSE excluded.meta
+                    END
+                """,
+                (mid, dia, int(pcs or 0), int(meta_default or 0)),
+            )
+
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 def _buscar_meta_mais_recente(conn, machine_id: str) -> int:
     try:
@@ -791,6 +888,14 @@ def api_historico():
         except Exception:
             pass
 
+
+        # Sincronizar historico diario com a contagem "ao vivo" (producao_horaria).
+        # Assim, a tabela do Historico nao fica zerada enquanto a maquina esta produzindo.
+        try:
+            _sync_producao_diaria_from_horaria_range(machine_id, days_desc)
+        except Exception:
+            pass
+
         rows = _fetch_producao_diaria_range(machine_id, days_desc)
 
     # -------------------------------------------------
@@ -1302,4 +1407,3 @@ def op_encerrar():
         op_active.pop(machine_id, None)
 
     return jsonify({"status": "ok", "active": False, "machine_id": machine_id, "ended_at": ended_at, "op_metros": op_metros, "op_pcs": op_pcs, "op_conv_m_por_pcs": conv})
-
