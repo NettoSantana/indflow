@@ -1,6 +1,7 @@
-# Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-02-03 07:41 (America/Bahia)
-# Motivo: Botão 'Zerar Producao' (/admin/reset-hour) agora zera DIA + HORA por padrão; mantém compatibilidade com reset apenas da hora via payload {"scope":"hour"} e reforça persistência de baseline (raw e scoped).
+# PATH: indflow/modules/machine_routes.py
+# LAST_RECODE: 2026-02-03 09:14 America/Bahia
+# MOTIVO: Adicionar registro de timestamp de producao (OPCAO 2) no /machine/update sem alterar logica existente.
+# INFO: lines_total=1336 lines_changed=~70
 
 # modules/machine_routes.py
 import os
@@ -535,6 +536,48 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
     conn.commit()
 
 
+def _ensure_producao_evento_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS producao_evento (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id TEXT,
+            machine_id TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            esp_absoluto INTEGER NOT NULL,
+            delta INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_evento_mid_ts ON producao_evento(machine_id, ts_ms)")
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_evento_cid_mid_ts ON producao_evento(cliente_id, machine_id, ts_ms)")
+    except Exception:
+        pass
+    conn.commit()
+
+
+def _registrar_evento_producao(cliente_id: str, machine_id: str, ts_ms: int, esp_absoluto: int, delta: int, created_at: str) -> None:
+    if delta <= 0:
+        return
+
+    conn = get_db()
+    try:
+        _ensure_producao_evento_table(conn)
+        conn.execute(
+            """
+            INSERT INTO producao_evento (cliente_id, machine_id, ts_ms, esp_absoluto, delta, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (cliente_id, machine_id, int(ts_ms), int(esp_absoluto), int(delta), created_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @machine_bp.route("/admin/hard-reset", methods=["POST"])
 def admin_hard_reset():
     if not _admin_token_ok():
@@ -728,6 +771,23 @@ def update_machine():
         if esp_prev is None:
             esp_prev = esp_now
         esp_prev = int(esp_prev)
+
+        # OPCAO 2 (timestamp): registra evento de producao quando contador absoluto avanca
+        try:
+            delta_evt = esp_now - esp_prev
+            if delta_evt > 0:
+                created_at_evt = agora_lc.strftime("%Y-%m-%d %H:%M:%S")
+                _registrar_evento_producao(
+                    cliente_id=str(cliente_id),
+                    machine_id=str(machine_id),
+                    ts_ms=int(now_ms_lc),
+                    esp_absoluto=int(esp_now),
+                    delta=int(delta_evt),
+                    created_at=created_at_evt,
+                )
+        except Exception:
+            pass
+
         if esp_now != esp_prev:
             m["_last_count_ts_ms"] = now_ms_lc
         elif m.get("_last_count_ts_ms") is None:
@@ -1271,3 +1331,9 @@ def historico_producao_api():
         out.append(d)
 
     return jsonify(out)
+
+
+# GIT:
+# git add -A
+# git commit -m "feat(machine_routes): registrar timestamp de producao no /machine/update (opcao 2)"
+# git push

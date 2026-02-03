@@ -1,5 +1,5 @@
 ﻿fix(machine_routes): /admin/reset-hour agora zera DIA + HORA por padrao
 
 - Mantem compatibilidade: payload {"scope":"hour"} faz reset apenas da hora
-- Padrao do endpoint (botao "Zerar Producao"): reset_contexto + reancora ultimo_dia
-- Zera producao_por_hora em memoria para nao exibir resquicio no dashboard
+- Padrao: reset_contexto + reancora ultimo_dia + zera acumuladores de hora
+- Reforca persistencia do baseline (raw e scoped) para evitar divergencia de leitura entre telas/rotas
