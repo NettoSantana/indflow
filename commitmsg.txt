@@ -1,5 +1,6 @@
-﻿feat(producao): historico por upsert com contagem ao vivo + timezone Bahia
+﻿fix(producao): historico com contagem ao vivo + timezone Bahia (-03:00) + OP ativa com totais
 
-- padroniza datas/horas no backend em America/Bahia (env TZ ou default)
-- historico: garante 30 dias via upsert e sincroniza produzido do dia usando soma de producao_horaria
-- evita historico zerado enquanto a maquina esta produzindo (sem depender de fechamento do dia)
+- started_at/ended_at em ISO com timezone America/Bahia
+- historico soma producao do dia detectando automaticamente tabela/colunas no SQLite
+- OP ativa retorna op_metros/op_pcs calculados (bobinas + conversao, floor) no historico e no /op/status
+- adiciona import os (corrige _get_tz)
