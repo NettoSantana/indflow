@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-02-03 07:32 (America/Bahia)
-# Motivo: Botão "Zerar Producao" (/admin/reset-hour) agora zera DIA + HORA por padrão, mantendo compatibilidade com reset apenas da hora via payload {"scope":"hour"}.
+# Último recode: 2026-02-03 07:41 (America/Bahia)
+# Motivo: Botão 'Zerar Producao' (/admin/reset-hour) agora zera DIA + HORA por padrão; mantém compatibilidade com reset apenas da hora via payload {"scope":"hour"} e reforça persistência de baseline (raw e scoped).
 
 # modules/machine_routes.py
 import os
@@ -814,8 +814,8 @@ def update_machine():
 
 
 # ============================================================
-# ADMIN - RESET (PADRÃO: DIA + HORA)
-#   - compatibilidade: payload {"scope":"hour"} mantém reset somente da hora
+# ADMIN - RESET (PADRAO: DIA + HORA)
+#   - compatibilidade: payload {"scope":"hour"} faz reset somente da hora (comportamento antigo)
 # ============================================================
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
@@ -878,35 +878,41 @@ def admin_reset_hour():
         })
 
     # ============================================================
-    # NOVO PADRÃO: reset completo (DIA + HORA)
-    # - atende o botão "Zerar Producao" na tela de configuração
+    # PADRAO: reset completo (DIA + HORA)
+    # - isso e o que o botao 'Zerar Producao' precisa fazer
     # ============================================================
+
+    # 1) tenta resolver cliente_id (para resetar o baseline correto do tenant)
     try:
-        cid_req = None
+        cid = (data.get("cliente_id") or "").strip()
+    except Exception:
+        cid = ""
+
+    if not cid:
         try:
-            cid_req = _get_cliente_id_for_request()
+            cid = (_get_cliente_id_for_request() or "").strip()
         except Exception:
-            cid_req = None
-        if cid_req:
-            m["cliente_id"] = cid_req
-    except Exception:
-        pass
+            cid = ""
 
-    # reseta contexto completo (zera producao_turno e reancora baseline_diario)
-    reset_contexto(m, machine_id)
+    if cid:
+        m["cliente_id"] = cid
 
-    # garante que "ultimo_dia" fique no dia operacional atual após o reset manual
-    try:
-        m["ultimo_dia"] = dia_operacional_ref_str(now_bahia())
-    except Exception:
-        pass
-
-    # prepara hora atual para começar do zero a partir de agora
+    # 2) captura esp atual (contador absoluto do ESP)
     try:
         esp_abs_now = int(m.get("esp_absoluto", 0) or 0)
     except Exception:
         esp_abs_now = 0
 
+    # 3) reseta contexto completo (deve persistir baseline_diario usando o padrao atual do sistema)
+    reset_contexto(m, machine_id)
+
+    # 4) garante que o dia operacional fique consistente apos reset manual
+    try:
+        m["ultimo_dia"] = dia_operacional_ref_str(now_bahia())
+    except Exception:
+        pass
+
+    # 5) hora: reancora baseline_hora e zera acumuladores
     idx = calcular_ultima_hora_idx(m)
     m["ultima_hora"] = idx
     m["baseline_hora"] = int(esp_abs_now)
@@ -914,11 +920,34 @@ def admin_reset_hour():
     m["percentual_hora"] = 0
     m["_ph_loaded"] = False
 
-    # zera o array do turno para evitar exibir resquício no front
+    # 6) zera array exibido (evita resquicio no front)
     try:
         if isinstance(m.get("producao_por_hora"), list):
             for i in range(len(m["producao_por_hora"])):
                 m["producao_por_hora"][i] = 0
+    except Exception:
+        pass
+
+    # 7) reforco: grava baseline também no formato legado (raw) e no formato scoped (cliente_id::machine_id)
+    #    Isso protege contra divergencias de leitura entre telas/rotas.
+    try:
+        from modules.repos.baseline_repo import persistir_baseline_diario as _persistir_bd
+
+        dia_ref = dia_operacional_ref_str(now_bahia())
+
+        # raw (legado)
+        try:
+            _persistir_bd(machine_id, dia_ref, int(esp_abs_now), int(esp_abs_now))
+        except Exception:
+            pass
+
+        # scoped (tenant)
+        if cid:
+            scoped_mid = f"{cid}::{machine_id}"
+            try:
+                _persistir_bd(scoped_mid, dia_ref, int(esp_abs_now), int(esp_abs_now))
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -927,10 +956,14 @@ def admin_reset_hour():
         "machine_id": machine_id,
         "scope": "day+hour",
         "hora_idx": idx,
+        "cliente_id": cid or None,
         "note": "Reset completo executado. Dia e hora zerados a partir de agora.",
     })
 
 
+# ============================================================
+# RESET MANUAL
+# ============================================================
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
     data = request.get_json() or {}
@@ -940,6 +973,9 @@ def reset_manual():
     return jsonify({"status": "resetado", "machine_id": machine_id})
 
 
+# ============================================================
+# REFUGO: SALVAR (PERSISTENTE)
+# ============================================================
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
     data = request.get_json() or {}

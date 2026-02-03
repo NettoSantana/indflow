@@ -1,4 +1,5 @@
-﻿fix: normalizar payload machine_status/op_status no config_maquina
+﻿fix(machine_routes): /admin/reset-hour agora zera DIA + HORA por padrao
 
-- Ajusta config_maquina.html para suportar resposta embrulhada {machine_status, op_status}
-- Preenche campos corretamente e prioriza op_status para OP ativa
+- Mantem compatibilidade: payload {"scope":"hour"} faz reset apenas da hora
+- Padrao do endpoint (botao "Zerar Producao"): reset_contexto + reancora ultimo_dia
+- Zera producao_por_hora em memoria para nao exibir resquicio no dashboard
