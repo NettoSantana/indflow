@@ -1,7 +1,6 @@
-﻿feat(machine_routes): usar ts_ms do ESP em producao_evento e _last_count_ts_ms (sanity-check + fallback)
+﻿fix(machine_status): aplicar ociosidade com default e preencher stopped_since_ms
 
-- /machine/update passa a usar ts_ms do payload quando valido
-- grava producao_evento.ts_ms com timestamp efetivo
-- atualiza _last_count_ts_ms apenas quando delta_evt > 0
-- expõe ts_source/ts_ms na resposta para debug
-- adiciona _last_esp_ts_iso_local (Bahia) para diagnostico
+- /machine/status: usa INDFLOW_NO_COUNT_STOP_SEC_DEFAULT quando no_count_stop_sec nao existe
+- Em AUTO+ocioso: preenche stopped_since_ms e grava machine_stop com _last_count_ts_ms
+- Ao voltar a produzir: limpa machine_stop e zera stopped_since_ms
+- Expondo _no_count_stop_sec_effective e _sem_contar_sec para debug

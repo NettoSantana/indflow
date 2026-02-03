@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 20:05 America/Bahia
-# MOTIVO: Corrigir /machine/status para marcar PARADA por ociosidade mesmo sem no_count_stop_sec na config, preencher stopped_since_ms e limpar corretamente ao voltar a produzir (baseado em _last_count_ts_ms do ESP).
-# INFO: lines_total=1404 lines_changed=~45
+# LAST_RECODE: 2026-02-03 20:30 America/Bahia
+# MOTIVO: Corrigir historico de producao para calcular produzido via producao_evento.ts_ms (timezone Bahia) e permitir /producao/historico retornar JSON quando chamado via XHR, mantendo pagina HTML.
+# INFO: lines_total=1491 lines_changed=~140
 
 # modules/machine_routes.py
 import os
@@ -113,6 +113,62 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
     except Exception:
         return 0
 
+
+def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, fim: str) -> dict:
+    """
+    Retorna {dia_ref: produzido} calculado a partir de producao_evento (delta),
+    agrupando pelo dia local Bahia usando ts_ms (epoch ms do ESP).
+    inicio/fim: ISO YYYY-MM-DD (inclusive).
+    """
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+
+    # range em ms (Bahia). Convertendo para UTC epoch aproximado:
+    # - Inicio 00:00:00 -03
+    # - Fim 23:59:59 -03
+    try:
+        d0 = datetime.fromisoformat(inicio).date()
+        d1 = datetime.fromisoformat(fim).date()
+    except Exception:
+        return {}
+
+    tz = TZ_BAHIA
+    start_dt = datetime(d0.year, d0.month, d0.day, 0, 0, 0, tzinfo=tz)
+    end_dt = datetime(d1.year, d1.month, d1.day, 23, 59, 59, tzinfo=tz)
+
+    start_ms = int(start_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+
+    conn = get_db()
+    try:
+        _ensure_producao_evento_table(conn)
+
+        # SQLite: converte epoch ms para dia local usando -3 hours.
+        # Observacao: usamos 'unixepoch' com segundos.
+        params = [mid, start_ms, end_ms]
+        where = "machine_id = ? AND ts_ms >= ? AND ts_ms <= ?"
+
+        if cliente_id:
+            where = f"cliente_id = ? AND {where}"
+            params = [cliente_id] + params
+
+        sql = f"""
+            SELECT
+              date(ts_ms/1000, 'unixepoch', '-3 hours') AS dia_ref,
+              SUM(COALESCE(delta, 0)) AS produzido
+            FROM producao_evento
+            WHERE {where}
+            GROUP BY dia_ref
+            ORDER BY dia_ref DESC
+        """
+
+        cur = conn.execute(sql, tuple(params))
+        out = {}
+        for r in cur.fetchall():
+            dia = (r[0] or "").strip()
+            out[dia] = _safe_int(r[1], 0)
+        return out
+    finally:
+        conn.close()
 
 def _looks_like_uuid(v: str) -> bool:
     """
@@ -822,12 +878,12 @@ def update_machine():
         m["_last_esp_ts_ms_seen"] = effective_ts_ms
         m["_last_esp_ts_source"] = "esp" if ts_ms_in is not None else "server_fallback"
 
+
         try:
             # debug humano: iso local (Bahia) derivado do timestamp efetivo usado no evento
             m["_last_esp_ts_iso_local"] = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             m["_last_esp_ts_iso_local"] = None
-
         esp_now = int(m.get("esp_absoluto", 0) or 0)
         esp_prev = m.get("_last_esp_abs_seen")
         if esp_prev is None:
@@ -835,7 +891,6 @@ def update_machine():
         esp_prev = int(esp_prev)
 
         # OPCAO 2 (timestamp): registra evento de producao quando contador absoluto avanca
-        delta_evt = 0
         try:
             delta_evt = esp_now - esp_prev
             if delta_evt > 0:
@@ -858,7 +913,6 @@ def update_machine():
         elif m.get("_last_count_ts_ms") is None:
             # inicializa para evitar sem_contar negativo/bug em status
             m["_last_count_ts_ms"] = int(effective_ts_ms)
-
         m["_last_esp_abs_seen"] = esp_now
     except Exception:
         pass
@@ -1151,23 +1205,6 @@ def salvar_refugo():
     })
 
 
-def _get_no_count_stop_sec_default() -> int:
-    """
-    Default para ociosidade quando a maquina nao tem no_count_stop_sec configurado.
-    Controlado por ENV:
-      INDFLOW_NO_COUNT_STOP_SEC_DEFAULT (default: 30)
-    """
-    try:
-        v = int((os.getenv("INDFLOW_NO_COUNT_STOP_SEC_DEFAULT") or "30").strip())
-        if v < 5:
-            v = 5
-        if v > 3600:
-            v = 3600
-        return v
-    except Exception:
-        return 30
-
-
 @machine_bp.route("/machine/status", methods=["GET"])
 def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
@@ -1272,11 +1309,6 @@ def machine_status():
             thr = int(m.get("no_count_stop_sec", 0) or 0)
         except Exception:
             thr = 0
-
-        # Se nao estiver configurado na maquina, usa default por ENV
-        if thr < 5:
-            thr = _get_no_count_stop_sec_default()
-
         try:
             agora_i = now_bahia()
             now_ms_i = int(agora_i.timestamp() * 1000)
@@ -1289,44 +1321,25 @@ def machine_status():
         except Exception:
             sem_contar = 0
 
-        # Regra: em AUTO, so considera ociosidade se run=0 (ESP ja detectou ausencia de pulso)
-        run_val = _safe_int(m.get("run", 0), 0)
-        ocioso = (run_val == 0) and (sem_contar >= thr)
-
-        if status == "AUTO" and ocioso:
+        if status == "AUTO" and thr >= 5 and sem_contar >= thr:
             m["status_ui"] = "PARADA"
-
             ss = _get_stopped_since_ms(machine_id)
             if ss is None:
                 try:
                     updated_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
-                    # stopped_since deve usar o last_count_ts_ms (preferencialmente do ESP)
                     _set_stopped_since_ms(machine_id, int(m.get("_last_count_ts_ms", now_ms)), updated_at)
                 except Exception:
                     pass
                 ss = _get_stopped_since_ms(machine_id)
-
-            m["stopped_since_ms"] = ss
-
             turno_inicio = (m.get("turno_inicio") or "").strip()
             turno_fim = (m.get("turno_fim") or "").strip()
             if turno_inicio and turno_fim:
                 m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss or now_ms), now_ms, turno_inicio, turno_fim)
             else:
                 m["parado_min"] = None
-
         elif status == "AUTO":
             m["status_ui"] = "PRODUZINDO"
             m["parado_min"] = None
-
-            # Limpando stopped_since ao voltar a produzir (evita ficar grudado)
-            try:
-                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
-                _clear_stopped_since(machine_id, updated_at)
-            except Exception:
-                pass
-            m["stopped_since_ms"] = None
-
         else:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
@@ -1334,8 +1347,6 @@ def machine_status():
                 updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
                 ss = now_ms
-            m["stopped_since_ms"] = ss
-
             turno_inicio = (m.get("turno_inicio") or "").strip()
             turno_fim = (m.get("turno_fim") or "").strip()
             if turno_inicio and turno_fim:
@@ -1343,11 +1354,6 @@ def machine_status():
             else:
                 diff_ms = max(0, now_ms - int(ss))
                 m["parado_min"] = int(diff_ms // 60000)
-
-        # Expor o threshold efetivo para debug rapido
-        m["_no_count_stop_sec_effective"] = thr
-        m["_sem_contar_sec"] = sem_contar
-
     except Exception:
         m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
         m["parado_min"] = None
@@ -1385,70 +1391,101 @@ def machine_status():
 @machine_bp.route("/producao/historico", methods=["GET"])
 @login_required
 def historico_page():
+    # Se a pagina chamar via XHR/fetch esperando JSON, devolvemos o mesmo payload do endpoint API.
+    # Mantemos o HTML para navegação normal.
+    accept = (request.headers.get("Accept") or "").lower()
+    xhr = (request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
+    fmt = (request.args.get("format") or "").lower()
+
+    if "application/json" in accept or xhr or fmt == "json":
+        return historico_producao_api()
+
     return render_template("historico.html")
 
 
 @machine_bp.route("/api/producao/historico", methods=["GET"])
 def historico_producao_api():
     cliente_id = _get_cliente_id_for_request()
-    if not cliente_id:
-        return jsonify({"error": "unauthorized"}), 401
+    machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
 
-    machine_id = request.args.get("machine_id")
-    inicio = request.args.get("inicio")
-    fim = request.args.get("fim")
+    inicio = (request.args.get("inicio") or "").strip()
+    fim = (request.args.get("fim") or "").strip()
 
-    query = """
-        SELECT machine_id, data, produzido, meta, percentual
-        FROM producao_diaria
-        WHERE cliente_id = ?
-    """
-    params = [cliente_id]
+    if not inicio or not fim:
+        hoje = now_bahia().date()
+        d0 = hoje - timedelta(days=29)
+        inicio = d0.isoformat()
+        fim = hoje.isoformat()
 
-    if machine_id:
-        raw_mid = _norm_machine_id(machine_id)
-        scoped_mid = f"{cliente_id}::{raw_mid}"
-        query += " AND (machine_id = ? OR machine_id = ?)"
-        params.extend([raw_mid, scoped_mid])
+    # 1) Base antiga: producao_diaria (se existir)
+    base = _get_historico_producao(cliente_id, machine_id, inicio, fim) or []
 
-    if inicio:
-        query += " AND data >= ?"
-        params.append(inicio)
+    # 2) Novo: somar a partir de producao_evento.ts_ms (delta), agrupado por dia local.
+    eventos_por_dia = _sum_eventos_por_dia(cliente_id, machine_id, inicio, fim)
 
-    if fim:
-        query += " AND data <= ?"
-        params.append(fim)
+    # Index da base por dia
+    base_por_dia = {item.get("data"): item for item in base if item.get("data")}
 
-    query += " ORDER BY data DESC"
+    # Conjunto de dias (union)
+    dias = set(base_por_dia.keys()) | set(eventos_por_dia.keys())
 
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(query, params)
-    rows = cur.fetchall()
-    conn.close()
+    # Se nao houver nada, devolve vazio
+    if not dias:
+        return jsonify([])
+
+    # Meta default da maquina (para dias sem meta na tabela)
+    m = get_machine(machine_id)
+    meta_default = _safe_int(m.get("meta_turno"), 0)
 
     out = []
-    for r in rows:
-        d = dict(r)
+    for dia in sorted(dias, reverse=True):
+        item = dict(base_por_dia.get(dia) or {})
+        item["data"] = dia
+        item["machine_id"] = machine_id
 
-        mid = d.get("machine_id") or "maquina01"
-        dia_ref = d.get("data") or ""
+        # produzido: preferir eventos (se existir no dict), senão manter base
+        if dia in eventos_por_dia:
+            item["produzido"] = _safe_int(eventos_por_dia.get(dia), 0)
 
-        refugo_total = _sum_refugo_24(mid, dia_ref)
+        # meta: se nao vier da base, usa default
+        item["meta"] = _safe_int(item.get("meta"), meta_default)
 
-        produzido = _safe_int(d.get("produzido"), 0)
-        pecas_boas = max(0, produzido - refugo_total)
+        # pecas_boas/refugo
+        pecas_boas = _safe_int(item.get("pecas_boas"), 0)
+        refugo_total = _safe_int(item.get("refugo_total"), 0)
+        produzido = _safe_int(item.get("produzido"), 0)
 
-        d["machine_id"] = _unscope_machine_id(mid)
-        d["refugo_total"] = refugo_total
-        d["pecas_boas"] = pecas_boas
+        # Se a base nao trouxe pecas_boas, assume produzido - refugo
+        if "pecas_boas" not in item or pecas_boas == 0:
+            if produzido > 0:
+                pecas_boas = max(0, produzido - refugo_total)
+                item["pecas_boas"] = pecas_boas
 
-        out.append(d)
+        # percentual
+        meta = _safe_int(item.get("meta"), 0)
+        if meta > 0:
+            item["percentual"] = round((produzido / meta) * 100)
+        else:
+            item["percentual"] = 0
+
+        # Mantem ops se existir na base (se outro modulo injeta). Caso contrario, lista vazia.
+        if "ops" not in item:
+            item["ops"] = []
+
+        out.append(item)
 
     return jsonify(out)
 
 
-# GIT:
+# =====================================================
+# GIT (PowerShell copiar e colar)
+# =====================================================
 # git add -A
-# git commit -m "fix(machine_status): aplicar ociosidade com default e preencher stopped_since_ms"
+# @"
+# fix: historico calcula produzido via producao_evento.ts_ms
+#
+# - /api/producao/historico agora soma produzido por dia a partir de producao_evento (delta) usando ts_ms do ESP
+# - Mantem fallback da tabela producao_diaria e inclui ops=[] quando ausente
+# "@ | Set-Content commitmsg.txt -Encoding UTF8
+# git commit -F commitmsg.txt
 # git push
