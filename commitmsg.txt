@@ -1,4 +1,7 @@
-﻿feat(indflow): historico por cliente_id + eventos de producao
+﻿feat(machine_routes): usar ts_ms do ESP em producao_evento e _last_count_ts_ms (sanity-check + fallback)
 
-- indflow/modules/machine_routes.py: registrar eventos em producao_evento (ts_ms) no /machine/update e manter logica existente; /api/producao/historico filtra por cliente_id
-- modules/producao/routes.py: ajustes de historico/OPs (fallback e timezone) conforme ultimo recode
+- /machine/update passa a usar ts_ms do payload quando valido
+- grava producao_evento.ts_ms com timestamp efetivo
+- atualiza _last_count_ts_ms apenas quando delta_evt > 0
+- expõe ts_source/ts_ms na resposta para debug
+- adiciona _last_esp_ts_iso_local (Bahia) para diagnostico

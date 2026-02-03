@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 19:10 America/Bahia
-# MOTIVO: Garantir uso do ts_ms do ESP no /machine/update (producao_evento.ts_ms e _last_count_ts_ms) com sanity-check e fallback server, e expor ts_source/ts_ms para debug.
-# INFO: lines_total=1404 lines_changed=~25
+# LAST_RECODE: 2026-02-03 20:05 America/Bahia
+# MOTIVO: Corrigir /machine/status para marcar PARADA por ociosidade mesmo sem no_count_stop_sec na config, preencher stopped_since_ms e limpar corretamente ao voltar a produzir (baseado em _last_count_ts_ms do ESP).
+# INFO: lines_total=1404 lines_changed=~45
 
 # modules/machine_routes.py
 import os
@@ -822,12 +822,12 @@ def update_machine():
         m["_last_esp_ts_ms_seen"] = effective_ts_ms
         m["_last_esp_ts_source"] = "esp" if ts_ms_in is not None else "server_fallback"
 
-
         try:
             # debug humano: iso local (Bahia) derivado do timestamp efetivo usado no evento
             m["_last_esp_ts_iso_local"] = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             m["_last_esp_ts_iso_local"] = None
+
         esp_now = int(m.get("esp_absoluto", 0) or 0)
         esp_prev = m.get("_last_esp_abs_seen")
         if esp_prev is None:
@@ -835,6 +835,7 @@ def update_machine():
         esp_prev = int(esp_prev)
 
         # OPCAO 2 (timestamp): registra evento de producao quando contador absoluto avanca
+        delta_evt = 0
         try:
             delta_evt = esp_now - esp_prev
             if delta_evt > 0:
@@ -857,6 +858,7 @@ def update_machine():
         elif m.get("_last_count_ts_ms") is None:
             # inicializa para evitar sem_contar negativo/bug em status
             m["_last_count_ts_ms"] = int(effective_ts_ms)
+
         m["_last_esp_abs_seen"] = esp_now
     except Exception:
         pass
@@ -1149,6 +1151,23 @@ def salvar_refugo():
     })
 
 
+def _get_no_count_stop_sec_default() -> int:
+    """
+    Default para ociosidade quando a maquina nao tem no_count_stop_sec configurado.
+    Controlado por ENV:
+      INDFLOW_NO_COUNT_STOP_SEC_DEFAULT (default: 30)
+    """
+    try:
+        v = int((os.getenv("INDFLOW_NO_COUNT_STOP_SEC_DEFAULT") or "30").strip())
+        if v < 5:
+            v = 5
+        if v > 3600:
+            v = 3600
+        return v
+    except Exception:
+        return 30
+
+
 @machine_bp.route("/machine/status", methods=["GET"])
 def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
@@ -1253,6 +1272,11 @@ def machine_status():
             thr = int(m.get("no_count_stop_sec", 0) or 0)
         except Exception:
             thr = 0
+
+        # Se nao estiver configurado na maquina, usa default por ENV
+        if thr < 5:
+            thr = _get_no_count_stop_sec_default()
+
         try:
             agora_i = now_bahia()
             now_ms_i = int(agora_i.timestamp() * 1000)
@@ -1265,25 +1289,44 @@ def machine_status():
         except Exception:
             sem_contar = 0
 
-        if status == "AUTO" and thr >= 5 and sem_contar >= thr:
+        # Regra: em AUTO, so considera ociosidade se run=0 (ESP ja detectou ausencia de pulso)
+        run_val = _safe_int(m.get("run", 0), 0)
+        ocioso = (run_val == 0) and (sem_contar >= thr)
+
+        if status == "AUTO" and ocioso:
             m["status_ui"] = "PARADA"
+
             ss = _get_stopped_since_ms(machine_id)
             if ss is None:
                 try:
                     updated_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
+                    # stopped_since deve usar o last_count_ts_ms (preferencialmente do ESP)
                     _set_stopped_since_ms(machine_id, int(m.get("_last_count_ts_ms", now_ms)), updated_at)
                 except Exception:
                     pass
                 ss = _get_stopped_since_ms(machine_id)
+
+            m["stopped_since_ms"] = ss
+
             turno_inicio = (m.get("turno_inicio") or "").strip()
             turno_fim = (m.get("turno_fim") or "").strip()
             if turno_inicio and turno_fim:
                 m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss or now_ms), now_ms, turno_inicio, turno_fim)
             else:
                 m["parado_min"] = None
+
         elif status == "AUTO":
             m["status_ui"] = "PRODUZINDO"
             m["parado_min"] = None
+
+            # Limpando stopped_since ao voltar a produzir (evita ficar grudado)
+            try:
+                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+                _clear_stopped_since(machine_id, updated_at)
+            except Exception:
+                pass
+            m["stopped_since_ms"] = None
+
         else:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
@@ -1291,6 +1334,8 @@ def machine_status():
                 updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
                 ss = now_ms
+            m["stopped_since_ms"] = ss
+
             turno_inicio = (m.get("turno_inicio") or "").strip()
             turno_fim = (m.get("turno_fim") or "").strip()
             if turno_inicio and turno_fim:
@@ -1298,6 +1343,11 @@ def machine_status():
             else:
                 diff_ms = max(0, now_ms - int(ss))
                 m["parado_min"] = int(diff_ms // 60000)
+
+        # Expor o threshold efetivo para debug rapido
+        m["_no_count_stop_sec_effective"] = thr
+        m["_sem_contar_sec"] = sem_contar
+
     except Exception:
         m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
         m["parado_min"] = None
@@ -1400,5 +1450,5 @@ def historico_producao_api():
 
 # GIT:
 # git add -A
-# git commit -m "feat(machine_routes): usar ts_ms do ESP em producao_evento (fallback server)"
+# git commit -m "fix(machine_status): aplicar ociosidade com default e preencher stopped_since_ms"
 # git push
