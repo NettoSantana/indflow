@@ -1,4 +1,5 @@
-﻿fix(producao): historico nao fica zerado + timezone Bahia no JSON
+﻿chore: config_maquina debug json + hora America/Bahia no front
 
-- historico: se nao achar contagem real no DB, produzido/pecas_boas = soma(op_pcs das OPs do dia
-- started_at/ended_at convertidos para America/Bahia (-03:00), assumindo UTC quando naive
+- adiciona botao "Ver JSON" e modal mostrando retorno bruto de /machine/status
+- padroniza hora do front-end usando America/Bahia via Intl.DateTimeFormat
+- fallback de dia_ref para data da Bahia quando backend nao enviar
