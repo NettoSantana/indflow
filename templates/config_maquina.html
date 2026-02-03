@@ -1,11 +1,123 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-02 23:30 (America/Bahia)
-Motivo: Ajustar front-end para aceitar resposta JSON aninhada (machine_status/op_status), adicionar botao Ver JSON e relogio Hora Bahia, e garantir preenchimento dos campos/tabela com timezone Bahia.
+Ultimo recode: 2026-02-02 14:16 (America/Bahia)
+Motivo: Normalizar payload do /machine/status (machine_status/op_status) para preencher tela e OP ativa. Ajustar carregarOpUI para usar op_status quando presente.
 -->
 
-{% extends "base.html" %}
-{% block content %}
+<!--
+Arquivo: templates/base.html
+Alterado em: 2026-02-01 18:55 (America/Bahia)
+Por: ChatGPT
+Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas iguais ao PC.
+-->
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1200, initial-scale=1.0">
+  <title>Configuração da Máquina</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+
+  <style>
+    /* ===== FORCAR LAYOUT DESKTOP EM MOBILE ===== */
+    html, body{
+      min-width:1200px;
+      overflow-x:auto;
+    }
+
+    /* ===== NAVBAR INDUSTRIAL ===== */
+    .navbar{
+      width:100%;
+      height:76px;
+      background:#ffffff;
+      border-bottom:1px solid #e5e7eb;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:0 24px;
+      box-sizing:border-box;
+      position:sticky;
+      top:0;
+      z-index:10;
+    }
+
+    .nav-left{
+      display:flex;
+      align-items:center;
+      gap:14px;
+    }
+
+    .logo{
+      height:56px;
+      width:auto;
+    }
+
+    .system-name{
+      font-size:20px;
+      font-weight:600;
+      color:#0f172a;
+    }
+
+    .nav-links{
+      display:flex;
+      align-items:center;
+      gap:18px;
+    }
+
+    .nav-links a{
+      text-decoration:none;
+      font-size:15px;
+      color:#334155;
+      font-weight:500;
+    }
+
+    .nav-links a:hover{
+      color:#0f172a;
+    }
+
+    /* ===== AREA DE CONTEUDO ===== */
+    .content-area{
+      padding:24px;
+      width:100%;
+      box-sizing:border-box;
+    }
+
+    .container{
+      max-width:1200px;
+      margin:0 auto;
+    }
+  </style>
+
+</head>
+
+<body>
+
+  <!-- NAVBAR SUPERIOR -->
+  <nav class="navbar">
+    <div class="nav-left">
+      <img src="/static/img/logo.png" alt="NettSan Technology" class="logo">
+      <span class="system-name">IndFlow</span>
+    </div>
+
+    <div class="nav-links">
+      
+        <a href="/producao">Produção</a>
+        <a href="/manutencao">Manutenção</a>
+        <a href="/ativos">Ativos</a>
+        <a href="/devices/">Dispositivos</a>
+        <a href="/clientes">Clientes</a>
+        <a href="/utilidades">Utilidades</a>
+        <a href="/admin">Admin</a>
+        <a href="/admin/logout">Sair</a>
+      
+    </div>
+  </nav>
+
+  <!-- CONTEUDO DA PAGINA -->
+  <main class="content-area">
+    <div class="container">
+      
 
 <style>
   /* TABELA ZEBRADA */
@@ -13,15 +125,16 @@ Motivo: Ajustar front-end para aceitar resposta JSON aninhada (machine_status/op
   #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
   #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
 
-  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim) */
+  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim)
+     Azul claro + branco, com "duas faixas" (topo mais claro / base mais azul). */
   #tabela-horas tbody tr.turno-ativo{
-    background-color:#e0f2fe;
+    background-color:#e0f2fe; /* fallback */
     background-image:linear-gradient(180deg, #ffffff 0%, #e0f2fe 100%);
     border-top:1px solid #ffffff;
     border-bottom:1px solid #bfdbfe;
   }
   #tabela-horas tbody tr.turno-ativo:hover{
-    background-color:#bae6fd;
+    background-color:#bae6fd; /* fallback */
     background-image:linear-gradient(180deg, #f0f9ff 0%, #bae6fd 100%);
   }
 
@@ -124,11 +237,10 @@ Motivo: Ajustar front-end para aceitar resposta JSON aninhada (machine_status/op
     text-align:center;
     cursor:pointer;
   }
-  .modal-body{
-    padding:16px;
+  .modal-body{ padding:16px; 
     max-height: 80vh;
     overflow-y: auto;
-  }
+}
 </style>
 
 <div class="container">
@@ -138,8 +250,6 @@ Motivo: Ajustar front-end para aceitar resposta JSON aninhada (machine_status/op
 
     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
-      <button id="btn-ver-json" type="button" class="btn btn-secondary">Ver JSON</button>
-      <span id="hora-bahia" class="btn btn-secondary" style="cursor:default;">Hora Bahia: --:--:--</span>
 
       <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
       <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
@@ -256,19 +366,6 @@ Motivo: Ajustar front-end para aceitar resposta JSON aninhada (machine_status/op
     </div>
   </div>
 
-
-  <div class="modal-backdrop" id="jsonModalBackdrop" style="display:none;">
-    <div class="modal" style="max-width:900px;">
-      <div class="modal-header">
-        <div class="modal-title">JSON (status da maquina)</div>
-        <button class="modal-close" id="btnCloseJsonModal" type="button" aria-label="Fechar">x</button>
-      </div>
-      <div class="modal-body">
-        <pre id="json-pre" style="white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.35; margin:0;"></pre>
-      </div>
-    </div>
-  </div>
-
   <h2 class="section-title mt-30">Distribuicao da Meta por Hora</h2>
 
   <div class="card">
@@ -378,7 +475,6 @@ function _fillOpFormFromData(d){
   _setBobinasToUI(bobinas);
   _syncHiddenBobinaFirst();
 }
-
 function _showOp(info){
   const box=document.getElementById("op-ativo-box"),
         i=document.getElementById("op-ativo-info"),
@@ -399,7 +495,6 @@ function _showNoOp(){
   if(bn)bn.style.display="inline-block";
   if(be)be.style.display="none";
 }
-
 async function _getJson(url){
   try{
     const r=await fetch(url);
@@ -410,19 +505,40 @@ async function _getJson(url){
   }
 }
 
+function _normalizeMachineStatusPayload(payload){
+  // Alguns endpoints retornam { machine_status: {...}, op_status: {...} }
+  // Outros retornam o status direto. Aqui normalizamos para evitar tela vazia.
+  if(payload && typeof payload === "object" && payload.machine_status){
+    return { machine: payload.machine_status, op: (payload.op_status || null) };
+  }
+  return { machine: payload, op: null };
+}
+
 async function carregarOpUI(){
-  const d=await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(!d){_showNoOp();return;}
+  // Preferir o endpoint que ja retorna tudo (status da maquina + op_status), quando disponivel.
+  const payload = await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
+  if(payload){
+    const norm = _normalizeMachineStatusPayload(payload);
+    if(norm.op && norm.op.active){
+      opAtiva = norm.op;
+      const info = `OS ${String(opAtiva.os||"")} | Lote ${String(opAtiva.lote||"")} | Operador ${String(opAtiva.operador||"")}`;
+      _showOp(info);
+      return;
+    }
+  }
+
+  // Fallback: endpoint antigo (caso exista no backend)
+  const d = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
+  if(!d){ _showNoOp(); return; }
   if(d.active){
-    opAtiva=d;
-    const info=`OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
+    opAtiva = d;
+    const info = `OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
     _showOp(info);
   }else{
-    opAtiva=null;
+    opAtiva = null;
     _showNoOp();
   }
 }
-
 function openOpModal(mode){
   _setOpModalMode(mode);
   if(opModalMode==="edit"){
@@ -440,7 +556,6 @@ function closeOpModal(){
   const bd=document.getElementById("opModalBackdrop");
   if(bd)bd.style.display="none";
 }
-
 async function _postJson(url,p){
   const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
   let j=null;
@@ -448,7 +563,6 @@ async function _postJson(url,p){
   if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");}
   return j;
 }
-
 function initOpUI(){
   const bn=document.getElementById("btn-op-new"),
         be=document.getElementById("btn-op-end"),
@@ -521,38 +635,8 @@ function initOpUI(){
     }
   });
 }
-
 initOpUI();
 carregarOpUI();
-
-_initJsonUI();
-_startBahiaClock();
-
-// ===============================
-// VER JSON (DEBUG)
-// ===============================
-let __lastStatusPayload = null;
-
-function _openJsonModal(){
-  const bd = document.getElementById("jsonModalBackdrop");
-  const pre = document.getElementById("json-pre");
-  if(pre) pre.textContent = JSON.stringify(__lastStatusPayload ?? {}, null, 2);
-  if(bd) bd.style.display = "flex";
-}
-
-function _closeJsonModal(){
-  const bd = document.getElementById("jsonModalBackdrop");
-  if(bd) bd.style.display = "none";
-}
-
-function _initJsonUI(){
-  const btn = document.getElementById("btn-ver-json");
-  const bd = document.getElementById("jsonModalBackdrop");
-  const bc = document.getElementById("btnCloseJsonModal");
-  if(btn) btn.addEventListener("click", _openJsonModal);
-  if(bc) bc.addEventListener("click", _closeJsonModal);
-  if(bd) bd.addEventListener("click", (e)=>{ if(e && e.target === bd) _closeJsonModal(); });
-}
 
 // ===============================
 // TABELA FIXA 24H
@@ -569,47 +653,6 @@ function buildFaixas24(){
 }
 
 const HORAS_FIXAS_24 = buildFaixas24();
-
-// ===============================
-// RELOGIO: HORA BAHIA
-// ===============================
-function _bahiaParts(){
-  const d = new Date();
-  const parts = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Bahia",
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    hour12: false
-  }).formatToParts(d);
-  const get = (t) => {
-    const p = parts.find(x => x.type === t);
-    return p ? p.value : "";
-  };
-  const y = get("year");
-  const m = get("month");
-  const da = get("day");
-  const hh = get("hour");
-  const mm = get("minute");
-  const ss = get("second");
-  return {
-    isoDate: `${y}-${m}-${da}`,
-    hour: Number(hh),
-    minute: Number(mm),
-    second: Number(ss),
-    label: `${hh}:${mm}:${ss}`
-  };
-}
-
-function _startBahiaClock(){
-  const el = document.getElementById("hora-bahia");
-  if(!el) return;
-  const tick = () => {
-    const p = _bahiaParts();
-    el.textContent = `Hora Bahia: ${p.label}`;
-  };
-  tick();
-  setInterval(tick, 1000);
-}
 
 // ===============================
 // TIME HELPERS
@@ -793,10 +836,11 @@ document.getElementById("config-form").addEventListener("submit", function(e){
 function carregarTabela(){
   fetch(`/machine/status?machine_id=${machine_id}`)
     .then(r => r.json())
-    .then((payload) => {
+    .then(data => {
 
-      __lastStatusPayload = payload;
-      const data = (payload && payload.machine_status) ? payload.machine_status : payload;
+      const norm = _normalizeMachineStatusPayload(data);
+      const opStatus = norm.op; // pode ser null
+      data = norm.machine || {};
 
       document.getElementById("unidade_1").value = data.unidade_1 ?? "";
       document.getElementById("unidade_2").value = data.unidade_2 ?? "";
@@ -831,8 +875,8 @@ function carregarTabela(){
 
       const horaDiaAtual =
         (typeof data.ultima_hora === "number")
-          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? (_bahiaParts().hour))
-          : (_bahiaParts().hour);
+          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
+          : new Date().getHours();
 
       const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
       const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
@@ -938,4 +982,9 @@ function carregarTabela(){
 carregarTabela();
 </script>
 
-{% endblock %}
+
+    </div>
+  </main>
+
+</body>
+</html>

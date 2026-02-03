@@ -1,5 +1,5 @@
-﻿fix(config_maquina): ver json e hora bahia + tratamento de erro
+﻿fix(config_maquina): preencher tela com JSON aninhado + ver json + relogio bahia
 
-- Botao Ver JSON abre modal e mostra JSON de /machine/status e /producao/op/status
-- Exibe Hora Bahia (America/Bahia) e atualiza a cada 10s
-- Melhor tratamento de erro quando backend nao retorna JSON
+- aceitar payload {machine_status, op_status}
+- armazenar ultimo payload e exibir no modal "Ver JSON"
+- relogio Hora Bahia e hora atual da tabela usando timezone America/Bahia
