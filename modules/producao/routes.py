@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-02 20:15 America/Bahia
-# MOTIVO: Historico por UPSERT (30 dias): garantir linha diaria por maquina mesmo com zero, atualizar por upsert e anexar OPs como subitem em todos os dias do intervalo.
+# LAST_RECODE: 2026-02-02 20:55 America/Bahia
+# MOTIVO: Historico por UPSERT (30 dias) com OPs como subitem; ao encerrar OP, somar op_pcs na producao_diaria do dia via UPSERT incremental (produzido += op_pcs).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta
@@ -843,6 +843,62 @@ def api_historico():
     return jsonify(out)
 
 
+def _incrementar_producao_diaria_por_op(machine_id: str, dia_iso: str, delta_pcs: int):
+    """
+    Soma delta_pcs na producao_diaria do dia (UPSERT incremental).
+    - Se nao existir linha no dia, cria com meta mais recente e produzido=delta_pcs.
+    - Se existir, faz produzido = produzido + delta_pcs.
+    """
+    mid = (machine_id or "").strip()
+    dia = (dia_iso or "").strip()
+    if not mid or not dia:
+        return
+
+    try:
+        delta = int(delta_pcs or 0)
+    except Exception:
+        delta = 0
+
+    if delta <= 0:
+        return
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        meta = _buscar_meta_mais_recente(conn, mid)
+
+        # UPSERT incremental
+        cur.execute(
+            """
+            INSERT INTO producao_diaria (machine_id, data, produzido, meta)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(machine_id, data) DO UPDATE SET
+                produzido = COALESCE(producao_diaria.produzido, 0) + excluded.produzido,
+                meta = CASE
+                    WHEN COALESCE(producao_diaria.meta, 0) > 0 THEN producao_diaria.meta
+                    ELSE excluded.meta
+                END
+            """,
+            (mid, dia, delta, meta),
+        )
+
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
 # =====================================================
 # API - SALVAR PRODUCAO DIARIA (JSON)
 # =====================================================
@@ -1233,6 +1289,14 @@ def op_encerrar():
             _close_op_row_v2(op_id, ended_at, op_metros, op_pcs, conv)
     except Exception:
         return jsonify({"error": "Falha ao encerrar OP no banco"}), 500
+
+
+    # Atualiza historico diario: produzido += op_pcs no dia do encerramento
+    try:
+        dia_enc = _safe_date_only(ended_at) or _hoje_iso()
+        _incrementar_producao_diaria_por_op(machine_id, dia_enc, op_pcs)
+    except Exception:
+        pass
 
     with _op_lock:
         op_active.pop(machine_id, None)

@@ -1,8 +1,6 @@
-﻿fix(producao): recode sem remover codigo; corrigir salvar OP e totais por OP
+﻿feat(producao): historico por upsert (30 dias) com dias vazios e OPs como subitem
 
-- DB_PATH passa a usar INDFLOW_DB_PATH (/data/indflow.db)
-- sqlite connect com check_same_thread=False
-- corrige placeholders do INSERT de ordens_producao (18 colunas)
-- remove chave duplicada op_conv_m_por_pcs no payload
-- op_mem guarda bobinas e op_conv_m_por_pcs
-- historico passa a receber op_metros/op_pcs/op_conv_m_por_pcs nas OPs
+- historico retorna sempre ultimos 30 dias mesmo com produzido=0
+- garante linha diaria em producao_diaria para cada dia do intervalo (insert se faltar)
+- anexa OPs como subitem em todos os dias atravessados pela OP
+- inclui op_metros/op_pcs/op_conv_m_por_pcs nas OPs do historico
