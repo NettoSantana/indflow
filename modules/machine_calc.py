@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc.py
-# Último recode: 2026-01-22 16:05 (America/Bahia)
-# Motivo: Implementar modo robusto (Opção C) na produção por hora: acumulador dedicado + validação por delta/anti-explosão na virada de hora.
+# Último recode: 2026-02-03 07:12 (America/Bahia)
+# Motivo: Opção 1 (reset diário robusto) - garantir verificar_reset_diario no cálculo de produção para zerar dia operacional corretamente.
 
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -242,6 +242,19 @@ def atualizar_producao_hora(m):
     # NOVO: acumular "não programado" (fora do turno)
     # ============================================================
     agora = now_bahia()
+
+    # ============================================================
+    # FIX (OPÇÃO 1): garantir reset diário sempre que houver cálculo
+    # Isso evita o bug 'o dia não zerou' quando a máquina fica parada
+    # ou quando não há produção após a virada do dia operacional.
+    # ============================================================
+    try:
+        raw_mid = _get_machine_id_from_m(m) or "maquina01"
+        verificar_reset_diario(m, raw_mid)
+    except Exception:
+        # não quebra o cálculo se alguma máquina estiver mal configurada
+        pass
+
     idx = calcular_ultima_hora_idx(m)
     dentro_turno = idx is not None
 
@@ -623,32 +636,37 @@ def reset_contexto(m, machine_id):
 
     # FIX: FECHAMENTO DIÁRIO IDEMPOTENTE
     dia_ref = str(m.get("ultimo_dia") or "").strip()
+    if not dia_ref:
+        # primeira execução sem ultimo_dia definido: não fecha dia anterior no DB
+        dia_ref = None
 
-    conn = get_db()
-    cur = conn.cursor()
 
-    # remove qualquer registro anterior desse dia (se existir)
-    try:
+    if dia_ref is not None:
+        conn = get_db()
+        cur = conn.cursor()
+    
+        # remove qualquer registro anterior desse dia (se existir)
+        try:
+            cur.execute("""
+                DELETE FROM producao_diaria
+                WHERE machine_id = ? AND data = ?
+            """, (scoped_machine_id, dia_ref))
+        except Exception:
+            pass
+    
         cur.execute("""
-            DELETE FROM producao_diaria
-            WHERE machine_id = ? AND data = ?
-        """, (scoped_machine_id, dia_ref))
-    except Exception:
-        pass
-
-    cur.execute("""
-        INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual)
-        VALUES (?, ?, ?, ?, ?)
-    """, (
-        scoped_machine_id,
-        dia_ref,
-        int(m.get("producao_turno", 0) or 0),
-        int(m.get("meta_turno", 0) or 0),
-        int(m.get("percentual_turno", 0) or 0)
-    ))
-
-    conn.commit()
-    conn.close()
+            INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            scoped_machine_id,
+            dia_ref,
+            int(m.get("producao_turno", 0) or 0),
+            int(m.get("meta_turno", 0) or 0),
+            int(m.get("percentual_turno", 0) or 0)
+        ))
+    
+        conn.commit()
+        conn.close()
 
     m["baseline_diario"] = m["esp_absoluto"]
     m["producao_turno"] = 0
