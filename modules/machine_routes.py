@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Último recode: 2026-01-28 12:41 (America/Bahia)
-# Motivo: Backfill retroativo de cliente_id em producao_diaria (historico legado) + fechamento diario continua via /machine/status sem remover funcionalidades.
+# Último recode: 2026-02-03 07:32 (America/Bahia)
+# Motivo: Botão "Zerar Producao" (/admin/reset-hour) agora zera DIA + HORA por padrão, mantendo compatibilidade com reset apenas da hora via payload {"scope":"hour"}.
 
 # modules/machine_routes.py
 import os
@@ -33,7 +33,6 @@ from modules.repos.refugo_repo import load_refugo_24, upsert_refugo
 
 from modules.admin.routes import login_required
 
-# ✅ helpers de device (já criado por você)
 from modules.machine.device_helpers import (
     norm_device_id,
     touch_device_seen,
@@ -113,13 +112,6 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
     except Exception:
         return 0
 
-
-# ============================================================
-# NÃO PROGRAMADO (HORA EXTRA)
-#   - Persistência/decisão: modules.machine_service.processar_nao_programado()
-#   - Leitura 24h: repos.nao_programado_horaria_repo.load_np_por_hora_24()
-#   - IMPORTANTE: routes não deve ter SQL nem lógica de delta do NP
-# ============================================================
 
 def _looks_like_uuid(v: str) -> bool:
     """
@@ -285,9 +277,7 @@ def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -
     finally:
         conn.close()
 
-# ============================================================
-# MULTI-TENANT (DEVICES) — helpers locais
-# ============================================================
+
 def _ensure_devices_table_min(conn):
     """
     Segurança: garante tabela devices e colunas cliente_id/created_at.
@@ -353,9 +343,6 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, al
             owner = row[1] if len(row) > 1 else None
 
         if owner and owner != cliente_id:
-            # Se o device já estiver amarrado a outro cliente, por padrão bloqueia (403).
-            # No DEV, você pode permitir "takeover" controlado via ENV:
-            #   INDFLOW_ALLOW_DEVICE_TAKEOVER=1
             if allow_takeover:
                 conn.execute("""
                     UPDATE devices
@@ -405,9 +392,6 @@ def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | No
         conn.close()
 
 
-# ============================================================
-# PARADA OFICIAL (BACKEND) — grava stopped_since_ms por máquina
-# ============================================================
 def _ensure_machine_stop_table(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS machine_stop (
@@ -473,9 +457,6 @@ def _clear_stopped_since(machine_id: str, updated_at: str):
         conn.close()
 
 
-# ============================================================
-# BASELINE (agora com suporte a cliente_id quando existir)
-# ============================================================
 def _ensure_baseline_table(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS baseline_diario (
@@ -488,21 +469,16 @@ def _ensure_baseline_table(conn):
         )
     """)
 
-    # tenta adicionar cliente_id (migração leve)
     try:
         conn.execute("ALTER TABLE baseline_diario ADD COLUMN cliente_id TEXT")
     except Exception:
         pass
 
-    # ⚠️ MUITO IMPORTANTE:
-    # NÃO criar mais o UNIQUE antigo (machine_id, dia_ref) porque pode haver duplicados
-    # e isso derruba o deploy/serviço.
     try:
         conn.execute("DROP INDEX IF EXISTS ux_baseline_diario")
     except Exception:
         pass
 
-    # Índice multi-tenant (principal)
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
@@ -511,7 +487,6 @@ def _ensure_baseline_table(conn):
     except Exception:
         pass
 
-    # Índice legado parcial (somente registros antigos com cliente_id NULL)
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_legacy
@@ -560,9 +535,6 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
     conn.commit()
 
 
-# ============================================================
-# ADMIN - HARD RESET (LIMPA BANCO)
-# ============================================================
 @machine_bp.route("/admin/hard-reset", methods=["POST"])
 def admin_hard_reset():
     if not _admin_token_ok():
@@ -609,17 +581,12 @@ def admin_hard_reset():
     })
 
 
-# ============================================================
-# CONFIGURAÇÃO DA MÁQUINA
-# ============================================================
 @machine_bp.route("/machine/config", methods=["POST"])
 def configurar_maquina():
     data = request.get_json() or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
-    # guarda tenant no estado para leitura do NP no /machine/status (web)
-    # ✅ RECODE: antes era cliente_id (variável inexistente). Agora resolvemos de forma segura.
     cliente_id = None
     try:
         cliente_id = _get_cliente_id_for_request()
@@ -635,7 +602,6 @@ def configurar_maquina():
     m["turno_fim"] = data["fim"]
     m["rampa_percentual"] = rampa
 
-    # no_count_stop_sec: alerta de parada por inatividade (segundos sem producao)
     try:
         ncss = int(data.get("no_count_stop_sec", 0) or 0)
         if ncss >= 5:
@@ -703,9 +669,6 @@ def configurar_maquina():
     })
 
 
-# ============================================================
-# UPDATE ESP
-# ============================================================
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
     data = request.get_json() or {}
@@ -746,22 +709,17 @@ def update_machine():
 
     m = get_machine(machine_id)
 
-    # ✅ RECODE: garantir que o status consiga ler NP scoped (cliente_id::machine_id)
     m["cliente_id"] = cliente_id
 
     verificar_reset_diario(m, machine_id)
 
-    # --- captura status anterior antes de sobrescrever
     prev_status = (m.get("status") or "").strip().upper()
 
-    # status novo vindo do ESP
     new_status = (data.get("status", "DESCONHECIDO") or "DESCONHECIDO").strip().upper()
 
     m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
 
-    # inatividade: marca o ultimo momento em que houve aumento de contagem
-    # (permite considerar PARADA mesmo se o ESP continuar enviando status AUTO)
     try:
         agora_lc = now_bahia()
         now_ms_lc = int(agora_lc.timestamp() * 1000)
@@ -780,18 +738,15 @@ def update_machine():
 
     m["run"] = _safe_int(data.get("run", 0), 0)
 
-    # --- parada oficial (backend)
     try:
         agora = now_bahia()
         updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
         now_ms = int(agora.timestamp() * 1000)
 
         if new_status == "AUTO":
-            # voltou a produzir -> limpa parada
             _clear_stopped_since(machine_id, updated_at)
             m["stopped_since_ms"] = None
         else:
-            # entrou/parado -> seta apenas se ainda não existir
             existing = _get_stopped_since_ms(machine_id)
             if existing is None:
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
@@ -832,10 +787,8 @@ def update_machine():
 
     atualizar_producao_hora(m)
 
-    # ✅ RECODE: persistir NP hora a hora (sem travar o update)
     try:
         agora_np = now_bahia()
-        # assinatura pode variar entre versões, por isso usamos kwargs e protegemos com try/except
         processar_nao_programado(
             m=m,
             machine_id=machine_id,
@@ -845,7 +798,6 @@ def update_machine():
         )
     except Exception:
         try:
-            # fallback posicional (caso seu processar_nao_programado seja antigo)
             processar_nao_programado(m, machine_id, cliente_id)
         except Exception:
             pass
@@ -862,7 +814,8 @@ def update_machine():
 
 
 # ============================================================
-# ADMIN - RESET SOMENTE DA HORA
+# ADMIN - RESET (PADRÃO: DIA + HORA)
+#   - compatibilidade: payload {"scope":"hour"} mantém reset somente da hora
 # ============================================================
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
@@ -873,54 +826,111 @@ def admin_reset_hour():
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
+    scope = (data.get("scope") or "").strip().lower()
+
+    # ============================================================
+    # COMPAT: reset somente da hora (comportamento antigo)
+    # ============================================================
+    if scope == "hour":
+        try:
+            carregar_baseline_diario(m, machine_id)
+        except Exception:
+            pass
+
+        try:
+            prod_turno = int(m.get("producao_turno", 0) or 0)
+        except Exception:
+            prod_turno = 0
+
+        if prod_turno <= 0:
+            try:
+                esp_abs = int(m.get("esp_absoluto", 0) or 0)
+            except Exception:
+                esp_abs = 0
+            try:
+                base_d = int(m.get("baseline_diario", 0) or 0)
+            except Exception:
+                base_d = 0
+            prod_turno = max(0, esp_abs - base_d)
+
+        idx = calcular_ultima_hora_idx(m)
+        m["ultima_hora"] = idx
+        m["baseline_hora"] = int(prod_turno)
+        m["producao_hora"] = 0
+        m["percentual_hora"] = 0
+
+        try:
+            if isinstance(idx, int) and "producao_por_hora" in m and isinstance(m.get("producao_por_hora"), list):
+                if 0 <= idx < len(m["producao_por_hora"]):
+                    m["producao_por_hora"][idx] = 0
+        except Exception:
+            pass
+
+        m["_ph_loaded"] = False
+
+        return jsonify({
+            "ok": True,
+            "machine_id": machine_id,
+            "scope": "hour",
+            "hora_idx": idx,
+            "baseline_hora": int(m.get("baseline_hora", 0) or 0),
+            "note": "Hora resetada. Produção da hora volta a contar a partir de agora.",
+        })
+
+    # ============================================================
+    # NOVO PADRÃO: reset completo (DIA + HORA)
+    # - atende o botão "Zerar Producao" na tela de configuração
+    # ============================================================
     try:
-        carregar_baseline_diario(m, machine_id)
+        cid_req = None
+        try:
+            cid_req = _get_cliente_id_for_request()
+        except Exception:
+            cid_req = None
+        if cid_req:
+            m["cliente_id"] = cid_req
     except Exception:
         pass
 
-    try:
-        prod_turno = int(m.get("producao_turno", 0) or 0)
-    except Exception:
-        prod_turno = 0
+    # reseta contexto completo (zera producao_turno e reancora baseline_diario)
+    reset_contexto(m, machine_id)
 
-    if prod_turno <= 0:
-        try:
-            esp_abs = int(m.get("esp_absoluto", 0) or 0)
-        except Exception:
-            esp_abs = 0
-        try:
-            base_d = int(m.get("baseline_diario", 0) or 0)
-        except Exception:
-            base_d = 0
-        prod_turno = max(0, esp_abs - base_d)
+    # garante que "ultimo_dia" fique no dia operacional atual após o reset manual
+    try:
+        m["ultimo_dia"] = dia_operacional_ref_str(now_bahia())
+    except Exception:
+        pass
+
+    # prepara hora atual para começar do zero a partir de agora
+    try:
+        esp_abs_now = int(m.get("esp_absoluto", 0) or 0)
+    except Exception:
+        esp_abs_now = 0
 
     idx = calcular_ultima_hora_idx(m)
     m["ultima_hora"] = idx
-    m["baseline_hora"] = int(prod_turno)
+    m["baseline_hora"] = int(esp_abs_now)
     m["producao_hora"] = 0
     m["percentual_hora"] = 0
+    m["_ph_loaded"] = False
 
+    # zera o array do turno para evitar exibir resquício no front
     try:
-        if isinstance(idx, int) and "producao_por_hora" in m and isinstance(m.get("producao_por_hora"), list):
-            if 0 <= idx < len(m["producao_por_hora"]):
-                m["producao_por_hora"][idx] = 0
+        if isinstance(m.get("producao_por_hora"), list):
+            for i in range(len(m["producao_por_hora"])):
+                m["producao_por_hora"][i] = 0
     except Exception:
         pass
-
-    m["_ph_loaded"] = False
 
     return jsonify({
         "ok": True,
         "machine_id": machine_id,
+        "scope": "day+hour",
         "hora_idx": idx,
-        "baseline_hora": int(m.get("baseline_hora", 0) or 0),
-        "note": "Hora resetada. Produção da hora volta a contar a partir de agora.",
+        "note": "Reset completo executado. Dia e hora zerados a partir de agora.",
     })
 
 
-# ============================================================
-# RESET MANUAL
-# ============================================================
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
     data = request.get_json() or {}
@@ -930,9 +940,6 @@ def reset_manual():
     return jsonify({"status": "resetado", "machine_id": machine_id})
 
 
-# ============================================================
-# REFUGO: SALVAR (PERSISTENTE)
-# ============================================================
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
     data = request.get_json() or {}
@@ -979,22 +986,12 @@ def salvar_refugo():
     })
 
 
-# ============================================================
-# STATUS
-# ============================================================
 @machine_bp.route("/machine/status", methods=["GET"])
 def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
 
-    # =====================================================
-    # FECHAMENTO DIARIO (OPCAO A) TAMBEM NO /machine/status
-    # - Se o ESP nao enviar /machine/update na virada (23:59),
-    #   o reset nao roda e o historico diario fica vazio.
-    # - Garantimos que o registro diario fique com cliente_id,
-    #   pois a API de historico filtra por cliente_id.
-    # =====================================================
     cid_req = None
     try:
         cid_req = _get_cliente_id_for_request()
@@ -1004,7 +1001,6 @@ def machine_status():
     if cid_req:
         m["cliente_id"] = cid_req
 
-        # Backfill retroativo (uma vez por processo): corrige historico legado sem cliente_id
         if not m.get("_pd_backfill_done"):
             try:
                 _backfill_producao_diaria_cliente_id_all(machine_id, cid_req)
@@ -1019,8 +1015,6 @@ def machine_status():
         pass
     dia_ref_after = str(m.get("ultimo_dia") or "").strip()
 
-    # Se houve virada e reset, o reset_contexto gravou producao_diaria para dia_ref_before.
-    # Em algumas versoes, esse insert nao popula a coluna cliente_id. Garantimos aqui.
     if cid_req and dia_ref_before and dia_ref_after and dia_ref_before != dia_ref_after:
         try:
             raw_mid = _norm_machine_id(machine_id)
@@ -1048,9 +1042,6 @@ def machine_status():
     dia_ref = dia_operacional_ref_str(now_bahia())
     m["refugo_por_hora"] = load_refugo_24(machine_id, dia_ref)
 
-    # =====================================================
-    # HORA EXTRA (NÃO PROGRAMADO): lista 24h persistida (DB)
-    # =====================================================
     try:
         cid = _resolve_cliente_id_for_status(m)
         m["np_por_hora_24"] = _load_np_por_hora_24_scoped(machine_id, dia_ref, cid)
@@ -1058,19 +1049,12 @@ def machine_status():
         m["np_por_hora_24"] = [0] * 24
 
 
-    # =====================================================
-    # OPÇÃO 1 (BACKEND): produção exibível 24h (turno + NP)
-    # - Dentro do turno: usa producao_por_hora (index do turno)
-    # - Fora do turno: usa np_por_hora_24 (hora do dia)
-    # Resultado em m["producao_exibicao_24"] (lista 24)
-    # =====================================================
     try:
         exib = [0] * 24
 
         horas_turno = m.get("horas_turno") or []
         prod_turno = m.get("producao_por_hora") or []
 
-        # mapeia cada slot do turno para hora inicial (ex: "12:00 - 13:00" -> 12)
         if isinstance(horas_turno, list) and isinstance(prod_turno, list):
             for i, faixa in enumerate(horas_turno):
                 if i >= len(prod_turno):
@@ -1085,7 +1069,6 @@ def machine_status():
                         continue
                     exib[h_ini] = _safe_int(v, 0)
 
-        # fora do turno: sobrescreve com NP quando houver valor
         np24 = m.get("np_por_hora_24") or [0] * 24
         if isinstance(np24, list) and len(np24) == 24:
             for h in range(24):
@@ -1099,13 +1082,11 @@ def machine_status():
     if "run" not in m:
         m["run"] = 0
 
-    # --- parada oficial (backend): devolve parado_min e status_ui
     try:
         status = (m.get("status") or "").strip().upper()
         agora = now_bahia()
         now_ms = int(agora.timestamp() * 1000)
 
-        # regra: se status do ESP for AUTO, mas ficar sem aumento de contagem por no_count_stop_sec, considerar PARADA
         thr = 0
         try:
             thr = int(m.get("no_count_stop_sec", 0) or 0)
@@ -1122,7 +1103,7 @@ def machine_status():
             sem_contar = (now_ms_i - last_ts) // 1000
         except Exception:
             sem_contar = 0
-        
+
         if status == "AUTO" and thr >= 5 and sem_contar >= thr:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
@@ -1146,7 +1127,6 @@ def machine_status():
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
             if ss is None:
-                # fallback: se não existir (ex: primeiro status), ancora agora
                 updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
                 _set_stopped_since_ms(machine_id, now_ms, updated_at)
                 ss = now_ms
@@ -1191,18 +1171,12 @@ def machine_status():
     return jsonify(m)
 
 
-# ============================================================
-# HISTÓRICO - TELA (HTML)
-# ============================================================
 @machine_bp.route("/producao/historico", methods=["GET"])
 @login_required
 def historico_page():
     return render_template("historico.html")
 
 
-# ============================================================
-# HISTÓRICO - API (JSON)  ✅ AGORA É MULTI-TENANT
-# ============================================================
 @machine_bp.route("/api/producao/historico", methods=["GET"])
 def historico_producao_api():
     cliente_id = _get_cliente_id_for_request()
@@ -1249,7 +1223,6 @@ def historico_producao_api():
         mid = d.get("machine_id") or "maquina01"
         dia_ref = d.get("data") or ""
 
-        # para refugo, sempre usa máquina "limpa"
         refugo_total = _sum_refugo_24(mid, dia_ref)
 
         produzido = _safe_int(d.get("produzido"), 0)
