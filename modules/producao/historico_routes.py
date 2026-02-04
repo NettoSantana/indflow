@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-04 12:00 America/Bahia
-# MOTIVO: Registrar historico_bp (modules/producao/historico_routes.py) no producao_bp e corrigir imports ausentes (os).
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
+# LAST_RECODE: 2026-02-04 12:58 America/Bahia
+# MOTIVO: Corrigir cabeçalho (PATH) para refletir o arquivo correto (historico_routes.py), sem alterar lógica.
 
 from __future__ import annotations
 
