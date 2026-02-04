@@ -1,5 +1,5 @@
-﻿fix: corrigir imports que impediam subida do producao_bp
+﻿fix: historico diario usa fallback em memoria quando producao_horaria esta vazia (opcao B)
 
-- Adiciona import os (uso em TZ via os.getenv)
-- Adiciona import timezone (uso de timezone.utc)
-- Garante registro do endpoint /producao/api/producao/historico
+- Historico deixa de zerar quando producao_horaria nao tem linhas
+- Fallback calcula produzido a partir das OPs/memoria
+- Mantem estrutura e HTML existentes
