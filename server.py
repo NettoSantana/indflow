@@ -1,5 +1,10 @@
-from flask import Flask, render_template
+# PATH: server.py
+# LAST_RECODE: 2026-02-04 11:32 America/Bahia
+# MOTIVO: Adicionar logging minimo (requests + init_db + caminho do DB) para diagnosticar gravacao no Railway DEV.
+
 import os
+import logging
+from flask import Flask, render_template, request
 
 # ============================================================
 # BLUEPRINTS (já existentes)
@@ -23,6 +28,15 @@ from modules.clientes.routes import clientes_bp
 from modules.db_indflow import init_db
 from modules.machine_routes import machine_bp
 
+# ============================================================
+# LOGGING (mínimo, para Railway)
+# ============================================================
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger("indflow")
+
 app = Flask(__name__)
 
 # ============================================================
@@ -35,7 +49,35 @@ app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-inseguro-trocar")
 # ============================================================
 # BANCO SQLITE
 # ============================================================
-init_db()
+def _log_db_context():
+    db_env = os.getenv("INDFLOW_DB_PATH")
+    cwd = os.getcwd()
+    log.info("startup: CWD=%s", cwd)
+    log.info("startup: INDFLOW_DB_PATH=%s", db_env)
+
+_log_db_context()
+
+try:
+    log.info("startup: init_db() begin")
+    init_db()
+    log.info("startup: init_db() ok")
+except Exception:
+    log.exception("startup: init_db() failed")
+    raise
+
+# ============================================================
+# LOG REQUESTS (mínimo)
+# ============================================================
+@app.after_request
+def _log_request(response):
+    try:
+        xfwd = request.headers.get("X-Forwarded-For", "")
+        addr = xfwd.split(",")[0].strip() if xfwd else (request.remote_addr or "")
+        log.info("http: %s %s %s ip=%s", request.method, request.path, response.status_code, addr)
+    except Exception:
+        # Nunca quebrar request por causa de log.
+        pass
+    return response
 
 # ============================================================
 # ROTAS PRINCIPAIS

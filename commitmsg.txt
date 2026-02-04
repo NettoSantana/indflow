@@ -1,4 +1,4 @@
-﻿fix: historico calcula produzido por OP quando base/eventos vem zerado
+﻿fix: corrigir status_ui/parado_min (IndentationError) e restaurar transição PRODUZINDO/PARADA
 
-- Se existir ops no dia e produzido=0, calcula produzido somando op_pcs das OPs ENCERRADAS (ou metros/conv)
-- Mantem logica atual de producao_evento e producao_diaria, sem quebrar API /api/producao/historico
+- Corrige bloco de status_ui que estava quebrando o deploy
+- Restaura cálculo de parado_min e transição de estado
