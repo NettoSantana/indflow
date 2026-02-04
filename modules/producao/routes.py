@@ -1,10 +1,12 @@
 # PATH: modules/producao/routes.py
-# LAST_RECODE: 2026-02-02 22:35 America/Bahia
-# MOTIVO: Historico: se nao achar contagem real no DB, somar op_pcs das OPs do dia para preencher produzido/pecas_boas; timezone: exibir started_at/ended_at convertidos para America/Bahia (-03:00) assumindo UTC quando naive.
+# LAST_RECODE: 2026-02-04 09:00 America/Bahia
+# MOTIVO: Corrigir imports ausentes (os, timezone) que impediam o carregamento do producao_bp e do endpoint /producao/api/producao/historico.
+# INFO: lines_total=1448 lines_changed=4
 
 from flask import Blueprint, render_template, redirect, request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+import os
 import sqlite3
 from pathlib import Path
 from threading import Lock
