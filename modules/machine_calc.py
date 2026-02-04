@@ -1,6 +1,6 @@
 # Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc.py
-# Último recode: 2026-02-03 07:12 (America/Bahia)
-# Motivo: Opção 1 (reset diário robusto) - garantir verificar_reset_diario no cálculo de produção para zerar dia operacional corretamente.
+# Último recode: 2026-02-04 10:07 (America/Bahia)
+# Motivo: Ajustar dia operacional para virar às 05:00 e garantir reset de produção diária sem saldo acumulado.
 
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -13,8 +13,8 @@ UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 # ============================================================
 TZ_BAHIA = ZoneInfo("America/Bahia")
 
-# Dia operacional vira às 23:59 (não à meia-noite)
-DIA_OPERACIONAL_VIRA = time(23, 59)
+# Dia operacional vira às 05:00 (inicio do turno)
+DIA_OPERACIONAL_VIRA = time(5, 0)
 
 
 def now_bahia():
@@ -60,7 +60,7 @@ def _scoped_machine_id(m, machine_id: str) -> str:
 # ============================================================
 def dia_operacional_ref_dt(agora: datetime):
     """
-    Retorna a date do dia operacional (vira às 23:59).
+    Retorna a date do dia operacional (vira às 05:00).
     """
     if agora.time() >= DIA_OPERACIONAL_VIRA:
         return agora.date()
@@ -69,13 +69,13 @@ def dia_operacional_ref_dt(agora: datetime):
 
 def dia_operacional_ref_str(agora: datetime) -> str:
     """
-    Retorna YYYY-MM-DD do dia operacional (vira às 23:59).
+    Retorna YYYY-MM-DD do dia operacional (vira às 05:00).
     """
     return _dia_operacional_ref(agora)
 
 
 def dia_operacional_atual():
-    """Ajuda para outros módulos decidirem a virada às 23:59."""
+    """Ajuda para outros módulos decidirem a virada às 05:00."""
     return _dia_operacional_ref(now_bahia())
 
 
