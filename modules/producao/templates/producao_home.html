@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao_home.html
-Último recode: 2026-01-16 21:10 (America/Bahia)
-Motivo: Corrigir card de Produção para MAQUINA02 e separar Dia/Hora usando campos corretos do backend (status_ui/parado_min + percentual_turno/percentual_hora + producao_turno/producao_hora).
+Último recode: 2026-02-04 09:00 (America/Bahia)
+Motivo: Tornar o nome da máquina clicável para abrir o histórico já com machine_id (/producao/historico?machine_id=<id>), evitando tela de histórico vazia quando acessada sem querystring.
 -->
 
 {% extends 'base.html' %}
@@ -41,6 +41,12 @@ Motivo: Corrigir card de Produção para MAQUINA02 e separar Dia/Hora usando cam
     font-weight: 800;
     color: #0f172a;
     letter-spacing: 0.2px;
+  }
+
+  .machine-name-link {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
   }
 
   .machine-header-right {
@@ -159,7 +165,7 @@ Motivo: Corrigir card de Produção para MAQUINA02 e separar Dia/Hora usando cam
 </div>
 
 <script>
-  // ✅ Ajuste simples: aqui você controla quais máquinas aparecem.
+  // Ajuste simples: aqui você controla quais máquinas aparecem.
   // No seu caso atual, é a MAQUINA02.
   const maquinas = ["maquina02"];
 
@@ -221,7 +227,7 @@ Motivo: Corrigir card de Produção para MAQUINA02 e separar Dia/Hora usando cam
             ? `<div class="machine-stopline">${minsParado} min parados</div>`
             : ``;
 
-          // ✅ Dia (Turno)
+          // Dia (Turno)
           const percDia = toNum(data.percentual_turno, 0);
           const indDia = calcularIndicador(percDia);
 
@@ -230,7 +236,7 @@ Motivo: Corrigir card de Produção para MAQUINA02 e separar Dia/Hora usando cam
           const metaDiaPCS = toNum(data.meta_turno, 0);        // exemplo: 300000
           const prodDiaPCS = toNum(data.producao_turno, 0);    // exemplo: 97337
 
-          // ✅ Hora
+          // Hora
           const percHora = toNum(data.percentual_hora, 0);
           const indHora = calcularIndicador(percHora);
 
@@ -246,10 +252,14 @@ Motivo: Corrigir card de Produção para MAQUINA02 e separar Dia/Hora usando cam
           const tempoMedio = toNum(data.tempo_medio_min_por_peca, 0);
           const tempoMedioTxt = tempoMedio > 0 ? String(tempoMedio).replace(".", ",") : "—";
 
+          const historicoHref = `/producao/historico?machine_id=${encodeURIComponent(id)}`;
+
           const card = `
             <div class="machine-card">
               <div class="machine-header">
-                <div class="machine-name">${nome}</div>
+                <div class="machine-name">
+                  <a class="machine-name-link" href="${historicoHref}" title="Abrir histórico">${nome}</a>
+                </div>
                 <div class="machine-header-right">
                   <div class="machine-status ${statusClass}">${statusUI}</div>
                   <button class="btn-x" title="Excluir equipamento" onclick="alert('Excluir ainda não implementado'); return false;">×</button>

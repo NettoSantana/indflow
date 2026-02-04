@@ -1,5 +1,5 @@
-﻿feat: registrar historico_bp no producao_bp
+﻿fix: corrigir imports que impediam subida do producao_bp
 
-- Importa historico_bp (modules/producao/historico_routes.py)
-- Registra blueprint para expor /producao/api/producao/historico
-- Corrige import os ausente
+- Adiciona import os (uso em TZ via os.getenv)
+- Adiciona import timezone (uso de timezone.utc)
+- Garante registro do endpoint /producao/api/producao/historico
