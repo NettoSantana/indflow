@@ -1,11 +1,10 @@
 # PATH: modules/producao/routes.py
-# LAST_RECODE: 2026-02-04 10:05 America/Bahia
-# MOTIVO: Fazer /producao/api/producao/historico delegar para historico_producao_api (machine_routes) para calcular produzido via producao_evento, mantendo a mesma URL usada pelo historico.html.
-# INFO: lines_total=1456 lines_changed=~30
+# LAST_RECODE: 2026-02-02 22:35 America/Bahia
+# MOTIVO: Historico: se nao achar contagem real no DB, somar op_pcs das OPs do dia para preencher produzido/pecas_boas; timezone: exibir started_at/ended_at convertidos para America/Bahia (-03:00) assumindo UTC quando naive.
+
 from flask import Blueprint, render_template, redirect, request, jsonify
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-import os
 import sqlite3
 from pathlib import Path
 from threading import Lock
@@ -887,15 +886,6 @@ def api_historico():
       pecas_boas = produzido
       refugo_total = 0
     """
-    # Delegar para o historico do machine_routes (usa producao_evento e fallback por OPs).
-    # Mantemos a mesma URL /producao/api/producao/historico para o historico.html.
-    try:
-        from modules.machine_routes import historico_producao_api as _historico_producao_api
-        return _historico_producao_api()
-    except Exception:
-        # Fallback: usa logica legada deste modulo (producao_diaria/producao_horaria).
-        pass
-
     machine_id = (request.args.get("machine_id") or "").strip() or None
 
     try:
