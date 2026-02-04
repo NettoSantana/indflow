@@ -1,5 +1,5 @@
-﻿fix: zerar producao deve zerar horas no banco
+﻿fix: reset-manual deve zerar producao_diaria por data e data_ref
 
-- /admin/reset-manual agora zera producao_diaria + producao_horaria do dia atual
-- Zera refugo_horaria do dia atual para nao manter valores antigos
-- Mantem resto do sistema sem alteracoes
+- /admin/reset-manual agora zera producao_diaria mesmo quando a coluna do dia for data_ref
+- Mantem zeragem de producao_horaria e refugo_horaria do dia atual
+- Mantem cadastros intactos e nao altera dias anteriores
