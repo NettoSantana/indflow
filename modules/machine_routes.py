@@ -1,7 +1,7 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-04 08:31 America/Bahia
-# MOTIVO: Corrigir IndentationError no bloco de status_ui e restaurar transição PRODUZINDO/PARADA com cálculo de parado_min
-# INFO: Linhas totais: 1486 | Linhas alteradas: 95 | Alteracao pontual no bloco de status_ui/parado_min.
+# PATH: indflow/modules/machine_routes.py
+# LAST_RECODE: 2026-02-04 14:55 America/Bahia
+# MOTIVO: Garantir baseline inicial no primeiro /machine/update e iniciar produção do zero mesmo com contador absoluto do ESP (corrige percentuais absurdos ao criar máquina nova).
+# INFO: lines_total=1486 lines_changed=~40 alteracao_pontual=baseline_inicial_update_machine
 
 # modules/machine_routes.py
 import os
@@ -694,6 +694,30 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
     conn.commit()
 
 
+def _load_baseline_esp_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str | None) -> int:
+    """Carrega baseline_esp do dia (multi-tenant). Retorna 0 se não existir."""
+    try:
+        if cliente_id:
+            cur = conn.execute(
+                "SELECT baseline_esp FROM baseline_diario WHERE machine_id=? AND dia_ref=? AND cliente_id=? LIMIT 1",
+                (machine_id, dia_ref, cliente_id),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT baseline_esp FROM baseline_diario WHERE machine_id=? AND dia_ref=? AND cliente_id IS NULL LIMIT 1",
+                (machine_id, dia_ref),
+            )
+        row = cur.fetchone()
+        if not row:
+            return 0
+        try:
+            return int(row[0] or 0)
+        except Exception:
+            return 0
+    except Exception:
+        return 0
+
+
 def _ensure_producao_evento_table(conn):
     conn.execute(
         """
@@ -999,15 +1023,29 @@ def update_machine():
             if not _has_baseline_for_day(conn, machine_id, dia_ref, cliente_id):
                 _insert_baseline_for_day(conn, machine_id, dia_ref, int(m["esp_absoluto"]), updated_at, cliente_id)
                 baseline_initialized = True
+
+            baseline_esp = _load_baseline_esp_for_day(conn, machine_id, dia_ref, cliente_id)
         finally:
             conn.close()
 
     except Exception:
         baseline_initialized = False
+        baseline_esp = 0
 
-    carregar_baseline_diario(m, machine_id)
+    # IMPORTANTE: não depende do baseline_repo (evita mismatch de scope). Usa baseline_diario direto.
+    try:
+        m["baseline_diario"] = int(baseline_esp or 0)
+    except Exception:
+        m["baseline_diario"] = 0
 
+    # Produção incremental (ESP manda contador absoluto)
     producao_atual = max(int(m.get("esp_absoluto", 0) or 0) - int(m.get("baseline_diario", 0) or 0), 0)
+
+    # PRIMEIRO PACOTE DO DIA: apenas inicializa baseline e começa do zero.
+    if baseline_initialized:
+        producao_atual = 0
+        m["_last_esp_abs_seen"] = int(m.get("esp_absoluto", 0) or 0)
+
     m["producao_turno"] = producao_atual
 
     if int(m.get("meta_turno", 0) or 0) > 0:

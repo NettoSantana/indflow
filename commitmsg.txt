@@ -1,5 +1,5 @@
-﻿fix: endpoint para purge total das tabelas operacionais (producao/estado)
+﻿fix: corrigir auth do admin purge (check_admin_auth + get_db_path)
 
-- adiciona POST /admin/purge-production (apaga definitivamente dados operacionais)
-- preserva cadastros (clientes, usuarios, devices, machine_config etc)
-- opcional: filtra por machine_id quando a tabela tiver coluna machine_id
+- Adiciona get_db_path() para padronizar INDFLOW_DB_PATH (/data/indflow.db)
+- Implementa _check_admin_auth() usando token (INDFLOW_ADMIN_TOKEN/ADMIN_RESET_TOKEN)
+- Remove NameError no POST /admin/purge-production (Railway DEV)
