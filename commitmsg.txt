@@ -1,4 +1,4 @@
-﻿fix: historico soma produzido a partir de OPs quando eventos nao existem
+﻿fix: historico calcula produzido por OP quando eventos/base nao tem produzido
 
-- Quando houver ops no dia e produzido=0, calcula produzido pelo somatorio de op_pcs (ou metros/conv)
-- Mantem logica atual de producao_evento e producao_diaria
+- Se existir ops no dia e produzido=0, calcula produzido somando op_pcs das OPs ENCERRADAS (ou metros/conv)
+- Mantem logica de producao_evento e producao_diaria
