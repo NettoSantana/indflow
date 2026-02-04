@@ -1725,4 +1725,4 @@ def _get_historico_producao(cliente_id: str | None, machine_id: str, inicio: str
 # - Mantem logica de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
-# git push##
+# git push
