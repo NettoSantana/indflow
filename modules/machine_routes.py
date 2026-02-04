@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 19:15 America/Bahia
-# MOTIVO: Corrigir SyntaxError no reset-manual e garantir zeragem de producao_diaria por data e data_ref, sem mexer no resto.
+# LAST_RECODE: 2026-02-04 19:26 America/Bahia
+# MOTIVO: OPCAO 1: /admin/reset-manual deve zerar producao_diaria do dia atual (e horas) no banco para historico nao manter valor antigo.
 # INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
 # modules/machine_routes.py
 import os
@@ -1307,75 +1307,28 @@ def _admin_zerar_producao_db_day_hour(machine_id: str, dia_ref: str, cliente_id:
     conn = get_db()
     try:
         for mid in mids:
-            # zera producao_horaria do dia (todas as horas)
             try:
-                conn.execute(
-                    "UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id = ? AND cliente_id = ?",
-                    (dia_ref, mid, cid),
-                )
+                conn.execute("UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id = ? AND cliente_id = ?", (dia_ref, mid, cid))
             except Exception:
                 try:
-                    conn.execute(
-                        "UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id = ?",
-                        (dia_ref, mid),
-                    )
+                    conn.execute("UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id = ?", (dia_ref, mid))
                 except Exception:
                     pass
-
-            # zera producao_diaria do dia (compatibilidade: coluna data OU data_ref)
             try:
-                conn.execute(
-                    "UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ? AND cliente_id = ?",
-                    (dia_ref, mid, cid),
-                )
+                conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ? AND cliente_id = ?", (dia_ref, mid, cid))
             except Exception:
                 try:
-                    conn.execute(
-                        "UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ?",
-                        (dia_ref, mid),
-                    )
+                    conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ?", (dia_ref, mid))
                 except Exception:
                     pass
-
-            try:
-                conn.execute(
-                    "UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data_ref = ? AND machine_id = ? AND cliente_id = ?",
-                    (dia_ref, mid, cid),
-                )
-            except Exception:
-                try:
-                    conn.execute(
-                        "UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data_ref = ? AND machine_id = ?",
-                        (dia_ref, mid),
-                    )
-                except Exception:
-                    pass
-
-        # fallback quando machine_id estiver salvo como "cliente::maquina"
         try:
-            conn.execute(
-                "UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id LIKE ?",
-                (dia_ref, like_mid),
-            )
+            conn.execute("UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id LIKE ?", (dia_ref, like_mid))
         except Exception:
             pass
-
         try:
-            conn.execute(
-                "UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id LIKE ?",
-                (dia_ref, like_mid),
-            )
+            conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id LIKE ?", (dia_ref, like_mid))
         except Exception:
             pass
-
-        try:
-            conn.execute(
-                "UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data_ref = ? AND machine_id LIKE ?",
-                (dia_ref, like_mid),
-            )
-        except Exception:
-            pass
-
         conn.commit()
     finally:
         conn.close()
@@ -1528,11 +1481,56 @@ def admin_esp_reset_counter():
 
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
-    d=request.get_json(silent=True) or {}; machine_id=_norm_machine_id(d.get("machine_id","maquina01")); m=get_machine(machine_id); reset_contexto(m, machine_id)
+    data = request.get_json() or {}
+    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
+    m = get_machine(machine_id)
+
+    # Reseta contexto em memoria (estado atual da maquina)
+    reset_contexto(m, machine_id)
+
+    # Zera producao consolidada do dia no banco, para historico nao manter valor antigo.
     try:
-        cid=(_get_cliente_id_for_request() or "").strip() or None; dia_ref=dia_operacional_ref_str(now_bahia()); _admin_zerar_producao_db_day_hour(machine_id=machine_id,dia_ref=dia_ref,cliente_id=cid); conn=get_db(); mid_raw=_norm_machine_id(_unscope_machine_id(machine_id)); like_mid=f"%::{mid_raw}"; mids=[mid_raw]+([f"{cid}::{mid_raw}"] if cid else []); cols=[r[1] for r in conn.execute("PRAGMA table_info(refugo_horaria)").fetchall()]; has_cid=("cliente_id" in cols); [(conn.execute("UPDATE refugo_horaria SET refugo=0 WHERE data_ref=? AND machine_id=? AND cliente_id=?", (dia_ref, mid, cid)) if has_cid else conn.execute("UPDATE refugo_horaria SET refugo=0 WHERE data_ref=? AND machine_id=?", (dia_ref, mid))) for mid in mids]; conn.execute("UPDATE refugo_horaria SET refugo=0 WHERE data_ref=? AND machine_id LIKE ?", (dia_ref, like_mid)); conn.commit(); conn.close()
-    except Exception: pass
-    return jsonify({"status":"resetado","machine_id":machine_id})
+        cid = None
+        try:
+            cid = _get_cliente_id_for_request()
+        except Exception:
+            cid = None
+
+        dia_ref_db = dia_operacional_ref_str(now_bahia())
+
+        _admin_zerar_producao_db_day_hour(machine_id=machine_id, dia_ref=dia_ref_db, cliente_id=cid or None)
+
+        # Opcional: se existir refugo_horaria, zerar refugo do dia para evitar resquicios na UI.
+        try:
+            conn = get_db()
+            try:
+                mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
+                like_mid = f"%::{mid_raw}"
+                mids = [mid_raw] + ([f"{cid}::{mid_raw}"] if cid else [])
+
+                for mid in mids:
+                    try:
+                        conn.execute("UPDATE refugo_horaria SET refugo = 0 WHERE dia_ref = ? AND machine_id = ? AND cliente_id = ?", (dia_ref_db, mid, cid))
+                    except Exception:
+                        try:
+                            conn.execute("UPDATE refugo_horaria SET refugo = 0 WHERE dia_ref = ? AND machine_id = ?", (dia_ref_db, mid))
+                        except Exception:
+                            pass
+
+                try:
+                    conn.execute("UPDATE refugo_horaria SET refugo = 0 WHERE dia_ref = ? AND machine_id LIKE ?", (dia_ref_db, like_mid))
+                except Exception:
+                    pass
+
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    return jsonify({"status": "resetado", "machine_id": machine_id})
 
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():

@@ -1,5 +1,5 @@
-﻿fix: reset-manual deve zerar producao_diaria por data e data_ref
+﻿fix: corrigir SyntaxError em machine_routes e manter reset-manual consistente
 
-- /admin/reset-manual agora zera producao_diaria mesmo quando a coluna do dia for data_ref
-- Mantem zeragem de producao_horaria e refugo_horaria do dia atual
-- Mantem cadastros intactos e nao altera dias anteriores
+- Corrige bloco try/except que quebrou o deploy (SyntaxError linha 1319)
+- /admin/reset-manual zera producao_diaria por data e por data_ref (compatibilidade)
+- Mantem restante do arquivo sem alteracoes fora do escopo
