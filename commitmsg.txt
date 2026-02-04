@@ -1,5 +1,5 @@
 ﻿fix: recalcular producao_diaria em tempo real (patch aditivo)
 
-- nao remove codigo existente
 - diaria passa a acompanhar a horaria durante o dia
-- elimina diff negativa no historico
+- elimina diaria=0 e diff negativa no historico
+- sem remover logica existente
