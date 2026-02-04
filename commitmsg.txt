@@ -1,7 +1,7 @@
-﻿fix: zerar producao deve zerar todas as horas e o diario no banco
+﻿fix: zerar producao deve limpar horas passadas no banco
 
-No reset day+hour (/admin/reset-hour), zerar producao_horaria (todas as horas do dia atual) e producao_diaria do dia atual
+No reset day+hour (/admin/reset-hour), zerar producao_horaria do dia inteiro (todas as horas) e producao_diaria do dia
+
+Inclui fallback para machine_id scoped (cliente_id::maquina) via LIKE
 
 Mantem cadastros intactos e nao apaga dias anteriores
-
-Evita inconsistencias entre configuracao por hora, dashboard e historico

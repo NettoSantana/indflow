@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 18:50 America/Bahia
-# MOTIVO: Historico diario usa apenas producao_diaria; reset "Zerar Producao" zera producao_diaria e todas as horas do dia (producao_horaria) no banco.
+# LAST_RECODE: 2026-02-04 19:15 America/Bahia
+# MOTIVO: Ajustar /admin/reset-manual (botao Zerar Producao) para zerar producao_diaria + producao_horaria + refugo_horaria do dia atual, evitando horas antigas manterem valores.
 # INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
 # modules/machine_routes.py
 import os
@@ -1481,11 +1481,11 @@ def admin_esp_reset_counter():
 
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
-    data = request.get_json() or {}
-    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
-    m = get_machine(machine_id)
-    reset_contexto(m, machine_id)
-    return jsonify({"status": "resetado", "machine_id": machine_id})
+    d=request.get_json(silent=True) or {}; machine_id=_norm_machine_id(d.get("machine_id","maquina01")); m=get_machine(machine_id); reset_contexto(m, machine_id)
+    try:
+        cid=(_get_cliente_id_for_request() or "").strip() or None; dia_ref=dia_operacional_ref_str(now_bahia()); _admin_zerar_producao_db_day_hour(machine_id=machine_id,dia_ref=dia_ref,cliente_id=cid); conn=get_db(); mid_raw=_norm_machine_id(_unscope_machine_id(machine_id)); like_mid=f"%::{mid_raw}"; mids=[mid_raw]+([f"{cid}::{mid_raw}"] if cid else []); cols=[r[1] for r in conn.execute("PRAGMA table_info(refugo_horaria)").fetchall()]; has_cid=("cliente_id" in cols); [(conn.execute("UPDATE refugo_horaria SET refugo=0 WHERE data_ref=? AND machine_id=? AND cliente_id=?", (dia_ref, mid, cid)) if has_cid else conn.execute("UPDATE refugo_horaria SET refugo=0 WHERE data_ref=? AND machine_id=?", (dia_ref, mid))) for mid in mids]; conn.execute("UPDATE refugo_horaria SET refugo=0 WHERE data_ref=? AND machine_id LIKE ?", (dia_ref, like_mid)); conn.commit(); conn.close()
+    except Exception: pass
+    return jsonify({"status":"resetado","machine_id":machine_id})
 
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
