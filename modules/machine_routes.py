@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 19:26 America/Bahia
-# MOTIVO: Corrigir reset (zerar por data) e adicionar endpoint /admin/reset-date; manter reset-manual e evitar historico ficar com valores antigos.
+# LAST_RECODE: 2026-02-04 20:27 America/Bahia
+# MOTIVO: Corrigir /admin/reset-date (zerar producao por data) que estava retornando HTTP 500 por usar funcao inexistente para cliente_id
 import os
 import hashlib
 import uuid
@@ -1600,7 +1600,7 @@ def admin_reset_date():
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", dia_ref):
         return jsonify({"ok": False, "error": "dia_ref deve ser YYYY-MM-DD", "dia_ref": dia_ref}), 400
 
-    cid = _extract_cliente_id_from_request() or None
+    cid = _get_cliente_id_for_request() or None
 
     out = _admin_reset_producao_por_data(machine_id=machine_id, dia_ref=dia_ref, cliente_id=cid)
     return jsonify(out)
