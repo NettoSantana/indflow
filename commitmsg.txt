@@ -1,5 +1,5 @@
-﻿fix: historico usar producao_diaria (mesmo criterio do dashboard)
+﻿fix: historico sem produzido em dobro
 
-- /api/producao/historico passa a ler producao_diaria como fonte principal
-- refugo soma por refugo_horaria quando existir
-- OPs retornam apenas como contexto (nao entram no total)
+No /api/producao/historico, evitar sobrescrever produzido da base com producao_evento
+
+producao_evento passa a ser somente fallback quando produzido da base for 0

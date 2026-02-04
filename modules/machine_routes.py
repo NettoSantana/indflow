@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 18:13 America/Bahia
-# MOTIVO: Corrigir histórico com produzido em dobro: no /api/producao/historico, usar producao_evento apenas como fallback quando base estiver 0.
+# LAST_RECODE: 2026-02-04 18:23 America/Bahia
+# MOTIVO: Corrigir historico com produzido em dobro: no /api/producao/historico usar exclusivamente producao_diaria (e fallback por OP).
 # INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
 
 # modules/machine_routes.py
@@ -1694,11 +1694,12 @@ def historico_producao_api():
 
     base = _get_historico_producao(cliente_id, machine_id, inicio, fim) or []
 
-    eventos_por_dia = _sum_eventos_por_dia(cliente_id, machine_id, inicio, fim)
+    # IMPORTANTE: historico diario deve usar exclusivamente producao_diaria.
+    # producao_evento eh log incremental e nao entra no calculo do historico (evita duplicar produzido).
 
     base_por_dia = {item.get("data"): item for item in base if item.get("data")}
 
-    dias = set(base_por_dia.keys()) | set(eventos_por_dia.keys())
+    dias = set(base_por_dia.keys())
 
     if not dias:
         return jsonify([])
@@ -1711,13 +1712,6 @@ def historico_producao_api():
         item = dict(base_por_dia.get(dia) or {})
         item["data"] = dia
         item["machine_id"] = machine_id
-
-        if dia in eventos_por_dia:
-            ev = _safe_int(eventos_por_dia.get(dia), 0)
-            # Importante: evitar "dobrar" o produzido. A base (producao_diaria/OP) ja representa o dia.
-            # Portanto, producao_evento serve apenas como fallback quando a base nao tiver produzido.
-            if _safe_int(item.get("produzido"), 0) == 0 and ev > 0:
-                item["produzido"] = ev
 
         item["meta"] = _safe_int(item.get("meta"), meta_default)
 
