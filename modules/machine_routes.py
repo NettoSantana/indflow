@@ -1,7 +1,7 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-04 08:31 America/Bahia
-# MOTIVO: Corrigir IndentationError no bloco de status_ui e restaurar transição PRODUZINDO/PARADA com cálculo de parado_min
-# INFO: Linhas totais: 1486 | Linhas alteradas: 95 | Alteracao pontual no bloco de status_ui/parado_min.
+# PATH: modules/machine_routes.py
+# LAST_RECODE: 2026-02-04 10:20 America/Bahia
+# MOTIVO: Historico: garantir produzido/pecas_boas no /api/producao/historico usando fallback por OPs encerradas quando eventos/base retornarem 0.
+# INFO: lines_total=1504 lines_changed=~50
 
 # modules/machine_routes.py
 import os
@@ -67,22 +67,33 @@ def _safe_int(v, default=0):
 
 def _calc_produzido_from_ops(ops: list) -> int:
     """
-    Fallback simples para dias em que existem OPs, mas produzido esta 0.
-    Regra:
-      - Soma op_pcs das OPs ENCERRADAS.
-      - Se op_pcs for 0 e houver op_metros + op_conv_m_por_pcs, converte para pcs (metros / conv).
-      - Ignora OP ATIVA com pcs=0 para nao inflar historico.
+    Fallback simples para dias em que existem OPs, mas 'produzido' esta 0.
+
+    Regras (ordem):
+      1) Soma op_pcs das OPs encerradas (status comeca com 'ENCERR' OU ended_at preenchido).
+      2) Se op_pcs for 0 e houver op_metros + op_conv_m_por_pcs, converte para pcs (floor(metros/conv)).
+      3) Ignora OP ATIVA sem pcs para nao inflar historico.
     """
     if not isinstance(ops, list) or not ops:
         return 0
 
     total = 0
+
     for op in ops:
         if not isinstance(op, dict):
             continue
 
         status = (op.get("status") or "").strip().upper()
-        if status != "ENCERRADA":
+        ended_at = (op.get("ended_at") or "").strip()
+
+        is_encerrada = False
+        if status.startswith("ENCERR"):
+            is_encerrada = True
+        elif ended_at:
+            # Alguns registros antigos podem nao ter status consistente
+            is_encerrada = True
+
+        if not is_encerrada:
             continue
 
         pcs = _safe_int(op.get("op_pcs"), 0)
@@ -98,7 +109,7 @@ def _calc_produzido_from_ops(ops: list) -> int:
 
         if metros > 0 and conv > 0:
             try:
-                total += int(round(metros / conv))
+                total += int(metros // conv)
             except Exception:
                 pass
 
@@ -1440,13 +1451,20 @@ def historico_producao_api():
         refugo_total = _safe_int(item.get("refugo_total"), 0)
         produzido = _safe_int(item.get("produzido"), 0)
 
-        # Fallback: se tem OPs no dia mas produzido esta 0, calcula pelo somatorio das OPs ENCERRADAS.
+        # Fallback: se tem OPs no dia e a base/eventos vierem 0, calcula pelo somatorio das OPs encerradas.
+        # Isso evita dias zerados quando a contagem real esta nas OPs, mas producao_evento/producao_diaria nao tem dados.
         try:
             ops_list = item.get("ops") or []
-            if produzido == 0 and isinstance(ops_list, list) and len(ops_list) > 0:
-                produzido_ops = _calc_produzido_from_ops(ops_list)
-                if produzido_ops > 0:
-                    produzido = int(produzido_ops)
+            if isinstance(ops_list, list) and len(ops_list) > 0:
+                if produzido == 0:
+                    produzido_ops = _calc_produzido_from_ops(ops_list)
+                    if produzido_ops > 0:
+                        produzido = int(produzido_ops)
+                        item["produzido"] = produzido
+
+                # Se ainda estiver 0, mas pecas_boas veio preenchido, reconstrui produzido = boas + refugo.
+                if produzido == 0 and pecas_boas > 0:
+                    produzido = int(pecas_boas + refugo_total)
                     item["produzido"] = produzido
         except Exception:
             pass
