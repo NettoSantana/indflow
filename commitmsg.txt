@@ -1,5 +1,4 @@
-﻿fix: historico diario usa fallback em memoria quando producao_horaria esta vazia (opcao B)
+﻿fix: historico calcula produzido por OP quando base/eventos vem zerado
 
-- Historico deixa de zerar quando producao_horaria nao tem linhas
-- Fallback calcula produzido a partir das OPs/memoria
-- Mantem estrutura e HTML existentes
+- Se existir ops no dia e produzido=0, calcula produzido somando op_pcs das OPs ENCERRADAS (ou metros/conv)
+- Mantem logica atual de producao_evento e producao_diaria, sem quebrar API /api/producao/historico
