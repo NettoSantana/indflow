@@ -1,4 +1,5 @@
-﻿fix: historico nao zerar produzido quando eventos_por_dia=0
+﻿feat: registrar historico_bp no producao_bp
 
-- Evita sobrescrever 'produzido' (OP/producao_diaria) com 0 vindo de producao_evento
-- Mantem o valor existente quando nao houver eventos no dia
+- Importa historico_bp (modules/producao/historico_routes.py)
+- Registra blueprint para expor /producao/api/producao/historico
+- Corrige import os ausente
