@@ -1,6 +1,5 @@
-﻿fix: corrigir cabecalho e alinhar historico ao dashboard
+﻿fix: historico usar producao_diaria (mesmo criterio do dashboard)
 
-- corrige PATH do arquivo historico_routes.py
-- historico passa a usar calcular_totais (base producao_evento)
-- elimina divergencia entre dashboard e historico
-- OPs permanecem apenas informativas
+- /api/producao/historico passa a ler producao_diaria como fonte principal
+- refugo soma por refugo_horaria quando existir
+- OPs retornam apenas como contexto (nao entram no total)

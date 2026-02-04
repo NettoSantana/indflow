@@ -1,6 +1,6 @@
 # PATH: server.py
-# LAST_RECODE: 2026-02-04 11:59 America/Bahia
-# MOTIVO: Evoluir /admin/db-check para comparar producao_horaria vs producao_diaria e amostrar producao_evento por dia (debug no Railway sem Shell).
+# LAST_RECODE: 2026-02-04 13:49 America/Bahia
+# MOTIVO: Adicionar endpoint admin para apagar definitivamente dados de producao (tabelas operacionais) preservando cadastros.
 
 import os
 import logging
@@ -365,6 +365,88 @@ def admin_db_check():
 # ============================================================
 # ROTAS PRINCIPAIS
 # ============================================================
+
+@app.post("/admin/purge-production")
+def admin_purge_production():
+    """
+    Apaga definitivamente dados operacionais das tabelas de producao/estado, preservando cadastros.
+    Tabelas alvo (conforme autorizacao do usuario):
+      - producao_evento, producao_horaria, producao_diaria
+      - machine_count_state, machine_stop
+      - nao_programado_diario, nao_programado_horaria
+      - refugo_horaria
+
+    Body (JSON) opcional:
+      { "machine_id": "maquina02" }  # se informado, tenta apagar apenas dessa maquina quando a tabela tiver a coluna machine_id
+    """
+    auth = _check_admin_auth()
+    if auth is not None:
+        return auth
+
+    payload = request.get_json(silent=True) or {}
+    machine_id = (payload.get("machine_id") or "").strip() or None
+
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    tables = [
+        "producao_evento",
+        "producao_horaria",
+        "producao_diaria",
+        "machine_count_state",
+        "machine_stop",
+        "nao_programado_diario",
+        "nao_programado_horaria",
+        "refugo_horaria",
+    ]
+
+    deleted = {}
+    errors = []
+
+    def _table_has_column(table_name: str, col: str) -> bool:
+        try:
+            cols = cur.execute(f"PRAGMA table_info({table_name})").fetchall()
+            return any(r[1] == col for r in cols)
+        except Exception:
+            return False
+
+    for t in tables:
+        try:
+            if machine_id and _table_has_column(t, "machine_id"):
+                cur.execute(f"DELETE FROM {t} WHERE machine_id = ?", (machine_id,))
+            else:
+                cur.execute(f"DELETE FROM {t}")
+            deleted[t] = cur.rowcount
+        except Exception as e:
+            errors.append({"table": t, "error": str(e)})
+
+    # Zera AUTOINCREMENT (SQLite) para as tabelas que usam sqlite_sequence
+    try:
+        cur.execute(
+            "DELETE FROM sqlite_sequence WHERE name IN ({})".format(",".join("?" for _ in tables)),
+            tuple(tables),
+        )
+    except Exception:
+        pass
+
+    conn.commit()
+    conn.close()
+
+    note = "Purge executado. Dados operacionais apagados."
+    if machine_id:
+        note += f" machine_id={machine_id}"
+
+    return jsonify({
+        "ok": len(errors) == 0,
+        "db_path": db_path,
+        "machine_id": machine_id,
+        "deleted": deleted,
+        "errors": errors,
+        "note": note,
+    })
+
 @app.route("/")
 def index():
     return render_template("index.html")
