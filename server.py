@@ -1,6 +1,6 @@
 # PATH: server.py
-# LAST_RECODE: 2026-02-04 11:45 America/Bahia
-# MOTIVO: Criar endpoint admin temporario /admin/db-check para inspecionar o SQLite real (/data/indflow.db) no Railway sem acesso a Shell.
+# LAST_RECODE: 2026-02-04 11:59 America/Bahia
+# MOTIVO: Evoluir /admin/db-check para comparar producao_horaria vs producao_diaria e amostrar producao_evento por dia (debug no Railway sem Shell).
 
 import os
 import logging
@@ -103,18 +103,46 @@ def _admin_token_ok() -> bool:
     return token_in == expected
 
 
+def _pragma_table_info(cur, table: str):
+    try:
+        return cur.execute(f"PRAGMA table_info({table})").fetchall()
+    except Exception:
+        return []
+
+
+def _columns_from_pragma(pragma_rows):
+    # PRAGMA table_info: (cid, name, type, notnull, dflt_value, pk)
+    return [r[1] for r in (pragma_rows or []) if len(r) >= 2]
+
+
+def _pick_first(cols, candidates):
+    for c in candidates:
+        if c in cols:
+            return c
+    return None
+
+
 @app.get("/admin/db-check")
 def admin_db_check():
     if not _admin_token_ok():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
 
     db_path = os.getenv("INDFLOW_DB_PATH", "/data/indflow.db")
+    machine_id = (request.args.get("machine_id") or "maquina02").strip()
+    days_limit = int((request.args.get("days") or "10").strip() or "10")
+    if days_limit < 1:
+        days_limit = 1
+    if days_limit > 31:
+        days_limit = 31
+
     out = {
         "ok": True,
         "db_path": db_path,
+        "machine_id": machine_id,
         "tables": [],
         "counts": {},
         "samples": {},
+        "compare": [],
         "errors": [],
     }
 
@@ -138,6 +166,7 @@ def admin_db_check():
         for t in [
             "producao_diaria",
             "producao_horaria",
+            "producao_evento",
             "machine_config",
             "devices",
             "usuarios",
@@ -146,32 +175,184 @@ def admin_db_check():
             if t in tables:
                 safe_count(t)
 
-        # Samples maquina02 (se existirem as colunas esperadas)
+        # Schema (para debugar nome de colunas no Railway)
+        if "producao_evento" in tables:
+            try:
+                pe_info = _pragma_table_info(cur, "producao_evento")
+                out["samples"]["producao_evento_schema"] = pe_info
+            except Exception as e:
+                out["errors"].append(f"schema producao_evento: {e}")
+
+        # Samples maquina (últimos N)
         if "producao_horaria" in tables:
             try:
                 rows = cur.execute(
                     "SELECT data_ref, machine_id, hora_idx, produzido, meta, updated_at "
                     "FROM producao_horaria "
-                    "WHERE machine_id='maquina02' "
+                    "WHERE machine_id=? "
                     "ORDER BY data_ref DESC, hora_idx DESC "
-                    "LIMIT 20"
+                    "LIMIT 20",
+                    (machine_id,),
                 ).fetchall()
-                out["samples"]["producao_horaria_maquina02"] = rows
+                out["samples"][f"producao_horaria_{machine_id}"] = rows
             except Exception as e:
-                out["errors"].append(f"sample producao_horaria_maquina02: {e}")
+                out["errors"].append(f"sample producao_horaria: {e}")
 
         if "producao_diaria" in tables:
             try:
                 rows = cur.execute(
                     "SELECT data, machine_id, produzido, meta, percentual "
                     "FROM producao_diaria "
-                    "WHERE machine_id='maquina02' "
+                    "WHERE machine_id=? "
                     "ORDER BY data DESC "
-                    "LIMIT 20"
+                    "LIMIT 20",
+                    (machine_id,),
                 ).fetchall()
-                out["samples"]["producao_diaria_maquina02"] = rows
+                out["samples"][f"producao_diaria_{machine_id}"] = rows
             except Exception as e:
-                out["errors"].append(f"sample producao_diaria_maquina02: {e}")
+                out["errors"].append(f"sample producao_diaria: {e}")
+
+        # ============================================================
+        # COMPARATIVO POR DIA: sum(producao_horaria) x producao_diaria
+        # + contagem de producao_evento (se existir) no mesmo dia
+        # ============================================================
+        days = []
+        if "producao_diaria" in tables:
+            try:
+                days = [r[0] for r in cur.execute(
+                    "SELECT DISTINCT data FROM producao_diaria "
+                    "WHERE machine_id=? "
+                    "ORDER BY data DESC "
+                    "LIMIT ?",
+                    (machine_id, days_limit),
+                ).fetchall()]
+            except Exception as e:
+                out["errors"].append(f"days from producao_diaria: {e}")
+                days = []
+
+        if not days and "producao_horaria" in tables:
+            try:
+                days = [r[0] for r in cur.execute(
+                    "SELECT DISTINCT data_ref FROM producao_horaria "
+                    "WHERE machine_id=? "
+                    "ORDER BY data_ref DESC "
+                    "LIMIT ?",
+                    (machine_id, days_limit),
+                ).fetchall()]
+            except Exception as e:
+                out["errors"].append(f"days from producao_horaria: {e}")
+                days = []
+
+        # Se ainda não tiver dias, usa hoje/ontem (Bahia) como fallback.
+        if not days:
+            try:
+                today = cur.execute("SELECT date('now','-3 hours')").fetchone()[0]
+                yesterday = cur.execute("SELECT date('now','-3 hours','-1 day')").fetchone()[0]
+                days = [today, yesterday]
+            except Exception:
+                days = []
+
+        # Prepara forma de agrupar producao_evento por dia (se existir)
+        evento_day_expr = None
+        evento_ts_col = None
+        if "producao_evento" in tables:
+            pe_cols = _columns_from_pragma(_pragma_table_info(cur, "producao_evento"))
+            # Escolha de coluna de data/tempo
+            evento_ts_col = _pick_first(pe_cols, ["ts_ms", "ts", "timestamp", "created_at", "updated_at", "data_ref", "data"])
+            if evento_ts_col == "ts_ms":
+                # Ajuste Bahia: subtrai 3h de UTC (assumindo ts_ms em UTC)
+                evento_day_expr = "date(datetime(ts_ms/1000,'unixepoch','-3 hours'))"
+            elif evento_ts_col in ("ts", "timestamp"):
+                # Tenta tratar como ISO: date(ts)
+                evento_day_expr = f"date({evento_ts_col})"
+            elif evento_ts_col in ("created_at", "updated_at"):
+                evento_day_expr = f"date({evento_ts_col})"
+            elif evento_ts_col in ("data_ref", "data"):
+                evento_day_expr = f"{evento_ts_col}"
+            else:
+                evento_day_expr = None
+
+        for d in days:
+            item = {"day": d}
+
+            # Diário (se existir)
+            if "producao_diaria" in tables:
+                try:
+                    row = cur.execute(
+                        "SELECT produzido, meta, percentual "
+                        "FROM producao_diaria "
+                        "WHERE machine_id=? AND data=? "
+                        "LIMIT 1",
+                        (machine_id, d),
+                    ).fetchone()
+                    if row:
+                        item["diaria_produzido"] = row[0]
+                        item["diaria_meta"] = row[1]
+                        item["diaria_percentual"] = row[2]
+                    else:
+                        item["diaria_produzido"] = None
+                        item["diaria_meta"] = None
+                        item["diaria_percentual"] = None
+                except Exception as e:
+                    out["errors"].append(f"diaria day={d}: {e}")
+
+            # Horária soma/contagem
+            if "producao_horaria" in tables:
+                try:
+                    row = cur.execute(
+                        "SELECT COALESCE(SUM(produzido),0), COUNT(1), COALESCE(MAX(meta),0) "
+                        "FROM producao_horaria "
+                        "WHERE machine_id=? AND data_ref=?",
+                        (machine_id, d),
+                    ).fetchone()
+                    if row:
+                        item["horaria_soma"] = row[0]
+                        item["horaria_linhas"] = row[1]
+                        item["horaria_meta_max"] = row[2]
+                except Exception as e:
+                    out["errors"].append(f"horaria day={d}: {e}")
+
+            # Diferença direta (se ambos existirem)
+            if item.get("diaria_produzido") is not None and item.get("horaria_soma") is not None:
+                try:
+                    item["diff_diaria_menos_horaria"] = int(item["diaria_produzido"]) - int(item["horaria_soma"])
+                except Exception:
+                    item["diff_diaria_menos_horaria"] = None
+
+            # Evento contagem + amostra curta
+            if "producao_evento" in tables and evento_day_expr and evento_ts_col:
+                try:
+                    # Contagem
+                    q = (
+                        f"SELECT COUNT(1) FROM producao_evento "
+                        f"WHERE machine_id=? AND {evento_day_expr}=?"
+                    )
+                    item["evento_count"] = int(cur.execute(q, (machine_id, d)).fetchone()[0])
+
+                    # Amostra (máx 5) para ver se está caindo no dia certo
+                    # Seleciona até 6 colunas úteis
+                    pe_cols = _columns_from_pragma(_pragma_table_info(cur, "producao_evento"))
+                    keep = []
+                    for c in ["machine_id", evento_ts_col, "ts_ms", "data_ref", "data", "produzido", "delta", "count", "valor", "op_id", "bp_id"]:
+                        if c in pe_cols and c not in keep:
+                            keep.append(c)
+                        if len(keep) >= 6:
+                            break
+                    if not keep:
+                        keep = pe_cols[:6]
+
+                    col_sql = ", ".join(keep)
+                    q2 = (
+                        f"SELECT {col_sql} FROM producao_evento "
+                        f"WHERE machine_id=? AND {evento_day_expr}=? "
+                        f"ORDER BY rowid DESC LIMIT 5"
+                    )
+                    item["evento_sample_cols"] = keep
+                    item["evento_sample"] = cur.execute(q2, (machine_id, d)).fetchall()
+                except Exception as e:
+                    out["errors"].append(f"evento day={d}: {e}")
+
+            out["compare"].append(item)
 
         conn.close()
 

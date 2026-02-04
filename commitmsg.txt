@@ -1,5 +1,5 @@
-﻿chore: adicionar logging minimo no server (startup + requests)
+﻿chore: criar endpoint admin /admin/db-check para inspecionar SQLite no Railway
 
-- Loga CWD e INDFLOW_DB_PATH no startup
-- Loga metodo/path/status/ip em cada request (after_request)
-- Envolve init_db com logs e exception
+- Adiciona /admin/db-check (JSON) protegido por token (INDFLOW_ADMIN_TOKEN ou ADMIN_RESET_TOKEN)
+- Lista tabelas e contagens principais
+- Retorna amostras de producao_horaria e producao_diaria para maquina02
