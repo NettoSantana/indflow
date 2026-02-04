@@ -1,12 +1,18 @@
 <!--
+PATH: templates/historico.html
+LAST_RECODE: 2026-02-04 23:05 America/Bahia
+MOTIVO: Adicionar botão 'Zerar produção por data' no histórico (chama /admin/reset-date com dia_ref).
+-->
+
+<!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-04 19:35 (America/Bahia)
-Motivo: Adicionar botao na tela Historico para zerar producao por data (frontend).
+Ultimo recode: 2026-02-02 15:25 (America/Bahia)
+Motivo: Ajustar endpoint do historico para usar o prefixo /producao e exibir sub-itens de OPs por dia.
 -->
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\historico.html
-LAST_RECODE: 2026-02-04 19:35 America/Bahia
-MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend).
+LAST_RECODE: 2026-02-01 12:10 America/Bahia
+MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada do arquivo original.
 -->
 
 {% extends "base.html" %}
@@ -160,27 +166,25 @@ MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend
     color:#334155;
     border:1px solid #e2e8f0;
   }
-    .actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
+
+    .filter-actions {
+      margin-left: auto;
     }
+
     .btn-danger {
+      padding: 10px 14px;
+      border: 0;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
       background: #dc3545;
       color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .btn-danger:hover {
-      filter: brightness(0.95);
     }
     .btn-danger:disabled {
-      opacity: 0.6;
+      opacity: 0.5;
       cursor: not-allowed;
     }
+
 </style>
 
 <div class="page">
@@ -202,9 +206,11 @@ MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend
       </div>
 
       <div class="hint">Selecione uma data para filtrar (opcional)</div>
-      <div class="actions">
-        <button id="btn-reset-date" type="button" class="btn-danger">Zerar producao por data</button>
+
+      <div class="filter-actions">
+        <button id="btn-reset-date" class="btn-danger" type="button">Zerar producao por data</button>
       </div>
+
     </div>
 
     <!-- EMBAIXO: TABELA POR DIA -->
@@ -336,93 +342,66 @@ MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend
 
   let cache = [];
 
-  async function loadHistorico() {
-    const url = `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`;
-    try {
-      const resp = await fetch(url);
-      const rows = await resp.json();
+  fetch(url)
+    .then(r => r.json())
+    .then(rows => {
       cache = Array.isArray(rows) ? rows : [];
-    } catch (e) {
+      renderRows(cache, "");
+    })
+    .catch(() => {
       cache = [];
-    }
-
-    const fd = document.getElementById('filter-date');
-    const selected = (fd && fd.value) ? fd.value : '';
-    renderRows(cache, selected);
-  }
-
-  loadHistorico();
+      renderRows(cache, "");
+    });
 
   document.getElementById("filter-date").addEventListener("change", (e) => {
     renderRows(cache, e?.target?.value || "");
   });
 
-    function normalizeDateInput(value) {
-      if (!value) return null;
-      const v = String(value).trim();
-      // Aceita YYYY-MM-DD
-      const iso = /^\d{4}-\d{2}-\d{2}$/;
-      if (iso.test(v)) return v;
-      // Aceita DD/MM/AAAA
-      const br = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-      const m = v.match(br);
-      if (m) {
-        const dd = m[1];
-        const mm = m[2];
-        const yyyy = m[3];
-        return `${yyyy}-${mm}-${dd}`;
-      }
-      return null;
-    }
+  // Zerar producao por data (dia_ref) para a maquina atual
+  const btnResetDate = document.getElementById("btn-reset-date");
+  function syncResetButtonState() {
+    const diaRef = document.getElementById("filter-date").value;
+    if (!btnResetDate) return;
+    btnResetDate.disabled = !machineId || !diaRef;
+  }
 
-    async function zerarProducaoPorData() {
-      const machineId = q('machine_id');
+  if (btnResetDate) {
+    syncResetButtonState();
+    document.getElementById("filter-date").addEventListener("change", syncResetButtonState);
+
+    btnResetDate.addEventListener("click", () => {
+      const diaRef = document.getElementById("filter-date").value;
       if (!machineId) {
-        alert('machine_id nao encontrado na URL.');
+        alert("Maquina nao identificada.");
         return;
       }
-
-      const filterDateEl = document.getElementById('filter-date');
-      const defaultDate = (filterDateEl && filterDateEl.value) ? filterDateEl.value : '';
-      const input = prompt('Informe a data para zerar (YYYY-MM-DD ou DD/MM/AAAA):', defaultDate);
-      const data = normalizeDateInput(input);
-      if (!data) {
-        alert('Data invalida. Use YYYY-MM-DD (ex: 2026-02-04) ou DD/MM/AAAA (ex: 04/02/2026).');
+      if (!diaRef) {
+        alert("Selecione a data que deseja zerar.");
         return;
       }
-
-      const ok = confirm(`Confirma zerar a producao da maquina ${machineId} na data ${data}?`);
+      const ok = confirm(`Confirma zerar a producao da maquina ${machineId.toUpperCase()} na data ${diaRef}?`);
       if (!ok) return;
 
-      const btn = document.getElementById('btn-reset-date');
-      if (btn) btn.disabled = true;
-
-      try {
-        const resp = await fetch('/producao/admin/reset-date', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ machine_id: machineId, data: data })
+      fetch("/admin/reset-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machine_id: machineId, dia_ref: diaRef }),
+      })
+        .then(async (r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json().catch(() => ({}));
+        })
+        .then(() => {
+          alert("Producao zerada para a data selecionada.");
+          // Recarrega a pagina para garantir que a tabela e o cache reflitam o novo valor
+          window.location.reload();
+        })
+        .catch((e) => {
+          alert(`Falha ao zerar producao por data. ${e.message}`);
         });
-        const payload = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          alert(payload.error || `Falha ao zerar producao por data. HTTP ${resp.status}`);
-          return;
-        }
+    });
+  }
 
-        alert(payload.note || 'Reset por data executado.');
-        // Atualiza tabela
-        await loadHistorico();
-      } catch (err) {
-        alert('Erro ao chamar o endpoint de reset por data.');
-      } finally {
-        if (btn) btn.disabled = false;
-      }
-    }
-
-    const btnResetDate = document.getElementById('btn-reset-date');
-    if (btnResetDate) {
-      btnResetDate.addEventListener('click', zerarProducaoPorData);
-    }
 </script>
 
 {% endblock %}

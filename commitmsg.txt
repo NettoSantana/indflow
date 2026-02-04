@@ -1,5 +1,6 @@
-﻿fix: corrigir SyntaxError no machine_routes e criar reset por data
+﻿feat: zerar producao por data no historico (frontend)
 
-- Corrige bloco try/except que estava quebrando o deploy no Railway
-- Adiciona endpoint POST /admin/reset-date para zerar producao por dia (YYYY-MM-DD)
-- Mantem /admin/reset-manual e torna reset mais robusto contra variações de schema
+- Adiciona botao na tela Historico para zerar producao por data
+- Prompt de data (YYYY-MM-DD ou DD/MM/AAAA) e confirmacao
+- POST /producao/admin/reset-date com machine_id e data
+- Recarrega a lista apos o reset
