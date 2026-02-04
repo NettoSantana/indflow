@@ -1,5 +1,5 @@
-﻿fix: historico usar producao_diaria (mesmo criterio do dashboard)
+﻿fix: endpoint para purge total das tabelas operacionais (producao/estado)
 
-- /api/producao/historico passa a ler producao_diaria como fonte principal
-- refugo soma por refugo_horaria quando existir
-- OPs retornam apenas como contexto (nao entram no total)
+- adiciona POST /admin/purge-production (apaga definitivamente dados operacionais)
+- preserva cadastros (clientes, usuarios, devices, machine_config etc)
+- opcional: filtra por machine_id quando a tabela tiver coluna machine_id

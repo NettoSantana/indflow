@@ -1,6 +1,6 @@
-# PATH: server.py
-# LAST_RECODE: 2026-02-04 13:49 America/Bahia
-# MOTIVO: Adicionar endpoint admin para apagar definitivamente dados de producao (tabelas operacionais) preservando cadastros.
+# PATH: indflow/server.py
+# LAST_RECODE: 2026-02-04 13:59 America/Bahia
+# MOTIVO: Corrigir NameError no /admin/purge-production adicionando get_db_path e _check_admin_auth (token admin).
 
 import os
 import logging
@@ -101,6 +101,20 @@ def _admin_token_ok() -> bool:
         return False
 
     return token_in == expected
+
+
+def get_db_path() -> str:
+    # Banco usado pelo app no Railway (volume /data).
+    return os.getenv("INDFLOW_DB_PATH", "/data/indflow.db")
+
+def _check_admin_auth():
+    """
+    Valida token administrativo para endpoints sensíveis.
+    Retorna None quando autorizado; caso contrário, retorna (json, status).
+    """
+    if _admin_token_ok():
+        return None
+    return jsonify({"ok": False, "error": "unauthorized"}), 401
 
 
 def _pragma_table_info(cur, table: str):
