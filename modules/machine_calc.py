@@ -14,7 +14,7 @@ UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 TZ_BAHIA = ZoneInfo("America/Bahia")
 
 # Dia operacional vira às 05:00 (inicio do turno)
-DIA_OPERACIONAL_VIRA = time(5, 0)
+DIA_OPERACIONAL_VIRA = time(23,59)
 
 
 def now_bahia():
