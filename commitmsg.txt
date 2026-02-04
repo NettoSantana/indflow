@@ -1,5 +1,6 @@
-﻿fix: historico usar producao_diaria (mesmo criterio do dashboard)
+﻿fix: unificar fonte de producao em producao_horaria
 
-- /api/producao/historico passa a ler producao_diaria como fonte principal
-- refugo soma por refugo_horaria quando existir
-- OPs retornam apenas como contexto (nao entram no total)
+- Dashboard passa a calcular producao do dia e da hora exclusivamente via producao_horaria
+- Historico diario agregado somente a partir de producao_horaria
+- Elimina duplicidade, dobragem e divergencia entre telas
+- Remove dependencia indireta de producao_diaria e producao_evento
