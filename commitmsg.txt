@@ -1,5 +1,5 @@
-﻿fix: reset-manual zera producao_diaria do dia (historico) e horas no banco
+﻿fix: corrigir SyntaxError no machine_routes e criar reset por data
 
-- /admin/reset-manual agora zera producao_horaria e producao_diaria do dia atual no banco
-- Evita historico manter valor antigo apos "Zerar Producao"
-- Tenta zerar refugo_horaria do dia se a tabela existir (sem quebrar se nao existir)
+- Corrige bloco try/except que estava quebrando o deploy no Railway
+- Adiciona endpoint POST /admin/reset-date para zerar producao por dia (YYYY-MM-DD)
+- Mantem /admin/reset-manual e torna reset mais robusto contra variações de schema
