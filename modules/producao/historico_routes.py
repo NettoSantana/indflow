@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-04 12:58 America/Bahia
-# MOTIVO: Corrigir cabeçalho (PATH) para refletir o arquivo correto (historico_routes.py), sem alterar lógica.
+# PATH: modules/producao/historico_routes.py
+# LAST_RECODE: 2026-02-04 13:05 America/Bahia
+# MOTIVO: Corrigir cabeçalho (PATH) e alinhar histórico ao mesmo critério do dashboard (producao_evento).
 
 from __future__ import annotations
 
@@ -8,96 +8,88 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import os
 
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import Blueprint, jsonify, render_template, request
 
 try:
     from modules.db_indflow import init_db
     from modules.machine_state import get_machine
     from modules.machine_calc import calcular_totais
 except Exception:
-    from .data import init_db, get_machine, calcular_totais  # fallback local
+    # fallback local (ambiente alternativo)
+    from .data import init_db, get_machine, calcular_totais
+
 
 # =====================================================
-# HISTORICO (mirror) - blueprint separado
+# CONFIG
 # =====================================================
-try:
-    from modules.producao.historico_routes import historico_bp
-except Exception:
-    from .historico_routes import historico_bp
-
-# Inicializa o banco
-init_db()
-
 TZ_BAHIA = ZoneInfo("America/Bahia")
 
-producao_bp = Blueprint("producao_bp", __name__, template_folder="templates")
+# Blueprint exclusivo do histórico
+historico_bp = Blueprint(
+    "historico_bp",
+    __name__,
+    template_folder="templates"
+)
 
-# REGISTRA O ENDPOINT ESPELHO:
-# /producao/api/producao/historico  -> historico_routes.py
-producao_bp.register_blueprint(historico_bp)
+# Inicializa DB (idempotente)
+init_db()
 
 
 # =====================================================
-# PAGINA PRINCIPAL DE PRODUCAO
+# API – HISTÓRICO (JSON)
+# Usa o MESMO critério do dashboard
 # =====================================================
-@producao_bp.route("/", methods=["GET"])
-def producao_home():
-    # Exibe um resumo simples de maquinas
-    maquinas = []
-    for mid in ["maquina01", "maquina02", "maquina03", "maquina04"]:
+@historico_bp.route("/api/producao/historico", methods=["GET"])
+def api_producao_historico():
+    machine_id = request.args.get("machine_id")
+    days = int(request.args.get("days", 10))
+
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id obrigatório"}), 400
+
+    hoje = datetime.now(TZ_BAHIA).date()
+    inicio = hoje - timedelta(days=days - 1)
+
+    dados = []
+
+    for i in range(days):
+        dia = inicio + timedelta(days=i)
+
         try:
-            m = get_machine(mid)
-            tot = calcular_totais(m)
-            maquinas.append(
-                {
-                    "machine_id": mid,
-                    "nome": m.get("nome", mid).upper(),
-                    "status_ui": tot.get("status_ui", "—"),
-                    "producao_turno": tot.get("producao_turno", 0),
-                    "percentual_turno": tot.get("percentual_turno", 0),
-                }
-            )
-        except Exception:
-            maquinas.append(
-                {
-                    "machine_id": mid,
-                    "nome": mid.upper(),
-                    "status_ui": "—",
-                    "producao_turno": 0,
-                    "percentual_turno": 0,
-                }
-            )
+            machine = get_machine(machine_id)
+            totais = calcular_totais(machine, data_ref=dia)
 
-    return render_template("producao_home.html", maquinas=maquinas)
+            dados.append({
+                "data": dia.isoformat(),
+                "produzido": totais.get("producao_dia", 0),
+                "pecas_boas": totais.get("pecas_boas", totais.get("producao_dia", 0)),
+                "refugo": totais.get("refugo_dia", 0),
+                "meta": totais.get("meta_dia"),
+                "percentual": totais.get("percentual_dia"),
+            })
+
+        except Exception as e:
+            dados.append({
+                "data": dia.isoformat(),
+                "produzido": 0,
+                "pecas_boas": 0,
+                "refugo": 0,
+                "meta": None,
+                "percentual": None,
+                "erro": str(e),
+            })
+
+    return jsonify({
+        "ok": True,
+        "machine_id": machine_id,
+        "dados": dados
+    })
 
 
 # =====================================================
-# TELA HISTORICO (HTML)
+# TELA HTML – HISTÓRICO
 # =====================================================
-@producao_bp.route("/historico", methods=["GET"])
-def producao_historico_page():
-    # Apenas renderiza a tela; o JS consome:
-    # /producao/api/producao/historico
+@historico_bp.route("/historico", methods=["GET"])
+def historico_page():
+    # A página consome a API acima via JS
     return render_template("historico.html")
-
-
-# =====================================================
-# EXEMPLO: ENDPOINTS AUXILIARES (mantidos do teu arquivo)
-# =====================================================
-
-@producao_bp.route("/api/ping", methods=["GET"])
-def api_ping():
-    return jsonify({"ok": True, "ts": datetime.now(TZ_BAHIA).isoformat()})
-
-
-# =====================================================
-# UTILITARIOS (mantidos)
-# =====================================================
-
-def now_bahia() -> datetime:
-    return datetime.now(TZ_BAHIA)
-
-
-# =====================================================
-# FIM
-# =====================================================
