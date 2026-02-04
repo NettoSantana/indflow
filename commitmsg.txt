@@ -1,4 +1,5 @@
-﻿fix: historico calcula produzido por OP quando eventos/base nao tem produzido
+﻿fix: historico por dia_operacional usando ts_ms do ESP (producao_evento)
 
-- Se existir ops no dia e produzido=0, calcula produzido somando op_pcs das OPs ENCERRADAS (ou metros/conv)
-- Mantem logica de producao_evento e producao_diaria
+- Historico soma producao_evento.delta agrupando por dia_operacional_ref_str (nao por dia calendario)
+- Usa ts_ms do ESP para montar dia_ref local Bahia
+- Garante retorno de dias no range mesmo sem producao_diaria
