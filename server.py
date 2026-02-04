@@ -1,10 +1,11 @@
 # PATH: server.py
-# LAST_RECODE: 2026-02-04 11:32 America/Bahia
-# MOTIVO: Adicionar logging minimo (requests + init_db + caminho do DB) para diagnosticar gravacao no Railway DEV.
+# LAST_RECODE: 2026-02-04 11:45 America/Bahia
+# MOTIVO: Criar endpoint admin temporario /admin/db-check para inspecionar o SQLite real (/data/indflow.db) no Railway sem acesso a Shell.
 
 import os
 import logging
-from flask import Flask, render_template, request
+import sqlite3
+from flask import Flask, render_template, request, jsonify
 
 # ============================================================
 # BLUEPRINTS (já existentes)
@@ -78,6 +79,107 @@ def _log_request(response):
         # Nunca quebrar request por causa de log.
         pass
     return response
+
+# ============================================================
+# ADMIN: DB CHECK (TEMPORÁRIO)
+# ============================================================
+def _admin_token_ok() -> bool:
+    # Aceita token via query (?token=) ou header X-Admin-Token.
+    token_in = (request.args.get("token") or "").strip()
+    if not token_in:
+        token_in = (request.headers.get("X-Admin-Token") or "").strip()
+
+    # Tokens aceitos (Railway Variables):
+    # - INDFLOW_ADMIN_TOKEN (preferencial)
+    # - ADMIN_RESET_TOKEN (fallback, já existe no projeto)
+    expected = (os.getenv("INDFLOW_ADMIN_TOKEN") or "").strip()
+    if not expected:
+        expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
+
+    if not expected:
+        # Sem token configurado: não expor endpoint.
+        return False
+
+    return token_in == expected
+
+
+@app.get("/admin/db-check")
+def admin_db_check():
+    if not _admin_token_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    db_path = os.getenv("INDFLOW_DB_PATH", "/data/indflow.db")
+    out = {
+        "ok": True,
+        "db_path": db_path,
+        "tables": [],
+        "counts": {},
+        "samples": {},
+        "errors": [],
+    }
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+
+        tables = [r[0] for r in cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        ).fetchall()]
+        out["tables"] = tables
+
+        def safe_count(tbl: str):
+            try:
+                n = cur.execute(f"SELECT COUNT(1) FROM {tbl}").fetchone()[0]
+                out["counts"][tbl] = int(n)
+            except Exception as e:
+                out["counts"][tbl] = None
+                out["errors"].append(f"count {tbl}: {e}")
+
+        for t in [
+            "producao_diaria",
+            "producao_horaria",
+            "machine_config",
+            "devices",
+            "usuarios",
+            "clientes",
+        ]:
+            if t in tables:
+                safe_count(t)
+
+        # Samples maquina02 (se existirem as colunas esperadas)
+        if "producao_horaria" in tables:
+            try:
+                rows = cur.execute(
+                    "SELECT data_ref, machine_id, hora_idx, produzido, meta, updated_at "
+                    "FROM producao_horaria "
+                    "WHERE machine_id='maquina02' "
+                    "ORDER BY data_ref DESC, hora_idx DESC "
+                    "LIMIT 20"
+                ).fetchall()
+                out["samples"]["producao_horaria_maquina02"] = rows
+            except Exception as e:
+                out["errors"].append(f"sample producao_horaria_maquina02: {e}")
+
+        if "producao_diaria" in tables:
+            try:
+                rows = cur.execute(
+                    "SELECT data, machine_id, produzido, meta, percentual "
+                    "FROM producao_diaria "
+                    "WHERE machine_id='maquina02' "
+                    "ORDER BY data DESC "
+                    "LIMIT 20"
+                ).fetchall()
+                out["samples"]["producao_diaria_maquina02"] = rows
+            except Exception as e:
+                out["errors"].append(f"sample producao_diaria_maquina02: {e}")
+
+        conn.close()
+
+    except Exception as e:
+        out["ok"] = False
+        out["error"] = str(e)
+
+    return jsonify(out)
 
 # ============================================================
 # ROTAS PRINCIPAIS

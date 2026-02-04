@@ -1,4 +1,5 @@
-﻿fix: corrigir status_ui/parado_min (IndentationError) e restaurar transição PRODUZINDO/PARADA
+﻿chore: adicionar logging minimo no server (startup + requests)
 
-- Corrige bloco de status_ui que estava quebrando o deploy
-- Restaura cálculo de parado_min e transição de estado
+- Loga CWD e INDFLOW_DB_PATH no startup
+- Loga metodo/path/status/ip em cada request (after_request)
+- Envolve init_db com logs e exception
