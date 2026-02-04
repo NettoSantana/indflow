@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 19:15 America/Bahia
-# MOTIVO: Ajustar /admin/reset-manual (botao Zerar Producao) para zerar producao_diaria + producao_horaria + refugo_horaria do dia atual, evitando horas antigas manterem valores.
+# LAST_RECODE: 2026-02-04 19:11 America/Bahia
+# MOTIVO: Reset manual deve zerar producao_diaria mesmo quando a coluna do dia for data_ref (compatibilidade), mantendo horas e historico consistentes.
 # INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
 # modules/machine_routes.py
 import os
@@ -1316,9 +1316,17 @@ def _admin_zerar_producao_db_day_hour(machine_id: str, dia_ref: str, cliente_id:
                     pass
             try:
                 conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ? AND cliente_id = ?", (dia_ref, mid, cid))
+            try:
+                conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data_ref = ? AND machine_id = ? AND cliente_id = ?", (dia_ref, mid, cid))
+            except Exception:
+                pass
             except Exception:
                 try:
                     conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ?", (dia_ref, mid))
+                try:
+                    conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data_ref = ? AND machine_id = ?", (dia_ref, mid))
+                except Exception:
+                    pass
                 except Exception:
                     pass
         try:
@@ -1327,6 +1335,10 @@ def _admin_zerar_producao_db_day_hour(machine_id: str, dia_ref: str, cliente_id:
             pass
         try:
             conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id LIKE ?", (dia_ref, like_mid))
+        try:
+            conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data_ref = ? AND machine_id LIKE ?", (dia_ref, like_mid))
+        except Exception:
+            pass
         except Exception:
             pass
         conn.commit()
