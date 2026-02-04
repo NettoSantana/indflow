@@ -1,11 +1,10 @@
 # PATH: indflow/modules/machine_routes.py
 # LAST_RECODE: 2026-02-04 19:26 America/Bahia
-# MOTIVO: OPCAO 1: /admin/reset-manual deve zerar producao_diaria do dia atual (e horas) no banco para historico nao manter valor antigo.
-# INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
-# modules/machine_routes.py
+# MOTIVO: Corrigir reset (zerar por data) e adicionar endpoint /admin/reset-date; manter reset-manual e evitar historico ficar com valores antigos.
 import os
 import hashlib
 import uuid
+import re
 from flask import Blueprint, request, jsonify, render_template, session
 from datetime import datetime, timedelta
 from modules.db_indflow import get_db
@@ -1445,11 +1444,167 @@ def admin_reset_hour():
 
     try:
         dia_ref_db = dia_operacional_ref_str(now_bahia())
-        _admin_zerar_producao_db_day_hour(machine_id=machine_id, dia_ref=dia_ref_db, cliente_id=cid or None)
+        _admin_reset_producao_por_data(machine_id=machine_id, dia_ref=dia_ref_db, cliente_id=cid or None)
     except Exception:
         pass
 
     return jsonify({"ok": True, "machine_id": machine_id, "scope": "day+hour", "hora_idx": idx, "cliente_id": cid or None, "note": "Reset completo executado. Dia e hora zerados a partir de agora."})
+
+# =====================================================
+# RESET PRODUCAO POR DATA (ADMIN)
+# =====================================================
+
+def _db_cols(conn, table_name: str) -> set[str]:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return set([r[1] for r in rows])  # (cid, name, type, notnull, dflt_value, pk)
+    except Exception:
+        return set()
+
+def _pick_date_col(cols: set[str]) -> str | None:
+    for c in ["data_ref", "data", "dia_ref", "date_ref", "date", "ts", "timestamp", "created_at"]:
+        if c in cols:
+            return c
+    return None
+
+def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: str | None = None) -> dict:
+    """
+    Zera/remover producao de uma maquina em um DIA especifico.
+    Funciona mesmo com variacoes de schema, tentando:
+      - UPDATE (quando a tabela guarda acumulados)
+      - DELETE (quando a tabela guarda eventos/linhas por hora)
+    """
+    conn = get_db()
+    cur = conn.cursor()
+
+    mid_raw = (machine_id or "").strip()
+    if not mid_raw:
+        return {"ok": False, "error": "machine_id vazio"}
+
+    dia = (dia_ref or "").strip()
+    if not dia or len(dia) < 8:
+        return {"ok": False, "error": "dia_ref invalido"}
+
+    cid = (cliente_id or "").strip() if cliente_id else None
+
+    # match por: machine_id puro, e (cliente_id:machine_id) quando existir
+    mids = [mid_raw]
+    if cid:
+        mids.append(f"{cid}:{mid_raw}")
+
+    # alguns dados podem ter machine_id com prefixo de cliente_id mesmo quando cid nao foi passado
+    # entao tambem tentamos LIKE '%:mid'
+    like_suffix = f"%:{mid_raw}"
+
+    tables = [
+        "producao_diaria",
+        "producao_horaria",
+        "producao_evento",
+        "machine_count_state",
+        "machine_stop",
+        "nao_programado_diario",
+        "nao_programado_horaria",
+        "refugo_horaria",
+    ]
+
+    result = {"ok": True, "machine_id": mid_raw, "dia_ref": dia, "cliente_id": cid, "tables": {}}
+
+    for t in tables:
+        cols = _db_cols(conn, t)
+        if not cols or "machine_id" not in cols:
+            continue
+
+        date_col = _pick_date_col(cols)
+        where_date_sql = ""
+        params_date = []
+
+        if date_col:
+            # algumas tabelas guardam 'YYYY-MM-DD' e outras guardam timestamp ISO.
+            where_date_sql = f" AND ({date_col} = ? OR {date_col} LIKE ?)"
+            params_date = [dia, f"{dia}%"]
+        else:
+            # sem coluna de data, nao mexe (evita apagar tudo)
+            continue
+
+        # se tiver cliente_id na tabela e cid foi informado, filtra por cliente_id tambem
+        where_cid_sql = ""
+        params_cid = []
+        if cid and "cliente_id" in cols:
+            where_cid_sql = " AND cliente_id = ?"
+            params_cid = [cid]
+
+        deleted = 0
+        updated = 0
+
+        # 1) Tenta UPDATE para zerar campos de acumulado, se existirem
+        set_parts = []
+        for c in ["produzido", "pecas_boas", "refugo_total", "refugo", "op_pcs"]:
+            if c in cols:
+                set_parts.append(f"{c}=0")
+        if set_parts:
+            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
+            # adiciona data e cid
+            sql_up += where_date_sql
+            sql_up += where_cid_sql
+
+            try:
+                cur.execute(sql_up, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
+                updated += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            except Exception:
+                # ignora e tenta delete
+                pass
+
+        # 2) Sempre tenta DELETE para remover linhas (horas/eventos)
+        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
+        sql_del += where_date_sql
+        sql_del += where_cid_sql
+
+        try:
+            cur.execute(sql_del, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
+            deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        except Exception:
+            pass
+
+        if updated or deleted:
+            result["tables"][t] = {"updated": updated, "deleted": deleted}
+
+    conn.commit()
+    return result
+
+
+@machine_bp.route("/admin/reset-date", methods=["POST"])
+@login_required
+def admin_reset_date():
+    """
+    Endpoint para zerar producao por DATA.
+    Body JSON:
+      - machine_id: "maquina005"
+      - dia_ref: "YYYY-MM-DD" (aceita tambem data_ref/data/date)
+    """
+    if not current_user.is_authenticated:
+        return jsonify({"ok": False, "error": "nao autenticado"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    machine_id = (payload.get("machine_id") or "").strip()
+
+    dia_ref = (
+        payload.get("dia_ref")
+        or payload.get("data_ref")
+        or payload.get("data")
+        or payload.get("date")
+        or ""
+    )
+    dia_ref = str(dia_ref).strip()
+
+    # valida formato simples YYYY-MM-DD
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", dia_ref):
+        return jsonify({"ok": False, "error": "dia_ref deve ser YYYY-MM-DD", "dia_ref": dia_ref}), 400
+
+    cid = _extract_cliente_id_from_request() or None
+
+    out = _admin_reset_producao_por_data(machine_id=machine_id, dia_ref=dia_ref, cliente_id=cid)
+    return jsonify(out)
+
 
 @machine_bp.route("/admin/esp-reset-counter", methods=["POST"])
 def admin_esp_reset_counter():

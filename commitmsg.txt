@@ -1,5 +1,5 @@
-﻿fix: corrigir SyntaxError em machine_routes e manter reset-manual consistente
+﻿fix: reset-manual zera producao_diaria do dia (historico) e horas no banco
 
-- Corrige bloco try/except que quebrou o deploy (SyntaxError linha 1319)
-- /admin/reset-manual zera producao_diaria por data e por data_ref (compatibilidade)
-- Mantem restante do arquivo sem alteracoes fora do escopo
+- /admin/reset-manual agora zera producao_horaria e producao_diaria do dia atual no banco
+- Evita historico manter valor antigo apos "Zerar Producao"
+- Tenta zerar refugo_horaria do dia se a tabela existir (sem quebrar se nao existir)
