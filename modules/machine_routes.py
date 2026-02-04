@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 20:30 America/Bahia
-# MOTIVO: Corrigir historico de producao para calcular produzido via producao_evento.ts_ms (timezone Bahia) e permitir /producao/historico retornar JSON quando chamado via XHR, mantendo pagina HTML.
-# INFO: lines_total=1491 lines_changed=~140
+# LAST_RECODE: 2026-02-03 21:30 America/Bahia
+# MOTIVO: Corrigir historico de producao quando cliente_id da sessao nao bate com producao_evento, aplicando validacao de UUID e fallback sem filtro de cliente_id.
+# INFO: lines_total=1528 lines_changed=~90
 
 # modules/machine_routes.py
 import os
@@ -144,28 +144,57 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
 
         # SQLite: converte epoch ms para dia local usando -3 hours.
         # Observacao: usamos 'unixepoch' com segundos.
-        params = [mid, start_ms, end_ms]
-        where = "machine_id = ? AND ts_ms >= ? AND ts_ms <= ?"
 
-        if cliente_id:
-            where = f"cliente_id = ? AND {where}"
-            params = [cliente_id] + params
+        # Alguns ambientes antigos gravaram machine_id scoping (cliente_id::maquinaXX).
+        # Para nao perder eventos, aceitamos raw e scoped.
+        scoped_mid = f"{cliente_id}::{mid}" if cliente_id else None
 
-        sql = f"""
-            SELECT
-              date(ts_ms/1000, 'unixepoch', '-3 hours') AS dia_ref,
-              SUM(COALESCE(delta, 0)) AS produzido
-            FROM producao_evento
-            WHERE {where}
-            GROUP BY dia_ref
-            ORDER BY dia_ref DESC
-        """
+        def _query_sum(cfilter: str | None) -> dict:
+            params = []
+            where_parts = []
 
-        cur = conn.execute(sql, tuple(params))
-        out = {}
-        for r in cur.fetchall():
-            dia = (r[0] or "").strip()
-            out[dia] = _safe_int(r[1], 0)
+            if cfilter:
+                where_parts.append("cliente_id = ?")
+                params.append(cfilter)
+
+            if scoped_mid:
+                where_parts.append("(machine_id = ? OR machine_id = ?)")
+                params.extend([mid, scoped_mid])
+            else:
+                where_parts.append("machine_id = ?")
+                params.append(mid)
+
+            where_parts.append("ts_ms >= ?")
+            where_parts.append("ts_ms <= ?")
+            params.extend([start_ms, end_ms])
+
+            where = " AND ".join(where_parts)
+
+            sql = f"""
+                SELECT
+                  date(ts_ms/1000, 'unixepoch', '-3 hours') AS dia_ref,
+                  SUM(COALESCE(delta, 0)) AS produzido
+                FROM producao_evento
+                WHERE {where}
+                GROUP BY dia_ref
+                ORDER BY dia_ref DESC
+            """
+
+            cur = conn.execute(sql, tuple(params))
+            out_local = {}
+            for r in cur.fetchall():
+                dia = (r[0] or "").strip()
+                out_local[dia] = _safe_int(r[1], 0)
+            return out_local
+
+        # 1) tenta com filtro de cliente_id (quando valido)
+        out = _query_sum(cliente_id if cliente_id else None)
+
+        # 2) fallback: se veio cliente_id mas nao achou nada, tenta sem filtro
+        #    (evita historico zerado quando sessao tem cliente_id invalido ou dados antigos sem cliente_id)
+        if cliente_id and not out:
+            out = _query_sum(None)
+
         return out
     finally:
         conn.close()
@@ -291,14 +320,22 @@ def _get_cliente_id_for_request() -> str | None:
     """
     Resolve tenant do request:
       1) se tiver X-API-Key válida -> cliente_id
-      2) senão, se tiver sessão web -> session['cliente_id']
+      2) senão, se tiver sessão web e parecer UUID valido -> session['cliente_id']
       3) senão -> None
+
+    Motivo:
+      - Em alguns fluxos a sessão pode conter um id que nao e cliente_id (ex: id de usuario).
+        Se filtrarmos por isso, o historico (producao_evento) fica invisivel e retorna produzido=0.
     """
     c = _get_cliente_from_api_key()
     if c:
         return c["id"]
+
     cid = (session.get("cliente_id") or "").strip()
-    return cid or None
+    if cid and _looks_like_uuid(cid):
+        return cid
+
+    return None
 
 
 def _get_ts_ms_from_payload(data: dict) -> int | None:
@@ -1482,10 +1519,10 @@ def historico_producao_api():
 # =====================================================
 # git add -A
 # @"
-# fix: historico calcula produzido via producao_evento.ts_ms
+# fix: historico nao zera produzido por filtro errado de cliente_id
 #
-# - /api/producao/historico agora soma produzido por dia a partir de producao_evento (delta) usando ts_ms do ESP
-# - Mantem fallback da tabela producao_diaria e inclui ops=[] quando ausente
+# - Valida session['cliente_id'] (somente UUID) para nao filtrar producao_evento com id invalido
+# - Soma eventos por dia aceitando machine_id raw e scoped e faz fallback sem cliente_id quando necessario
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
 # git push

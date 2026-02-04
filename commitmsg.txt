@@ -1,6 +1,4 @@
-﻿fix(machine_status): aplicar ociosidade com default e preencher stopped_since_ms
+﻿fix: historico calcula produzido via producao_evento.ts_ms
 
-- /machine/status: usa INDFLOW_NO_COUNT_STOP_SEC_DEFAULT quando no_count_stop_sec nao existe
-- Em AUTO+ocioso: preenche stopped_since_ms e grava machine_stop com _last_count_ts_ms
-- Ao voltar a produzir: limpa machine_stop e zera stopped_since_ms
-- Expondo _no_count_stop_sec_effective e _sem_contar_sec para debug
+- /api/producao/historico agora soma produzido por dia a partir de producao_evento (delta) usando ts_ms do ESP
+- /producao/historico passa a devolver JSON quando chamado via XHR/Accept: application/json (mantendo HTML normal)
