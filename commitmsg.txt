@@ -1,5 +1,7 @@
-﻿fix: historico sem produzido em dobro
+﻿fix: historico diario usa apenas producao_diaria
 
-No /api/producao/historico, evitar sobrescrever produzido da base com producao_evento
+No /api/producao/historico, remover uso de producao_evento no calculo do produzido
 
-producao_evento passa a ser somente fallback quando produzido da base for 0
+Mantem fallback por OP quando produzido vier 0
+
+Evita duplicacao (produzido em dobro) no historico
