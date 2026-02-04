@@ -1,11 +1,12 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 14:55 America/Bahia
-# MOTIVO: Garantir que produção por hora/dia inicie em zero mesmo com contador absoluto do ESP, calculando baseline_hora via soma das horas anteriores (evita percentuais absurdos ao criar máquina nova ou trocar machine_id).
-# INFO: lines_total=1588 lines_changed=~150 alteracao_pontual=baseline_hora_por_soma_horas
+# LAST_RECODE: 2026-02-04 13:25 America/Bahia
+# MOTIVO: Implementar reset remoto do contador no ESP via comando explicito (admin/esp-reset-counter) e ACK (reset_ack), forcando baseline do dia para 0 para iniciar produção do zero.
+# INFO: lines_total=1756 lines_changed=~210 alteracao_pontual=cmd_reset_counter_para_esp
 
 # modules/machine_routes.py
 import os
 import hashlib
+import uuid
 from flask import Blueprint, request, jsonify, render_template, session
 from datetime import datetime, timedelta
 
@@ -42,11 +43,9 @@ from modules.machine.device_helpers import (
 
 machine_bp = Blueprint("machine_bp", __name__)
 
-
 def _norm_machine_id(v):
     v = (v or "").strip().lower()
     return v or "maquina01"
-
 
 def _unscope_machine_id(v: str) -> str:
     """
@@ -57,13 +56,11 @@ def _unscope_machine_id(v: str) -> str:
         return (s.split("::", 1)[1] or "").strip() or "maquina01"
     return s or "maquina01"
 
-
 def _safe_int(v, default=0):
     try:
         return int(v)
     except Exception:
         return default
-
 
 def _calc_produzido_from_ops(ops: list) -> int:
     """
@@ -104,7 +101,6 @@ def _calc_produzido_from_ops(ops: list) -> int:
 
     return int(total)
 
-
 def _parse_hhmm(hhmm: str) -> tuple[int, int] | None:
     try:
         h_str, m_str = (hhmm or "").strip().split(":", 1)
@@ -115,7 +111,6 @@ def _parse_hhmm(hhmm: str) -> tuple[int, int] | None:
     except Exception:
         pass
     return None
-
 
 def _calc_minutos_parados_somente_turno(start_ms: int, end_ms: int, turno_inicio: str | None, turno_fim: str | None) -> int:
     ini = _parse_hhmm(turno_inicio or "")
@@ -139,7 +134,6 @@ def _calc_minutos_parados_somente_turno(start_ms: int, end_ms: int, turno_inicio
         d = d + timedelta(days=1)
     return int(total // 60)
 
-
 def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
     """
     Refugo ainda está por machine_id (legado). Para não misturar,
@@ -153,7 +147,6 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
         return sum(_safe_int(x, 0) for x in arr)
     except Exception:
         return 0
-
 
 def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, fim: str) -> dict:
     """
@@ -229,7 +222,6 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
     finally:
         conn.close()
 
-
 def _looks_like_uuid(v: str) -> bool:
     """
     Validacao simples para evitar usar session['cliente_id'] errado (ex: id de usuario).
@@ -251,7 +243,6 @@ def _looks_like_uuid(v: str) -> bool:
             if ch not in "0123456789abcdefABCDEF":
                 return False
     return True
-
 
 def _resolve_cliente_id_for_status(m: dict) -> str | None:
     """
@@ -284,12 +275,10 @@ def _resolve_cliente_id_for_status(m: dict) -> str | None:
 
     return None
 
-
 def _machine_id_scoped(cliente_id: str | None, machine_id: str) -> str:
     if cliente_id:
         return f"{cliente_id}::{machine_id}"
     return machine_id
-
 
 def _load_np_por_hora_24_scoped(machine_id: str, dia_ref: str, cliente_id: str | None) -> list:
     """Carrega NP por hora (24) do banco para a máquina (scoped)."""
@@ -303,7 +292,6 @@ def _load_np_por_hora_24_scoped(machine_id: str, dia_ref: str, cliente_id: str |
     except Exception:
         return [0] * 24
 
-
 def _admin_token_ok() -> bool:
     """
     Proteção simples:
@@ -315,7 +303,6 @@ def _admin_token_ok() -> bool:
         return False
     received = (request.headers.get("X-Admin-Token") or "").strip()
     return received == expected
-
 
 def _get_cliente_from_api_key() -> dict | None:
     """
@@ -346,7 +333,6 @@ def _get_cliente_from_api_key() -> dict | None:
     finally:
         conn.close()
 
-
 def _get_cliente_id_for_request() -> str | None:
     """
     Resolve tenant do request:
@@ -363,7 +349,6 @@ def _get_cliente_id_for_request() -> str | None:
         return cid
 
     return None
-
 
 def _get_ts_ms_from_payload(data: dict) -> int | None:
     """
@@ -401,7 +386,6 @@ def _get_ts_ms_from_payload(data: dict) -> int | None:
 
     return iv
 
-
 def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -> None:
     """
     Backfill retroativo:
@@ -431,7 +415,6 @@ def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -
     finally:
         conn.close()
 
-
 def _ensure_devices_table_min(conn):
     conn.execute(
         """
@@ -460,7 +443,6 @@ def _ensure_devices_table_min(conn):
         pass
 
     conn.commit()
-
 
 def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, allow_takeover: bool = False) -> bool:
     conn = get_db()
@@ -516,7 +498,6 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, al
     finally:
         conn.close()
 
-
 def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | None:
     conn = get_db()
     try:
@@ -541,7 +522,6 @@ def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | No
     finally:
         conn.close()
 
-
 def _ensure_machine_stop_table(conn):
     conn.execute(
         """
@@ -557,7 +537,6 @@ def _ensure_machine_stop_table(conn):
     except Exception:
         pass
     conn.commit()
-
 
 def _get_stopped_since_ms(machine_id: str) -> int | None:
     conn = get_db()
@@ -579,7 +558,6 @@ def _get_stopped_since_ms(machine_id: str) -> int | None:
     finally:
         conn.close()
 
-
 def _set_stopped_since_ms(machine_id: str, stopped_since_ms: int, updated_at: str):
     conn = get_db()
     try:
@@ -598,7 +576,6 @@ def _set_stopped_since_ms(machine_id: str, stopped_since_ms: int, updated_at: st
     finally:
         conn.close()
 
-
 def _clear_stopped_since(machine_id: str, updated_at: str):
     conn = get_db()
     try:
@@ -607,7 +584,6 @@ def _clear_stopped_since(machine_id: str, updated_at: str):
         conn.commit()
     finally:
         conn.close()
-
 
 def _ensure_baseline_table(conn):
     conn.execute(
@@ -656,7 +632,6 @@ def _ensure_baseline_table(conn):
 
     conn.commit()
 
-
 def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str | None) -> bool:
     try:
         if cliente_id:
@@ -672,7 +647,6 @@ def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str |
         return cur.fetchone() is not None
     except Exception:
         return False
-
 
 def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, updated_at: str, cliente_id: str | None):
     if cliente_id:
@@ -692,7 +666,6 @@ def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, 
             (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at),
         )
     conn.commit()
-
 
 def _load_baseline_esp_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str | None) -> int:
     """Carrega baseline_esp do dia (multi-tenant). Retorna 0 se não existir."""
@@ -717,6 +690,151 @@ def _load_baseline_esp_for_day(conn, machine_id: str, dia_ref: str, cliente_id: 
     except Exception:
         return 0
 
+# =====================================================
+# RESET REMOTO DO CONTADOR NO ESP (cmd reset_counter)
+# =====================================================
+
+def _ensure_reset_cmd_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS esp_reset_cmd (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id TEXT,
+            machine_id TEXT NOT NULL,
+            cmd_id TEXT NOT NULL,
+            pending INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            applied_at TEXT
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_esp_reset_cmd_mid_pending ON esp_reset_cmd(machine_id, pending)")
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_esp_reset_cmd_cid_mid_pending ON esp_reset_cmd(cliente_id, machine_id, pending)")
+    except Exception:
+        pass
+    conn.commit()
+
+def _issue_reset_cmd(conn, cliente_id: str | None, machine_id: str, created_at: str) -> str:
+    _ensure_reset_cmd_table(conn)
+    cmd_id = str(uuid.uuid4())
+    if cliente_id:
+        conn.execute(
+            """
+            INSERT INTO esp_reset_cmd(cliente_id, machine_id, cmd_id, pending, created_at)
+            VALUES(?, ?, ?, 1, ?)
+            """,
+            (str(cliente_id), str(machine_id), cmd_id, created_at),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO esp_reset_cmd(cliente_id, machine_id, cmd_id, pending, created_at)
+            VALUES(NULL, ?, ?, 1, ?)
+            """,
+            (str(machine_id), cmd_id, created_at),
+        )
+    conn.commit()
+    return cmd_id
+
+def _get_pending_reset_cmd(conn, cliente_id: str | None, machine_id: str) -> str | None:
+    _ensure_reset_cmd_table(conn)
+    try:
+        if cliente_id:
+            row = conn.execute(
+                """
+                SELECT cmd_id FROM esp_reset_cmd
+                WHERE cliente_id=? AND machine_id=? AND pending=1
+                ORDER BY id DESC LIMIT 1
+                """,
+                (str(cliente_id), str(machine_id)),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT cmd_id FROM esp_reset_cmd
+                WHERE cliente_id IS NULL AND machine_id=? AND pending=1
+                ORDER BY id DESC LIMIT 1
+                """,
+                (str(machine_id),),
+            ).fetchone()
+        if not row:
+            return None
+        return str(row[0])
+    except Exception:
+        return None
+
+def _ack_reset_cmd(conn, cliente_id: str | None, machine_id: str, cmd_id: str, applied_at: str) -> bool:
+    _ensure_reset_cmd_table(conn)
+    try:
+        if not cmd_id:
+            return False
+
+        if cliente_id:
+            cur = conn.execute(
+                """
+                UPDATE esp_reset_cmd
+                SET pending=0, applied_at=?
+                WHERE cliente_id=? AND machine_id=? AND cmd_id=? AND pending=1
+                """,
+                (applied_at, str(cliente_id), str(machine_id), str(cmd_id)),
+            )
+        else:
+            cur = conn.execute(
+                """
+                UPDATE esp_reset_cmd
+                SET pending=0, applied_at=?
+                WHERE cliente_id IS NULL AND machine_id=? AND cmd_id=? AND pending=1
+                """,
+                (applied_at, str(machine_id), str(cmd_id)),
+            )
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+    except Exception:
+        return False
+
+def _force_baseline_for_day(conn, machine_id: str, dia_ref: str, baseline_esp: int, updated_at: str, cliente_id: str | None):
+    _ensure_baseline_table(conn)
+
+    if cliente_id:
+        cur = conn.execute(
+            """
+            UPDATE baseline_diario
+            SET baseline_esp=?, esp_last=?, updated_at=?
+            WHERE machine_id=? AND dia_ref=? AND cliente_id=?
+            """,
+            (int(baseline_esp), int(baseline_esp), str(updated_at), str(machine_id), str(dia_ref), str(cliente_id)),
+        )
+        if (cur.rowcount or 0) <= 0:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO baseline_diario(machine_id, dia_ref, baseline_esp, esp_last, updated_at, cliente_id)
+                VALUES(?, ?, ?, ?, ?, ?)
+                """,
+                (str(machine_id), str(dia_ref), int(baseline_esp), int(baseline_esp), str(updated_at), str(cliente_id)),
+            )
+    else:
+        cur = conn.execute(
+            """
+            UPDATE baseline_diario
+            SET baseline_esp=?, esp_last=?, updated_at=?
+            WHERE machine_id=? AND dia_ref=? AND cliente_id IS NULL
+            """,
+            (int(baseline_esp), int(baseline_esp), str(updated_at), str(machine_id), str(dia_ref)),
+        )
+        if (cur.rowcount or 0) <= 0:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO baseline_diario(machine_id, dia_ref, baseline_esp, esp_last, updated_at, cliente_id)
+                VALUES(?, ?, ?, ?, ?, NULL)
+                """,
+                (str(machine_id), str(dia_ref), int(baseline_esp), int(baseline_esp), str(updated_at)),
+            )
+
+    conn.commit()
 
 def _ensure_producao_evento_table(conn):
     conn.execute(
@@ -742,7 +860,6 @@ def _ensure_producao_evento_table(conn):
         pass
     conn.commit()
 
-
 def _registrar_evento_producao(cliente_id: str, machine_id: str, ts_ms: int, esp_absoluto: int, delta: int, created_at: str) -> None:
     if delta <= 0:
         return
@@ -760,7 +877,6 @@ def _registrar_evento_producao(cliente_id: str, machine_id: str, ts_ms: int, esp
         conn.commit()
     finally:
         conn.close()
-
 
 @machine_bp.route("/admin/hard-reset", methods=["POST"])
 def admin_hard_reset():
@@ -808,7 +924,6 @@ def admin_hard_reset():
             "note": "Banco limpo. Recomece a contagem a partir do próximo envio do ESP.",
         }
     )
-
 
 @machine_bp.route("/machine/config", methods=["POST"])
 def configurar_maquina():
@@ -898,7 +1013,6 @@ def configurar_maquina():
         }
     )
 
-
 def _sum_prev_hours_produzido(conn, machine_id: str, cliente_id: str, dia_ref: str, hora_idx: int) -> int:
     """Soma o produzido de horas anteriores (hora_idx < atual) para o mesmo dia.
     Isso permite derivar baseline_hora sem depender do reset do ESP nem de baseline_repo.
@@ -979,6 +1093,29 @@ def update_machine():
 
     m["status"] = new_status
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
+
+    # ACK do reset do ESP (zera contador absoluto de forma explicita)
+    reset_ack = _safe_int(data.get("reset_ack"), 0)
+    cmd_id_in = (data.get("cmd_id") or "").strip()
+
+    if reset_ack == 1:
+        try:
+            conn_ack = get_db()
+            applied = _ack_reset_cmd(conn_ack, cliente_id, machine_id, cmd_id_in, now_bahia().isoformat())
+            if applied:
+                dia_ref_ack = dia_operacional_ref_str(now_bahia())
+                # Forca baseline do dia para 0 (o ESP vai voltar a contar a partir de 0)
+                _force_baseline_for_day(conn_ack, machine_id, dia_ref_ack, 0, now_bahia().isoformat(), cliente_id)
+                # Compat: baseline legado (sem cliente_id) se existir
+                try:
+                    _force_baseline_for_day(conn_ack, machine_id, dia_ref_ack, 0, now_bahia().isoformat(), None)
+                except Exception:
+                    pass
+
+                m["_last_reset_cmd_id"] = cmd_id_in
+                m["_last_reset_applied_at"] = now_bahia().isoformat()
+        except Exception:
+            pass
 
     try:
         ts_ms_in = _get_ts_ms_from_payload(data)
@@ -1128,20 +1265,29 @@ def update_machine():
         except Exception:
             pass
 
-    return jsonify(
-        {
-            "message": "OK",
-            "machine_id": machine_id,
-            "cliente_id": cliente_id,
-            "device_id": device_id or None,
-            "linked_machine": linked_machine or None,
-            "baseline_initialized": bool(baseline_initialized),
-            "allow_takeover": bool(allow_takeover),
-            "ts_source": (m.get("_last_esp_ts_source") or None),
-            "ts_ms": (m.get("_last_esp_ts_ms_seen") or None),
-        }
-    )
+    resp = {
+        "message": "OK",
+        "machine_id": machine_id,
+        "cliente_id": cliente_id,
+        "device_id": device_id or None,
+        "linked_machine": linked_machine or None,
+        "baseline_initialized": bool(baseline_initialized),
+        "allow_takeover": bool(allow_takeover),
+        "ts_source": (m.get("_last_esp_ts_source") or None),
+        "ts_ms": (m.get("_last_esp_ts_ms_seen") or None),
+    }
 
+    # Se houver reset pendente, envia comando ao ESP (vai repetir ate receber ACK)
+    try:
+        conn_cmd = get_db()
+        pending_cmd_id = _get_pending_reset_cmd(conn_cmd, cliente_id, machine_id)
+        if pending_cmd_id:
+            resp["cmd"] = "reset_counter"
+            resp["cmd_id"] = pending_cmd_id
+    except Exception:
+        pass
+
+    return jsonify(resp)
 
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
@@ -1254,6 +1400,33 @@ def admin_reset_hour():
 
     return jsonify({"ok": True, "machine_id": machine_id, "scope": "day+hour", "hora_idx": idx, "cliente_id": cid or None, "note": "Reset completo executado. Dia e hora zerados a partir de agora."})
 
+@machine_bp.route("/admin/esp-reset-counter", methods=["POST"])
+def admin_esp_reset_counter():
+    if not _admin_token_ok():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True) or {}
+    machine_id = _norm_machine_id(payload.get("machine_id", ""))
+    cliente_id_in = (payload.get("cliente_id") or "").strip() or None
+
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id obrigatório"}), 400
+
+    try:
+        conn = get_db()
+        cmd_id = _issue_reset_cmd(conn, cliente_id_in, machine_id, now_bahia().isoformat())
+        return jsonify(
+            {
+                "ok": True,
+                "cmd": "reset_counter",
+                "cmd_id": cmd_id,
+                "machine_id": machine_id,
+                "cliente_id": cliente_id_in,
+                "note": "Comando registrado. ESP vai zerar no proximo /machine/update e enviar ACK (reset_ack=1).",
+            }
+        )
+    except Exception as e:
+        return jsonify({"ok": False, "error": "falha ao registrar comando", "detail": str(e)}), 500
 
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
@@ -1262,7 +1435,6 @@ def reset_manual():
     m = get_machine(machine_id)
     reset_contexto(m, machine_id)
     return jsonify({"status": "resetado", "machine_id": machine_id})
-
 
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
@@ -1296,7 +1468,6 @@ def salvar_refugo():
         return jsonify({"ok": False, "error": "Falha ao salvar no banco"}), 500
 
     return jsonify({"ok": True, "machine_id": machine_id, "dia_ref": dia_ref, "hora_dia": hora_dia, "refugo": refugo})
-
 
 @machine_bp.route("/machine/status", methods=["GET"])
 def machine_status():
@@ -1481,7 +1652,6 @@ def machine_status():
 
     return jsonify(m)
 
-
 @machine_bp.route("/producao/historico", methods=["GET"])
 @login_required
 def historico_page():
@@ -1493,7 +1663,6 @@ def historico_page():
         return historico_producao_api()
 
     return render_template("historico.html")
-
 
 @machine_bp.route("/api/producao/historico", methods=["GET"])
 def historico_producao_api():
@@ -1572,7 +1741,6 @@ def historico_producao_api():
         out.append(item)
 
     return jsonify(out)
-
 
 # =====================================================
 # GIT (PowerShell copiar e colar)
