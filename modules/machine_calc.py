@@ -1,7 +1,7 @@
-// PATH: modules/machine_calc.py
-// LAST_RECODE: 2026-02-04 12:34 America/Bahia
-// MOTIVO: Recalcular producao_diaria em tempo real a partir da producao_horaria para eliminar diaria=0 e diff negativa no historico.
-// INFO: lines_total=849 lines_changed=~67
+# PATH: modules/machine_calc.py
+#// LAST_RECODE: 2026-02-04 12:34 America/Bahia
+#// MOTIVO: Recalcular producao_diaria em tempo real a partir da producao_horaria para eliminar diaria=0 e diff negativa no historico.
+#// INFO: lines_total=849 lines_changed=~67
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
