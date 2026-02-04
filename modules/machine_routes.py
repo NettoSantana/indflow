@@ -1,7 +1,7 @@
-# PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 02:38 America/Bahia
-# MOTIVO: Historico: nao sobrescrever "produzido" com 0 quando nao houver eventos; manter valor de producao_diaria/OP.
-# INFO: lines_total=1485 lines_changed=~6
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
+# LAST_RECODE: 2026-02-04 08:31 America/Bahia
+# MOTIVO: Corrigir IndentationError no bloco de status_ui e restaurar transição PRODUZINDO/PARADA com cálculo de parado_min
+# INFO: Linhas totais: 1486 | Linhas alteradas: 95 | Alteracao pontual no bloco de status_ui/parado_min.
 
 # modules/machine_routes.py
 import os
@@ -1292,6 +1292,7 @@ def machine_status():
 
     try:
         status = (m.get("status") or "").strip().upper()
+        run_val = int(m.get("run") or 0)
         agora = now_bahia()
         now_ms = int(agora.timestamp() * 1000)
 
@@ -1300,51 +1301,51 @@ def machine_status():
             thr = int(m.get("no_count_stop_sec", 0) or 0)
         except Exception:
             thr = 0
+
+        sem_contar = 0
         try:
-            agora_i = now_bahia()
-            now_ms_i = int(agora_i.timestamp() * 1000)
             last_ts = m.get("_last_count_ts_ms")
             if last_ts is None:
-                last_ts = now_ms_i
+                last_ts = now_ms
                 m["_last_count_ts_ms"] = last_ts
             last_ts = int(last_ts)
-            sem_contar = (now_ms_i - last_ts) // 1000
+            if now_ms >= last_ts:
+                sem_contar = int((now_ms - last_ts) / 1000)
         except Exception:
             sem_contar = 0
 
-        if status == "AUTO" and thr >= 5 and sem_contar >= thr:
-            m["status_ui"] = "PARADA"
-            ss = _get_stopped_since_ms(machine_id)
-            if ss is None:
-                try:
-                    updated_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
-                    _set_stopped_since_ms(machine_id, int(m.get("_last_count_ts_ms", now_ms)), updated_at)
-                except Exception:
-                    pass
-                ss = _get_stopped_since_ms(machine_id)
-            turno_inicio = (m.get("turno_inicio") or "").strip()
-            turno_fim = (m.get("turno_fim") or "").strip()
-            if turno_inicio and turno_fim:
-                m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss or now_ms), now_ms, turno_inicio, turno_fim)
-            else:
-                m["parado_min"] = None
-        elif status == "AUTO":
+        stopped_by_no_count = bool(thr >= 5 and sem_contar >= thr)
+
+        if status == "AUTO" and run_val == 1 and not stopped_by_no_count:
             m["status_ui"] = "PRODUZINDO"
             m["parado_min"] = None
+            try:
+                _clear_stopped_since_ms(machine_id)
+            except Exception:
+                pass
         else:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
             if ss is None:
-                updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
-                _set_stopped_since_ms(machine_id, now_ms, updated_at)
-                ss = now_ms
+                try:
+                    updated_at = agora.strftime("%Y-%m-%d %H:%M:%S")
+                    # quando parar, ancora no ultimo timestamp conhecido (se tiver)
+                    anchor_ms = int(m.get("_last_count_ts_ms", now_ms) or now_ms)
+                    _set_stopped_since_ms(machine_id, anchor_ms, updated_at)
+                    ss = anchor_ms
+                except Exception:
+                    ss = None
+
             turno_inicio = (m.get("turno_inicio") or "").strip()
             turno_fim = (m.get("turno_fim") or "").strip()
-            if turno_inicio and turno_fim:
-                m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
+            if isinstance(ss, int):
+                if turno_inicio and turno_fim:
+                    m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
+                else:
+                    diff_ms = max(0, now_ms - int(ss))
+                    m["parado_min"] = int(diff_ms // 60000)
             else:
-                diff_ms = max(0, now_ms - int(ss))
-                m["parado_min"] = int(diff_ms // 60000)
+                m["parado_min"] = None
     except Exception:
         m["status_ui"] = "PRODUZINDO" if (m.get("status") == "AUTO") else "PARADA"
         m["parado_min"] = None
