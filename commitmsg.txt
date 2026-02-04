@@ -1,5 +1,6 @@
-﻿fix: recalcular producao_diaria em tempo real (patch aditivo)
+﻿fix: corrigir cabecalho e alinhar historico ao dashboard
 
-- diaria passa a acompanhar a horaria durante o dia
-- elimina diaria=0 e diff negativa no historico
-- sem remover logica existente
+- corrige PATH do arquivo historico_routes.py
+- historico passa a usar calcular_totais (base producao_evento)
+- elimina divergencia entre dashboard e historico
+- OPs permanecem apenas informativas
