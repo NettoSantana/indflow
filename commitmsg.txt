@@ -1,4 +1,4 @@
-﻿fix: historico nao zera produzido por filtro errado de cliente_id
+﻿fix: historico soma produzido a partir de OPs quando eventos nao existem
 
-- Valida session['cliente_id'] (somente UUID) para nao filtrar producao_evento com id invalido
-- Soma eventos por dia aceitando machine_id raw e scoped e faz fallback sem cliente_id quando necessario
+- Quando houver ops no dia e produzido=0, calcula produzido pelo somatorio de op_pcs (ou metros/conv)
+- Mantem logica atual de producao_evento e producao_diaria

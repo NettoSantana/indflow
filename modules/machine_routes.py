@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 21:30 America/Bahia
-# MOTIVO: Corrigir historico de producao quando cliente_id da sessao nao bate com producao_evento, aplicando validacao de UUID e fallback sem filtro de cliente_id.
-# INFO: lines_total=1528 lines_changed=~90
+# LAST_RECODE: 2026-02-03 21:45 America/Bahia
+# MOTIVO: Historico calcula produzido via OPs quando nao houver producao_evento/producao_diaria (dias com OPs mas produzido=0).
+# INFO: lines_total=1541 lines_changed=~70
 
 # modules/machine_routes.py
 import os
@@ -114,6 +114,44 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
         return 0
 
 
+def _calc_produzido_from_ops(ops: list) -> int:
+    """
+    Fallback simples: se existir OP no dia mas a producao_diaria/producao_evento nao tiver dados,
+    calcula o produzido somando op_pcs (prioridade) das OPs ENCERRADAS (e também ATIVAS se já tiverem pcs > 0).
+    Se op_pcs for 0 mas houver op_metros e op_conv_m_por_pcs, converte para pcs.
+    """
+    if not isinstance(ops, list) or not ops:
+        return 0
+
+    total = 0
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+
+        status = (op.get('status') or '').strip().upper()
+        if status not in {'ENCERRADA', 'ATIVA'}:
+            continue
+
+        pcs = _safe_int(op.get('op_pcs'), 0)
+        if pcs > 0:
+            total += pcs
+            continue
+
+        metros = _safe_int(op.get('op_metros'), 0)
+        try:
+            conv = float(op.get('op_conv_m_por_pcs') or 0)
+        except Exception:
+            conv = 0.0
+
+        if metros > 0 and conv > 0:
+            try:
+                total += int(round(metros / conv))
+            except Exception:
+                pass
+
+    return int(total)
+
+
 def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, fim: str) -> dict:
     """
     Retorna {dia_ref: produzido} calculado a partir de producao_evento (delta),
@@ -122,9 +160,6 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
     """
     mid = _norm_machine_id(_unscope_machine_id(machine_id))
 
-    # range em ms (Bahia). Convertendo para UTC epoch aproximado:
-    # - Inicio 00:00:00 -03
-    # - Fim 23:59:59 -03
     try:
         d0 = datetime.fromisoformat(inicio).date()
         d1 = datetime.fromisoformat(fim).date()
@@ -142,11 +177,6 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
     try:
         _ensure_producao_evento_table(conn)
 
-        # SQLite: converte epoch ms para dia local usando -3 hours.
-        # Observacao: usamos 'unixepoch' com segundos.
-
-        # Alguns ambientes antigos gravaram machine_id scoping (cliente_id::maquinaXX).
-        # Para nao perder eventos, aceitamos raw e scoped.
         scoped_mid = f"{cliente_id}::{mid}" if cliente_id else None
 
         def _query_sum(cfilter: str | None) -> dict:
@@ -187,17 +217,15 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
                 out_local[dia] = _safe_int(r[1], 0)
             return out_local
 
-        # 1) tenta com filtro de cliente_id (quando valido)
         out = _query_sum(cliente_id if cliente_id else None)
 
-        # 2) fallback: se veio cliente_id mas nao achou nada, tenta sem filtro
-        #    (evita historico zerado quando sessao tem cliente_id invalido ou dados antigos sem cliente_id)
         if cliente_id and not out:
             out = _query_sum(None)
 
         return out
     finally:
         conn.close()
+
 
 def _looks_like_uuid(v: str) -> bool:
     """
@@ -322,10 +350,6 @@ def _get_cliente_id_for_request() -> str | None:
       1) se tiver X-API-Key válida -> cliente_id
       2) senão, se tiver sessão web e parecer UUID valido -> session['cliente_id']
       3) senão -> None
-
-    Motivo:
-      - Em alguns fluxos a sessão pode conter um id que nao e cliente_id (ex: id de usuario).
-        Se filtrarmos por isso, o historico (producao_evento) fica invisivel e retorna produzido=0.
     """
     c = _get_cliente_from_api_key()
     if c:
@@ -341,14 +365,6 @@ def _get_cliente_id_for_request() -> str | None:
 def _get_ts_ms_from_payload(data: dict) -> int | None:
     """
     Timestamp preferencial vindo do ESP (epoch ms).
-    Aceita chaves comuns:
-      - ts_ms
-      - timestamp_ms
-      - ts
-      - t_ms
-    Regras:
-      - retorna int(ms) se parecer valido
-      - senao retorna None (caller aplica fallback)
     """
     if not isinstance(data, dict):
         return None
@@ -371,15 +387,13 @@ def _get_ts_ms_from_payload(data: dict) -> int | None:
         except Exception:
             return None
 
-    # valida simples: >= 2020-01-01 e <= now + 7 dias
     try:
-        min_ok = 1577836800000  # 2020-01-01 00:00:00 UTC em ms
+        min_ok = 1577836800000
         now_ms = int(now_bahia().timestamp() * 1000)
         max_ok = now_ms + (7 * 24 * 60 * 60 * 1000)
         if iv < min_ok or iv > max_ok:
             return None
     except Exception:
-        # se der erro na validacao, ainda assim nao confia
         return None
 
     return iv
@@ -391,9 +405,6 @@ def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -
     - Preenche cliente_id em TODOS os registros de producao_diaria dessa maquina
       onde cliente_id esteja NULL ou vazio.
     - Faz match tanto no machine_id raw quanto no scoped (cliente_id::machine_id).
-
-    Objetivo:
-    - A API /api/producao/historico filtra por cliente_id. Registros antigos sem cliente_id ficam invisiveis.
     '''
     cid = (cliente_id or "").strip()
     if not cid:
@@ -419,10 +430,6 @@ def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -
 
 
 def _ensure_devices_table_min(conn):
-    """
-    Segurança: garante tabela devices e colunas cliente_id/created_at.
-    (No ideal, isso fica em init_db; aqui é só para não quebrar ambientes antigos.)
-    """
     conn.execute("""
         CREATE TABLE IF NOT EXISTS devices (
             device_id TEXT PRIMARY KEY,
@@ -451,17 +458,6 @@ def _ensure_devices_table_min(conn):
 
 
 def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, allow_takeover: bool = False) -> bool:
-    """
-    Garante que o device (MAC) fique amarrado ao cliente.
-    Regra:
-      - se device já pertence a outro cliente -> bloqueia (False)
-      - se não existe -> cria com cliente_id + created_at + last_seen
-      - se existe sem cliente_id -> seta cliente_id
-      - sempre atualiza last_seen
-
-    Observação (DEV):
-      - se allow_takeover=True, permite reassociar device preso a outro cliente.
-    """
     conn = get_db()
     try:
         _ensure_devices_table_min(conn)
@@ -508,9 +504,6 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, al
 
 
 def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | None:
-    """
-    Resolve machine_id vinculado ao device, mas garantindo o tenant.
-    """
     conn = get_db()
     try:
         _ensure_devices_table_min(conn)
@@ -657,11 +650,6 @@ def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str |
 
 
 def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, updated_at: str, cliente_id: str | None):
-    """
-    Ancora baseline inicial para máquina nova / primeiro vínculo:
-    baseline_esp = esp_abs atual
-    esp_last     = esp_abs atual
-    """
     if cliente_id:
         conn.execute("""
             INSERT OR IGNORE INTO baseline_diario (cliente_id, machine_id, dia_ref, baseline_esp, esp_last, updated_at)
@@ -902,32 +890,27 @@ def update_machine():
     m["esp_absoluto"] = int(data.get("producao_turno", 0) or 0)
 
     try:
-        # timestamp preferencial vindo do ESP (epoch ms)
         ts_ms_in = _get_ts_ms_from_payload(data)
 
         agora_lc = now_bahia()
         now_ms_lc = int(agora_lc.timestamp() * 1000)
 
-        # fallback: se nao vier ts_ms do ESP, usa now do servidor (compatibilidade)
         effective_ts_ms = int(ts_ms_in) if ts_ms_in is not None else int(now_ms_lc)
 
-        # guarda debug do ultimo ts visto (para diagnostico)
         m["_last_esp_ts_ms_seen"] = effective_ts_ms
         m["_last_esp_ts_source"] = "esp" if ts_ms_in is not None else "server_fallback"
 
-
         try:
-            # debug humano: iso local (Bahia) derivado do timestamp efetivo usado no evento
             m["_last_esp_ts_iso_local"] = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA).strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
             m["_last_esp_ts_iso_local"] = None
+
         esp_now = int(m.get("esp_absoluto", 0) or 0)
         esp_prev = m.get("_last_esp_abs_seen")
         if esp_prev is None:
             esp_prev = esp_now
         esp_prev = int(esp_prev)
 
-        # OPCAO 2 (timestamp): registra evento de producao quando contador absoluto avanca
         try:
             delta_evt = esp_now - esp_prev
             if delta_evt > 0:
@@ -943,12 +926,9 @@ def update_machine():
         except Exception:
             pass
 
-        # _last_count_ts_ms deve acompanhar o timestamp do evento (preferencialmente do ESP)
-        # Regra: só atualiza quando houve avanço real (delta > 0). Isso evita "pular" timestamp em reset/recuo do contador.
         if delta_evt > 0:
             m["_last_count_ts_ms"] = int(effective_ts_ms)
         elif m.get("_last_count_ts_ms") is None:
-            # inicializa para evitar sem_contar negativo/bug em status
             m["_last_count_ts_ms"] = int(effective_ts_ms)
         m["_last_esp_abs_seen"] = esp_now
     except Exception:
@@ -1033,10 +1013,6 @@ def update_machine():
     })
 
 
-# ============================================================
-# ADMIN - RESET (PADRAO: DIA + HORA)
-#   - compatibilidade: payload {"scope":"hour"} faz reset somente da hora (comportamento antigo)
-# ============================================================
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
     if not _admin_token_ok():
@@ -1048,9 +1024,6 @@ def admin_reset_hour():
 
     scope = (data.get("scope") or "").strip().lower()
 
-    # ============================================================
-    # COMPAT: reset somente da hora (comportamento antigo)
-    # ============================================================
     if scope == "hour":
         try:
             carregar_baseline_diario(m, machine_id)
@@ -1097,12 +1070,6 @@ def admin_reset_hour():
             "note": "Hora resetada. Produção da hora volta a contar a partir de agora.",
         })
 
-    # ============================================================
-    # PADRAO: reset completo (DIA + HORA)
-    # - isso e o que o botao 'Zerar Producao' precisa fazer
-    # ============================================================
-
-    # 1) tenta resolver cliente_id (para resetar o baseline correto do tenant)
     try:
         cid = (data.get("cliente_id") or "").strip()
     except Exception:
@@ -1117,22 +1084,18 @@ def admin_reset_hour():
     if cid:
         m["cliente_id"] = cid
 
-    # 2) captura esp atual (contador absoluto do ESP)
     try:
         esp_abs_now = int(m.get("esp_absoluto", 0) or 0)
     except Exception:
         esp_abs_now = 0
 
-    # 3) reseta contexto completo (deve persistir baseline_diario usando o padrao atual do sistema)
     reset_contexto(m, machine_id)
 
-    # 4) garante que o dia operacional fique consistente apos reset manual
     try:
         m["ultimo_dia"] = dia_operacional_ref_str(now_bahia())
     except Exception:
         pass
 
-    # 5) hora: reancora baseline_hora e zera acumuladores
     idx = calcular_ultima_hora_idx(m)
     m["ultima_hora"] = idx
     m["baseline_hora"] = int(esp_abs_now)
@@ -1140,7 +1103,6 @@ def admin_reset_hour():
     m["percentual_hora"] = 0
     m["_ph_loaded"] = False
 
-    # 6) zera array exibido (evita resquicio no front)
     try:
         if isinstance(m.get("producao_por_hora"), list):
             for i in range(len(m["producao_por_hora"])):
@@ -1148,20 +1110,16 @@ def admin_reset_hour():
     except Exception:
         pass
 
-    # 7) reforco: grava baseline também no formato legado (raw) e no formato scoped (cliente_id::machine_id)
-    #    Isso protege contra divergencias de leitura entre telas/rotas.
     try:
         from modules.repos.baseline_repo import persistir_baseline_diario as _persistir_bd
 
         dia_ref = dia_operacional_ref_str(now_bahia())
 
-        # raw (legado)
         try:
             _persistir_bd(machine_id, dia_ref, int(esp_abs_now), int(esp_abs_now))
         except Exception:
             pass
 
-        # scoped (tenant)
         if cid:
             scoped_mid = f"{cid}::{machine_id}"
             try:
@@ -1181,9 +1139,6 @@ def admin_reset_hour():
     })
 
 
-# ============================================================
-# RESET MANUAL
-# ============================================================
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
     data = request.get_json() or {}
@@ -1193,9 +1148,6 @@ def reset_manual():
     return jsonify({"status": "resetado", "machine_id": machine_id})
 
 
-# ============================================================
-# REFUGO: SALVAR (PERSISTENTE)
-# ============================================================
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
     data = request.get_json() or {}
@@ -1428,8 +1380,6 @@ def machine_status():
 @machine_bp.route("/producao/historico", methods=["GET"])
 @login_required
 def historico_page():
-    # Se a pagina chamar via XHR/fetch esperando JSON, devolvemos o mesmo payload do endpoint API.
-    # Mantemos o HTML para navegação normal.
     accept = (request.headers.get("Accept") or "").lower()
     xhr = (request.headers.get("X-Requested-With") or "").lower() == "xmlhttprequest"
     fmt = (request.args.get("format") or "").lower()
@@ -1454,23 +1404,15 @@ def historico_producao_api():
         inicio = d0.isoformat()
         fim = hoje.isoformat()
 
-    # 1) Base antiga: producao_diaria (se existir)
     base = _get_historico_producao(cliente_id, machine_id, inicio, fim) or []
-
-    # 2) Novo: somar a partir de producao_evento.ts_ms (delta), agrupado por dia local.
     eventos_por_dia = _sum_eventos_por_dia(cliente_id, machine_id, inicio, fim)
 
-    # Index da base por dia
     base_por_dia = {item.get("data"): item for item in base if item.get("data")}
-
-    # Conjunto de dias (union)
     dias = set(base_por_dia.keys()) | set(eventos_por_dia.keys())
 
-    # Se nao houver nada, devolve vazio
     if not dias:
         return jsonify([])
 
-    # Meta default da maquina (para dias sem meta na tabela)
     m = get_machine(machine_id)
     meta_default = _safe_int(m.get("meta_turno"), 0)
 
@@ -1480,11 +1422,9 @@ def historico_producao_api():
         item["data"] = dia
         item["machine_id"] = machine_id
 
-        # produzido: preferir eventos (se existir no dict), senão manter base
         if dia in eventos_por_dia:
             item["produzido"] = _safe_int(eventos_por_dia.get(dia), 0)
 
-        # meta: se nao vier da base, usa default
         item["meta"] = _safe_int(item.get("meta"), meta_default)
 
         # pecas_boas/refugo
@@ -1492,20 +1432,28 @@ def historico_producao_api():
         refugo_total = _safe_int(item.get("refugo_total"), 0)
         produzido = _safe_int(item.get("produzido"), 0)
 
-        # Se a base nao trouxe pecas_boas, assume produzido - refugo
+        # fallback: se tem OPs no dia, mas produzido ainda esta 0, calcula pelo somatorio das OPs
+        try:
+            ops_list = item.get("ops") or []
+            if produzido == 0 and isinstance(ops_list, list) and len(ops_list) > 0:
+                produzido_ops = _calc_produzido_from_ops(ops_list)
+                if produzido_ops > 0:
+                    produzido = int(produzido_ops)
+                    item["produzido"] = produzido
+        except Exception:
+            pass
+
         if "pecas_boas" not in item or pecas_boas == 0:
             if produzido > 0:
                 pecas_boas = max(0, produzido - refugo_total)
                 item["pecas_boas"] = pecas_boas
 
-        # percentual
         meta = _safe_int(item.get("meta"), 0)
         if meta > 0:
             item["percentual"] = round((produzido / meta) * 100)
         else:
             item["percentual"] = 0
 
-        # Mantem ops se existir na base (se outro modulo injeta). Caso contrario, lista vazia.
         if "ops" not in item:
             item["ops"] = []
 
@@ -1519,10 +1467,10 @@ def historico_producao_api():
 # =====================================================
 # git add -A
 # @"
-# fix: historico nao zera produzido por filtro errado de cliente_id
+# fix: historico soma produzido a partir de OPs quando eventos nao existem
 #
-# - Valida session['cliente_id'] (somente UUID) para nao filtrar producao_evento com id invalido
-# - Soma eventos por dia aceitando machine_id raw e scoped e faz fallback sem cliente_id quando necessario
+# - Quando houver ops no dia e produzido=0, calcula produzido pelo somatorio de op_pcs (ou metros/conv)
+# - Mantem logica atual de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
 # git push
