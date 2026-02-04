@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 17:10 America/Bahia
-# MOTIVO: Corrigir historico dobrando produzido ao somar producao_evento em machine_id scoped+unscoped; agora prioriza scoped e faz fallback para legado.
+# LAST_RECODE: 2026-02-04 18:13 America/Bahia
+# MOTIVO: Corrigir histórico com produzido em dobro: no /api/producao/historico, usar producao_evento apenas como fallback quando base estiver 0.
 # INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
 
 # modules/machine_routes.py
@@ -1714,8 +1714,9 @@ def historico_producao_api():
 
         if dia in eventos_por_dia:
             ev = _safe_int(eventos_por_dia.get(dia), 0)
-            # Nao sobrescrever produzido calculado por producao_diaria/OP quando nao houver eventos (ev==0).
-            if ev > 0 or _safe_int(item.get("produzido"), 0) == 0:
+            # Importante: evitar "dobrar" o produzido. A base (producao_diaria/OP) ja representa o dia.
+            # Portanto, producao_evento serve apenas como fallback quando a base nao tiver produzido.
+            if _safe_int(item.get("produzido"), 0) == 0 and ev > 0:
                 item["produzido"] = ev
 
         item["meta"] = _safe_int(item.get("meta"), meta_default)
