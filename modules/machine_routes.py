@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 14:00 America/Bahia
-# MOTIVO: Historico agora calcula produzido por dia a partir de producao_evento usando dia_operacional_ref (mesma regra do sistema), e garante retorno de dias mesmo sem base no banco.
-# INFO: lines_total=1728 lines_changed=~254
+# LAST_RECODE: 2026-02-04 02:38 America/Bahia
+# MOTIVO: Historico: nao sobrescrever "produzido" com 0 quando nao houver eventos; manter valor de producao_diaria/OP.
+# INFO: lines_total=1485 lines_changed=~6
 
 # modules/machine_routes.py
 import os
@@ -229,129 +229,6 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
     finally:
         conn.close()
 
-
-def _sum_eventos_por_dia_operacional(cliente_id: str | None, machine_id: str, inicio: str, fim: str) -> dict:
-    """
-    Retorna {dia_ref: produzido} calculado a partir de producao_evento (delta),
-    agrupando pelo MESMO "dia operacional" usado no sistema (dia_operacional_ref_str),
-    derivado do timestamp (ts_ms) enviado pelo ESP.
-
-    Importante:
-    - Não agrupa por "dia calendário" do SQLite, porque isso quebra quando o sistema usa dia_ref
-      diferente do calendário (ex.: fora do turno / madrugada).
-    - Faz a consulta por faixa de ts_ms e agrupa em Python aplicando dia_operacional_ref_str
-      no datetime local (Bahia) derivado de ts_ms.
-    """
-    mid = _norm_machine_id(_unscope_machine_id(machine_id))
-
-    try:
-        d0 = datetime.fromisoformat(inicio).date()
-        d1 = datetime.fromisoformat(fim).date()
-    except Exception:
-        return {}
-
-    tz = TZ_BAHIA
-
-    # Para cobrir bordas (madrugada/fora do turno), amplia 36h para cada lado.
-    start_dt = datetime(d0.year, d0.month, d0.day, 0, 0, 0, tzinfo=tz) - timedelta(hours=36)
-    end_dt = datetime(d1.year, d1.month, d1.day, 23, 59, 59, tzinfo=tz) + timedelta(hours=36)
-
-    start_ms = int(start_dt.timestamp() * 1000)
-    end_ms = int(end_dt.timestamp() * 1000)
-
-    conn = get_db()
-    try:
-        _ensure_producao_evento_table(conn)
-
-        scoped_mid = f"{cliente_id}::{mid}" if cliente_id else None
-
-        params = []
-        where_parts = []
-
-        if cliente_id:
-            where_parts.append("cliente_id = ?")
-            params.append(cliente_id)
-
-        if scoped_mid:
-            where_parts.append("(machine_id = ? OR machine_id = ?)")
-            params.extend([mid, scoped_mid])
-        else:
-            where_parts.append("machine_id = ?")
-            params.append(mid)
-
-        where_parts.append("ts_ms >= ?")
-        where_parts.append("ts_ms <= ?")
-        params.extend([start_ms, end_ms])
-
-        where = " AND ".join(where_parts)
-
-        sql = f"""
-            SELECT ts_ms, COALESCE(delta, 0) AS delta
-              FROM producao_evento
-             WHERE {where}
-             ORDER BY ts_ms ASC
-        """
-
-        cur = conn.execute(sql, tuple(params))
-        out = {}
-
-        for r in cur.fetchall():
-            try:
-                ts_ms = int(r[0])
-                delta = _safe_int(r[1], 0)
-            except Exception:
-                continue
-
-            if delta <= 0:
-                continue
-
-            try:
-                dt_local = datetime.fromtimestamp(ts_ms / 1000, tz)
-            except Exception:
-                continue
-
-            try:
-                dia_ref = dia_operacional_ref_str(dt_local)
-            except Exception:
-                # fallback: dia calendário local
-                dia_ref = dt_local.date().isoformat()
-
-            if dia_ref < inicio or dia_ref > fim:
-                continue
-
-            out[dia_ref] = _safe_int(out.get(dia_ref), 0) + int(delta)
-
-        # Se filtrou por cliente_id e não veio nada, tenta legado (cliente_id NULL) como fallback
-        if cliente_id and not out:
-            try:
-                where2 = where.replace("cliente_id = ? AND ", "")
-                params2 = params[1:]  # remove cliente_id
-                cur2 = conn.execute(sql.replace(where, where2), tuple(params2))
-                for r in cur2.fetchall():
-                    try:
-                        ts_ms = int(r[0])
-                        delta = _safe_int(r[1], 0)
-                    except Exception:
-                        continue
-                    if delta <= 0:
-                        continue
-                    try:
-                        dt_local = datetime.fromtimestamp(ts_ms / 1000, tz)
-                    except Exception:
-                        continue
-                    try:
-                        dia_ref = dia_operacional_ref_str(dt_local)
-                    except Exception:
-                        dia_ref = dt_local.date().isoformat()
-                    if dia_ref < inicio or dia_ref > fim:
-                        continue
-                    out[dia_ref] = _safe_int(out.get(dia_ref), 0) + int(delta)
-            except Exception:
-                pass
-
-        return out
-    finally:
-        conn.close()
 
 def _looks_like_uuid(v: str) -> bool:
     """
@@ -1531,7 +1408,7 @@ def historico_producao_api():
 
     base = _get_historico_producao(cliente_id, machine_id, inicio, fim) or []
 
-    eventos_por_dia = _sum_eventos_por_dia_operacional(cliente_id, machine_id, inicio, fim)
+    eventos_por_dia = _sum_eventos_por_dia(cliente_id, machine_id, inicio, fim)
 
     base_por_dia = {item.get("data"): item for item in base if item.get("data")}
 
@@ -1550,7 +1427,10 @@ def historico_producao_api():
         item["machine_id"] = machine_id
 
         if dia in eventos_por_dia:
-            item["produzido"] = _safe_int(eventos_por_dia.get(dia), 0)
+            ev = _safe_int(eventos_por_dia.get(dia), 0)
+            # Nao sobrescrever produzido calculado por producao_diaria/OP quando nao houver eventos (ev==0).
+            if ev > 0 or _safe_int(item.get("produzido"), 0) == 0:
+                item["produzido"] = ev
 
         item["meta"] = _safe_int(item.get("meta"), meta_default)
 
@@ -1591,129 +1471,6 @@ def historico_producao_api():
     return jsonify(out)
 
 
-
-
-def _ensure_producao_diaria_table(conn):
-    """
-    Tabela simples (compat) para histórico diário.
-    Observação: pode já existir com colunas diferentes; por isso os selects abaixo são defensivos.
-    """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS producao_diaria (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cliente_id TEXT,
-            machine_id TEXT NOT NULL,
-            data TEXT NOT NULL,
-            meta INTEGER NOT NULL DEFAULT 0,
-            produzido INTEGER NOT NULL DEFAULT 0,
-            pecas_boas INTEGER NOT NULL DEFAULT 0,
-            refugo_total INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT
-        )
-        """
-    )
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_pd_mid_data ON producao_diaria(machine_id, data)")
-    except Exception:
-        pass
-    try:
-        conn.execute("CREATE INDEX IF NOT EXISTS ix_pd_cid_mid_data ON producao_diaria(cliente_id, machine_id, data)")
-    except Exception:
-        pass
-    conn.commit()
-
-
-def _date_range_inclusive(d0, d1):
-    d = d0
-    while d <= d1:
-        yield d
-        d = d + timedelta(days=1)
-
-
-def _get_historico_producao(cliente_id: str | None, machine_id: str, inicio: str, fim: str) -> list:
-    """
-    Base do histórico (producao_diaria), com fallback para "lista de dias" vazios.
-    A soma real do produzido por dia é aplicada depois via producao_evento (ver historico_producao_api).
-    """
-    mid = _norm_machine_id(_unscope_machine_id(machine_id))
-
-    try:
-        d0 = datetime.fromisoformat(inicio).date()
-        d1 = datetime.fromisoformat(fim).date()
-    except Exception:
-        return []
-
-    # Monta base default com todos os dias do range (para UI nunca ficar vazia).
-    mcfg = get_machine(mid) or {}
-    meta_default = _safe_int(mcfg.get("meta_turno"), 0)
-
-    base = {}
-    for d in _date_range_inclusive(d0, d1):
-        dia = d.isoformat()
-        base[dia] = {
-            "data": dia,
-            "machine_id": mid,
-            "meta": meta_default,
-            "produzido": 0,
-            "pecas_boas": 0,
-            "refugo_total": _sum_refugo_24(mid, dia),
-            "ops": [],
-        }
-
-    conn = get_db()
-    try:
-        _ensure_producao_diaria_table(conn)
-
-        params = []
-        where = []
-
-        if cliente_id:
-            where.append("(cliente_id = ? OR cliente_id IS NULL OR TRIM(cliente_id) = '')")
-            params.append(str(cliente_id))
-
-        scoped_mid = f"{cliente_id}::{mid}" if cliente_id else None
-        if scoped_mid:
-            where.append("(machine_id = ? OR machine_id = ?)")
-            params.extend([mid, scoped_mid])
-        else:
-            where.append("machine_id = ?")
-            params.append(mid)
-
-        where.append("data >= ?")
-        where.append("data <= ?")
-        params.extend([inicio, fim])
-
-        where_sql = " AND ".join(where)
-
-        # Select defensivo: tenta pegar colunas se existirem.
-        sql = f"""
-            SELECT data,
-                   COALESCE(meta, 0) AS meta,
-                   COALESCE(produzido, 0) AS produzido,
-                   COALESCE(pecas_boas, 0) AS pecas_boas,
-                   COALESCE(refugo_total, 0) AS refugo_total
-              FROM producao_diaria
-             WHERE {where_sql}
-        """
-        cur = conn.execute(sql, tuple(params))
-        for r in cur.fetchall():
-            dia = (r[0] or "").strip()
-            if not dia or dia not in base:
-                continue
-            base[dia]["meta"] = _safe_int(r[1], meta_default)
-            base[dia]["produzido"] = _safe_int(r[2], 0)
-            base[dia]["pecas_boas"] = _safe_int(r[3], 0)
-            base[dia]["refugo_total"] = _safe_int(r[4], base[dia]["refugo_total"])
-
-    except Exception:
-        # Se a tabela não existir/colunas forem diferentes, mantém só o fallback.
-        pass
-    finally:
-        conn.close()
-
-    # Retorna lista ordenada (mais recente primeiro) - o endpoint reordena também.
-    return [base[k] for k in sorted(base.keys(), reverse=True)]
 # =====================================================
 # GIT (PowerShell copiar e colar)
 # =====================================================

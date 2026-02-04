@@ -1,5 +1,3 @@
-﻿fix: historico por dia_operacional usando ts_ms do ESP (producao_evento)
-
-- Historico soma producao_evento.delta agrupando por dia_operacional_ref_str (nao por dia calendario)
-- Usa ts_ms do ESP para montar dia_ref local Bahia
-- Garante retorno de dias no range mesmo sem producao_diaria
+﻿fix: historico por eventos (producao_evento)
+- calcula produzido/pecas_boas/refugo por dia a partir de producao_evento
+- agrupa por dia_operacional_ref e garante retorno consistente no /api/producao/historico
