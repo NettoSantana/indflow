@@ -1,4 +1,5 @@
-﻿chore: melhorar /admin/db-check com comparativo diaria x horaria e amostra de eventos
+﻿fix: recalcular producao_diaria em tempo real (patch aditivo)
 
-- adiciona bloco compare por dia (horaria_soma, diaria_produzido, diff)
-- inclui contagem e sample de producao_evento por dia (detecta coluna ts_ms/ts/etc)
+- nao remove codigo existente
+- diaria passa a acompanhar a horaria durante o dia
+- elimina diff negativa no historico
