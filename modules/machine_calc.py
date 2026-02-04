@@ -780,3 +780,70 @@ def aplicar_derivados_ml(m):
     m["meta_hora_pcs"] = int(meta_hora_pcs or 0)
     m["meta_hora_ml"] = round(m["meta_hora_pcs"] * conv, 2)
     m["producao_hora_ml"] = round((m.get("producao_hora", 0) or 0) * conv, 2)
+
+
+
+# =========================
+# PATCH ADDITIVO (NAO REMOVE NADA)
+# LAST_RECODE: 2026-02-04 America/Bahia
+# MOTIVO: Recalcular producao_diaria em tempo real a partir da producao_horaria
+# =========================
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    _TZ_BAHIA = ZoneInfo("America/Bahia")
+except Exception:
+    _TZ_BAHIA = None
+
+def _now_bahia_safe():
+    try:
+        return datetime.now(_TZ_BAHIA) if _TZ_BAHIA else datetime.now()
+    except Exception:
+        return datetime.now()
+
+def _dia_operacional_str_safe(dt):
+    # Mantem compatibilidade: usa 00:01 como virada
+    try:
+        if dt.hour > 0 or (dt.hour == 0 and dt.minute >= 1):
+            return dt.date().isoformat()
+        return (dt.date()).isoformat()
+    except Exception:
+        return dt.date().isoformat()
+
+def _recalc_diaria_from_horaria_safe(machine_id, data_ref, meta_dia=0):
+    try:
+        from modules.db_indflow import get_db
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE(SUM(produzido),0) FROM producao_horaria WHERE machine_id=? AND data_ref=?",
+            (machine_id, data_ref),
+        )
+        produzido_dia = int(cur.fetchone()[0] or 0)
+        percentual = int((produzido_dia / meta_dia) * 100) if meta_dia and meta_dia > 0 else None
+        cur.execute("DELETE FROM producao_diaria WHERE machine_id=? AND data=?", (machine_id, data_ref))
+        cur.execute(
+            "INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual) VALUES (?,?,?,?,?)",
+            (machine_id, data_ref, produzido_dia, meta_dia or 0, percentual),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+# Hook nao-invasivo: se existir atualizar_producao_hora, envolve com recalc diaria
+if "atualizar_producao_hora" in globals():
+    _orig_atualizar_producao_hora = atualizar_producao_hora
+    def atualizar_producao_hora(*args, **kwargs):
+        res = _orig_atualizar_producao_hora(*args, **kwargs)
+        try:
+            m = args[0] if args else None
+            machine_id = (m.get("nome") or "").strip().lower() if isinstance(m, dict) else None
+            if machine_id:
+                dt = _now_bahia_safe()
+                data_ref = _dia_operacional_str_safe(dt)
+                meta_dia = int(m.get("meta_turno", 0) or 0) if isinstance(m, dict) else 0
+                _recalc_diaria_from_horaria_safe(machine_id, data_ref, meta_dia)
+        except Exception:
+            pass
+        return res
