@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-03 21:45 America/Bahia
-# MOTIVO: Historico calcula produzido via OPs quando nao houver producao_evento/producao_diaria (dias com OPs mas produzido=0).
-# INFO: lines_total=1541 lines_changed=~70
+# LAST_RECODE: 2026-02-03 22:10 America/Bahia
+# MOTIVO: Historico agora calcula produzido por dia usando producao_evento e, quando houver OPs no dia com produzido=0, calcula produzido somando op_pcs (ou metros/conv) das OPs.
+# INFO: lines_total=1542 lines_changed=~55
 
 # modules/machine_routes.py
 import os
@@ -65,10 +65,51 @@ def _safe_int(v, default=0):
         return default
 
 
+def _calc_produzido_from_ops(ops: list) -> int:
+    """
+    Fallback simples para dias em que existem OPs, mas produzido esta 0.
+    Regra:
+      - Soma op_pcs das OPs ENCERRADAS.
+      - Se op_pcs for 0 e houver op_metros + op_conv_m_por_pcs, converte para pcs (metros / conv).
+      - Ignora OP ATIVA com pcs=0 para nao inflar historico.
+    """
+    if not isinstance(ops, list) or not ops:
+        return 0
+
+    total = 0
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+
+        status = (op.get("status") or "").strip().upper()
+        if status != "ENCERRADA":
+            continue
+
+        pcs = _safe_int(op.get("op_pcs"), 0)
+        if pcs > 0:
+            total += pcs
+            continue
+
+        metros = _safe_int(op.get("op_metros"), 0)
+        try:
+            conv = float(op.get("op_conv_m_por_pcs") or 0)
+        except Exception:
+            conv = 0.0
+
+        if metros > 0 and conv > 0:
+            try:
+                total += int(round(metros / conv))
+            except Exception:
+                pass
+
+    return int(total)
+
+
 def _parse_hhmm(hhmm: str) -> tuple[int, int] | None:
     try:
-        h_str, m_str = (hhmm or '').strip().split(':', 1)
-        h = int(h_str); m = int(m_str)
+        h_str, m_str = (hhmm or "").strip().split(":", 1)
+        h = int(h_str)
+        m = int(m_str)
         if 0 <= h <= 23 and 0 <= m <= 59:
             return (h, m)
     except Exception:
@@ -77,8 +118,8 @@ def _parse_hhmm(hhmm: str) -> tuple[int, int] | None:
 
 
 def _calc_minutos_parados_somente_turno(start_ms: int, end_ms: int, turno_inicio: str | None, turno_fim: str | None) -> int:
-    ini = _parse_hhmm(turno_inicio or '')
-    fim = _parse_hhmm(turno_fim or '')
+    ini = _parse_hhmm(turno_inicio or "")
+    fim = _parse_hhmm(turno_fim or "")
     if ini is None or fim is None or end_ms <= start_ms:
         return 0
     a0 = datetime.fromtimestamp(int(start_ms) / 1000, TZ_BAHIA)
@@ -112,44 +153,6 @@ def _sum_refugo_24(machine_id: str, dia_ref: str) -> int:
         return sum(_safe_int(x, 0) for x in arr)
     except Exception:
         return 0
-
-
-def _calc_produzido_from_ops(ops: list) -> int:
-    """
-    Fallback simples: se existir OP no dia mas a producao_diaria/producao_evento nao tiver dados,
-    calcula o produzido somando op_pcs (prioridade) das OPs ENCERRADAS (e também ATIVAS se já tiverem pcs > 0).
-    Se op_pcs for 0 mas houver op_metros e op_conv_m_por_pcs, converte para pcs.
-    """
-    if not isinstance(ops, list) or not ops:
-        return 0
-
-    total = 0
-    for op in ops:
-        if not isinstance(op, dict):
-            continue
-
-        status = (op.get('status') or '').strip().upper()
-        if status not in {'ENCERRADA', 'ATIVA'}:
-            continue
-
-        pcs = _safe_int(op.get('op_pcs'), 0)
-        if pcs > 0:
-            total += pcs
-            continue
-
-        metros = _safe_int(op.get('op_metros'), 0)
-        try:
-            conv = float(op.get('op_conv_m_por_pcs') or 0)
-        except Exception:
-            conv = 0.0
-
-        if metros > 0 and conv > 0:
-            try:
-                total += int(round(metros / conv))
-            except Exception:
-                pass
-
-    return int(total)
 
 
 def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, fim: str) -> dict:
@@ -400,12 +403,12 @@ def _get_ts_ms_from_payload(data: dict) -> int | None:
 
 
 def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -> None:
-    '''
+    """
     Backfill retroativo:
     - Preenche cliente_id em TODOS os registros de producao_diaria dessa maquina
       onde cliente_id esteja NULL ou vazio.
     - Faz match tanto no machine_id raw quanto no scoped (cliente_id::machine_id).
-    '''
+    """
     cid = (cliente_id or "").strip()
     if not cid:
         return
@@ -416,12 +419,12 @@ def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -
     conn = get_db()
     try:
         conn.execute(
-            '''
+            """
             UPDATE producao_diaria
                SET cliente_id = ?
              WHERE (cliente_id IS NULL OR TRIM(cliente_id) = '')
                AND (machine_id = ? OR machine_id = ?)
-            ''',
+            """,
             (cid, raw_mid, scoped_mid),
         )
         conn.commit()
@@ -430,14 +433,16 @@ def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -
 
 
 def _ensure_devices_table_min(conn):
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS devices (
             device_id TEXT PRIMARY KEY,
             machine_id TEXT,
             alias TEXT,
             last_seen TEXT
         )
-    """)
+    """
+    )
 
     try:
         conn.execute("ALTER TABLE devices ADD COLUMN cliente_id TEXT")
@@ -466,10 +471,13 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, al
         row = cur.fetchone()
 
         if row is None:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO devices (device_id, cliente_id, machine_id, alias, created_at, last_seen)
                 VALUES (?, ?, NULL, NULL, ?, ?)
-            """, (device_id, cliente_id, now_str, now_str))
+            """,
+                (device_id, cliente_id, now_str, now_str),
+            )
             conn.commit()
             return True
 
@@ -480,22 +488,28 @@ def _upsert_device_for_cliente(device_id: str, cliente_id: str, now_str: str, al
 
         if owner and owner != cliente_id:
             if allow_takeover:
-                conn.execute("""
+                conn.execute(
+                    """
                     UPDATE devices
                        SET cliente_id = ?,
                            last_seen = ?
                      WHERE device_id = ?
-                """, (cliente_id, now_str, device_id))
+                """,
+                    (cliente_id, now_str, device_id),
+                )
                 conn.commit()
                 return True
             return False
 
-        conn.execute("""
+        conn.execute(
+            """
             UPDATE devices
                SET last_seen = ?,
                    cliente_id = COALESCE(cliente_id, ?)
              WHERE device_id = ?
-        """, (now_str, cliente_id, device_id))
+        """,
+            (now_str, cliente_id, device_id),
+        )
         conn.commit()
         return True
 
@@ -507,32 +521,37 @@ def _get_linked_machine_for_cliente(device_id: str, cliente_id: str) -> str | No
     conn = get_db()
     try:
         _ensure_devices_table_min(conn)
-        cur = conn.execute("""
+        cur = conn.execute(
+            """
             SELECT machine_id
               FROM devices
              WHERE device_id = ?
                AND cliente_id = ?
              LIMIT 1
-        """, (device_id, cliente_id))
+        """,
+            (device_id, cliente_id),
+        )
         row = cur.fetchone()
         if not row:
             return None
         try:
-            return (row["machine_id"] or None)
+            return row["machine_id"] or None
         except Exception:
-            return (row[0] or None)
+            return row[0] or None
     finally:
         conn.close()
 
 
 def _ensure_machine_stop_table(conn):
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS machine_stop (
             machine_id TEXT PRIMARY KEY,
             stopped_since_ms INTEGER NOT NULL,
             updated_at TEXT NOT NULL
         )
-    """)
+    """
+    )
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS ix_machine_stop_updated_at ON machine_stop(updated_at)")
     except Exception:
@@ -544,10 +563,7 @@ def _get_stopped_since_ms(machine_id: str) -> int | None:
     conn = get_db()
     try:
         _ensure_machine_stop_table(conn)
-        cur = conn.execute(
-            "SELECT stopped_since_ms FROM machine_stop WHERE machine_id = ? LIMIT 1",
-            (machine_id,),
-        )
+        cur = conn.execute("SELECT stopped_since_ms FROM machine_stop WHERE machine_id = ? LIMIT 1", (machine_id,))
         row = cur.fetchone()
         if not row:
             return None
@@ -568,13 +584,16 @@ def _set_stopped_since_ms(machine_id: str, stopped_since_ms: int, updated_at: st
     conn = get_db()
     try:
         _ensure_machine_stop_table(conn)
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO machine_stop (machine_id, stopped_since_ms, updated_at)
             VALUES (?, ?, ?)
             ON CONFLICT(machine_id) DO UPDATE SET
                 stopped_since_ms=excluded.stopped_since_ms,
                 updated_at=excluded.updated_at
-        """, (machine_id, int(stopped_since_ms), updated_at))
+        """,
+            (machine_id, int(stopped_since_ms), updated_at),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -591,7 +610,8 @@ def _clear_stopped_since(machine_id: str, updated_at: str):
 
 
 def _ensure_baseline_table(conn):
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS baseline_diario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
@@ -600,7 +620,8 @@ def _ensure_baseline_table(conn):
             esp_last INTEGER NOT NULL,
             updated_at TEXT NOT NULL
         )
-    """)
+    """
+    )
 
     try:
         conn.execute("ALTER TABLE baseline_diario ADD COLUMN cliente_id TEXT")
@@ -613,19 +634,23 @@ def _ensure_baseline_table(conn):
         pass
 
     try:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_cliente
             ON baseline_diario(cliente_id, machine_id, dia_ref)
-        """)
+        """
+        )
     except Exception:
         pass
 
     try:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_diario_legacy
             ON baseline_diario(machine_id, dia_ref)
             WHERE cliente_id IS NULL
-        """)
+        """
+        )
     except Exception:
         pass
 
@@ -651,20 +676,27 @@ def _has_baseline_for_day(conn, machine_id: str, dia_ref: str, cliente_id: str |
 
 def _insert_baseline_for_day(conn, machine_id: str, dia_ref: str, esp_abs: int, updated_at: str, cliente_id: str | None):
     if cliente_id:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT OR IGNORE INTO baseline_diario (cliente_id, machine_id, dia_ref, baseline_esp, esp_last, updated_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (cliente_id, machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
+        """,
+            (cliente_id, machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at),
+        )
     else:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT OR IGNORE INTO baseline_diario (cliente_id, machine_id, dia_ref, baseline_esp, esp_last, updated_at)
             VALUES (NULL, ?, ?, ?, ?, ?)
-        """, (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at))
+        """,
+            (machine_id, dia_ref, int(esp_abs), int(esp_abs), updated_at),
+        )
     conn.commit()
 
 
 def _ensure_producao_evento_table(conn):
-    conn.execute("""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS producao_evento (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             cliente_id TEXT,
@@ -674,7 +706,8 @@ def _ensure_producao_evento_table(conn):
             delta INTEGER NOT NULL,
             created_at TEXT NOT NULL
         )
-    """)
+    """
+    )
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS ix_producao_evento_mid_ts ON producao_evento(machine_id, ts_ms)")
     except Exception:
@@ -744,11 +777,13 @@ def admin_hard_reset():
     conn.commit()
     conn.close()
 
-    return jsonify({
-        "ok": True,
-        "deleted_tables": deleted,
-        "note": "Banco limpo. Recomece a contagem a partir do próximo envio do ESP."
-    })
+    return jsonify(
+        {
+            "ok": True,
+            "deleted_tables": deleted,
+            "note": "Banco limpo. Recomece a contagem a partir do próximo envio do ESP.",
+        }
+    )
 
 
 @machine_bp.route("/machine/config", methods=["POST"])
@@ -782,15 +817,15 @@ def configurar_maquina():
     aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
     salvar_conversao(m, data)
 
-    inicio = datetime.strptime(m["turno_inicio"], "%H:%M")
-    fim = datetime.strptime(m["turno_fim"], "%H:%M")
+    inicio_dt = datetime.strptime(m["turno_inicio"], "%H:%M")
+    fim_dt = datetime.strptime(m["turno_fim"], "%H:%M")
 
-    if fim <= inicio:
-        fim += timedelta(days=1)
+    if fim_dt <= inicio_dt:
+        fim_dt += timedelta(days=1)
 
     horas = []
-    atual = inicio
-    while atual < fim:
+    atual = inicio_dt
+    while atual < fim_dt:
         proxima = atual + timedelta(hours=1)
         horas.append(f"{atual.strftime('%H:%M')} - {proxima.strftime('%H:%M')}")
         atual = proxima
@@ -828,14 +863,16 @@ def configurar_maquina():
     except Exception:
         pass
 
-    return jsonify({
-        "status": "configurado",
-        "machine_id": machine_id,
-        "meta_por_hora": m["meta_por_hora"],
-        "unidade_1": m.get("unidade_1"),
-        "unidade_2": m.get("unidade_2"),
-        "conv_m_por_pcs": m.get("conv_m_por_pcs")
-    })
+    return jsonify(
+        {
+            "status": "configurado",
+            "machine_id": machine_id,
+            "meta_por_hora": m["meta_por_hora"],
+            "unidade_1": m.get("unidade_1"),
+            "unidade_2": m.get("unidade_2"),
+            "conv_m_por_pcs": m.get("conv_m_por_pcs"),
+        }
+    )
 
 
 @machine_bp.route("/machine/update", methods=["POST"])
@@ -856,14 +893,9 @@ def update_machine():
 
         allow_takeover = (os.getenv("INDFLOW_ALLOW_DEVICE_TAKEOVER") or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
-        ok_owner = _upsert_device_for_cliente(
-            device_id=device_id,
-            cliente_id=cliente_id,
-            now_str=now_str,
-            allow_takeover=allow_takeover,
-        )
+        ok_owner = _upsert_device_for_cliente(device_id=device_id, cliente_id=cliente_id, now_str=now_str, allow_takeover=allow_takeover)
         if not ok_owner:
-            return jsonify({"error": "device pertence a outro cliente", "hint": "se for DEV, você pode liberar takeover setando INDFLOW_ALLOW_DEVICE_TAKEOVER=1"}), 403
+            return jsonify({"error": "device pertence a outro cliente", "hint": "se for DEV, libere takeover setando INDFLOW_ALLOW_DEVICE_TAKEOVER=1"}), 403
 
         try:
             touch_device_seen(device_id)
@@ -987,30 +1019,26 @@ def update_machine():
 
     try:
         agora_np = now_bahia()
-        processar_nao_programado(
-            m=m,
-            machine_id=machine_id,
-            cliente_id=cliente_id,
-            esp_absoluto=int(m.get("esp_absoluto", 0) or 0),
-            agora=agora_np,
-        )
+        processar_nao_programado(m=m, machine_id=machine_id, cliente_id=cliente_id, esp_absoluto=int(m.get("esp_absoluto", 0) or 0), agora=agora_np)
     except Exception:
         try:
             processar_nao_programado(m, machine_id, cliente_id)
         except Exception:
             pass
 
-    return jsonify({
-        "message": "OK",
-        "machine_id": machine_id,
-        "cliente_id": cliente_id,
-        "device_id": device_id or None,
-        "linked_machine": linked_machine or None,
-        "baseline_initialized": bool(baseline_initialized),
-        "allow_takeover": bool(allow_takeover),
-        "ts_source": (m.get("_last_esp_ts_source") or None),
-        "ts_ms": (m.get("_last_esp_ts_ms_seen") or None),
-    })
+    return jsonify(
+        {
+            "message": "OK",
+            "machine_id": machine_id,
+            "cliente_id": cliente_id,
+            "device_id": device_id or None,
+            "linked_machine": linked_machine or None,
+            "baseline_initialized": bool(baseline_initialized),
+            "allow_takeover": bool(allow_takeover),
+            "ts_source": (m.get("_last_esp_ts_source") or None),
+            "ts_ms": (m.get("_last_esp_ts_ms_seen") or None),
+        }
+    )
 
 
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
@@ -1061,14 +1089,7 @@ def admin_reset_hour():
 
         m["_ph_loaded"] = False
 
-        return jsonify({
-            "ok": True,
-            "machine_id": machine_id,
-            "scope": "hour",
-            "hora_idx": idx,
-            "baseline_hora": int(m.get("baseline_hora", 0) or 0),
-            "note": "Hora resetada. Produção da hora volta a contar a partir de agora.",
-        })
+        return jsonify({"ok": True, "machine_id": machine_id, "scope": "hour", "hora_idx": idx, "baseline_hora": int(m.get("baseline_hora", 0) or 0), "note": "Hora resetada. Produção da hora volta a contar a partir de agora."})
 
     try:
         cid = (data.get("cliente_id") or "").strip()
@@ -1129,14 +1150,7 @@ def admin_reset_hour():
     except Exception:
         pass
 
-    return jsonify({
-        "ok": True,
-        "machine_id": machine_id,
-        "scope": "day+hour",
-        "hora_idx": idx,
-        "cliente_id": cid or None,
-        "note": "Reset completo executado. Dia e hora zerados a partir de agora.",
-    })
+    return jsonify({"ok": True, "machine_id": machine_id, "scope": "day+hour", "hora_idx": idx, "cliente_id": cid or None, "note": "Reset completo executado. Dia e hora zerados a partir de agora."})
 
 
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
@@ -1161,37 +1175,25 @@ def salvar_refugo():
     refugo = _safe_int(data.get("refugo"), 0)
 
     if hora_dia < 0 or hora_dia > 23:
-        return jsonify({"ok": False, "error": "hora_dia inválida (0..23)"}), 400
+        return jsonify({"ok": False, "error": "hora_dia invalida (0..23)"}), 400
 
     if refugo < 0:
         refugo = 0
 
     if dia_ref > dia_atual:
-        return jsonify({"ok": False, "error": "dia_ref futuro não permitido"}), 400
+        return jsonify({"ok": False, "error": "dia_ref futuro nao permitido"}), 400
 
     if dia_ref == dia_atual:
         hora_atual = int(agora.hour)
         if hora_dia >= hora_atual:
-            return jsonify({"ok": False, "error": "Só é permitido lançar refugo em horas passadas"}), 400
+            return jsonify({"ok": False, "error": "So e permitido lancar refugo em horas passadas"}), 400
 
-    ok = upsert_refugo(
-        machine_id=machine_id,
-        dia_ref=dia_ref,
-        hora_dia=hora_dia,
-        refugo=refugo,
-        updated_at_iso=agora.isoformat(),
-    )
+    ok = upsert_refugo(machine_id=machine_id, dia_ref=dia_ref, hora_dia=hora_dia, refugo=refugo, updated_at_iso=agora.isoformat())
 
     if not ok:
         return jsonify({"ok": False, "error": "Falha ao salvar no banco"}), 500
 
-    return jsonify({
-        "ok": True,
-        "machine_id": machine_id,
-        "dia_ref": dia_ref,
-        "hora_dia": hora_dia,
-        "refugo": refugo
-    })
+    return jsonify({"ok": True, "machine_id": machine_id, "dia_ref": dia_ref, "hora_dia": hora_dia, "refugo": refugo})
 
 
 @machine_bp.route("/machine/status", methods=["GET"])
@@ -1405,9 +1407,11 @@ def historico_producao_api():
         fim = hoje.isoformat()
 
     base = _get_historico_producao(cliente_id, machine_id, inicio, fim) or []
+
     eventos_por_dia = _sum_eventos_por_dia(cliente_id, machine_id, inicio, fim)
 
     base_por_dia = {item.get("data"): item for item in base if item.get("data")}
+
     dias = set(base_por_dia.keys()) | set(eventos_por_dia.keys())
 
     if not dias:
@@ -1432,7 +1436,7 @@ def historico_producao_api():
         refugo_total = _safe_int(item.get("refugo_total"), 0)
         produzido = _safe_int(item.get("produzido"), 0)
 
-        # fallback: se tem OPs no dia, mas produzido ainda esta 0, calcula pelo somatorio das OPs
+        # Fallback: se tem OPs no dia mas produzido esta 0, calcula pelo somatorio das OPs ENCERRADAS.
         try:
             ops_list = item.get("ops") or []
             if produzido == 0 and isinstance(ops_list, list) and len(ops_list) > 0:
@@ -1443,11 +1447,13 @@ def historico_producao_api():
         except Exception:
             pass
 
+        # Se a base nao trouxe pecas_boas, assume produzido - refugo
         if "pecas_boas" not in item or pecas_boas == 0:
             if produzido > 0:
                 pecas_boas = max(0, produzido - refugo_total)
                 item["pecas_boas"] = pecas_boas
 
+        # percentual
         meta = _safe_int(item.get("meta"), 0)
         if meta > 0:
             item["percentual"] = round((produzido / meta) * 100)
@@ -1467,10 +1473,10 @@ def historico_producao_api():
 # =====================================================
 # git add -A
 # @"
-# fix: historico soma produzido a partir de OPs quando eventos nao existem
+# fix: historico calcula produzido por OP quando eventos/base nao tem produzido
 #
-# - Quando houver ops no dia e produzido=0, calcula produzido pelo somatorio de op_pcs (ou metros/conv)
-# - Mantem logica atual de producao_evento e producao_diaria
+# - Se existir ops no dia e produzido=0, calcula produzido somando op_pcs das OPs ENCERRADAS (ou metros/conv)
+# - Mantem logica de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
 # git push
