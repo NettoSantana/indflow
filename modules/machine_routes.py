@@ -1,15 +1,13 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 18:23 America/Bahia
-# MOTIVO: Corrigir historico com produzido em dobro: no /api/producao/historico usar exclusivamente producao_diaria (e fallback por OP).
+# LAST_RECODE: 2026-02-04 18:50 America/Bahia
+# MOTIVO: Historico diario usa apenas producao_diaria; reset "Zerar Producao" zera producao_diaria e todas as horas do dia (producao_horaria) no banco.
 # INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
-
 # modules/machine_routes.py
 import os
 import hashlib
 import uuid
 from flask import Blueprint, request, jsonify, render_template, session
 from datetime import datetime, timedelta
-
 from modules.db_indflow import get_db
 from modules.machine_state import get_machine
 from modules.machine_calc import (
@@ -26,13 +24,10 @@ from modules.machine_calc import (
     dia_operacional_ref_str,
     TZ_BAHIA,
 )
-
 from modules.machine_service import processar_nao_programado
 from modules.repos.nao_programado_horaria_repo import load_np_por_hora_24
-
 from modules.repos.machine_config_repo import upsert_machine_config
 from modules.repos.refugo_repo import load_refugo_24, upsert_refugo
-
 from modules.admin.routes import login_required
 
 from modules.machine.device_helpers import (
@@ -1303,6 +1298,41 @@ def update_machine():
 
     return jsonify(resp)
 
+def _admin_zerar_producao_db_day_hour(machine_id: str, dia_ref: str, cliente_id: str | None) -> None:
+    mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+    like_mid = f"%::{mid_raw}"
+    mids = [mid_raw] + ([f"{cid}::{mid_raw}"] if cid else [])
+
+    conn = get_db()
+    try:
+        for mid in mids:
+            try:
+                conn.execute("UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id = ? AND cliente_id = ?", (dia_ref, mid, cid))
+            except Exception:
+                try:
+                    conn.execute("UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id = ?", (dia_ref, mid))
+                except Exception:
+                    pass
+            try:
+                conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ? AND cliente_id = ?", (dia_ref, mid, cid))
+            except Exception:
+                try:
+                    conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id = ?", (dia_ref, mid))
+                except Exception:
+                    pass
+        try:
+            conn.execute("UPDATE producao_horaria SET produzido = 0 WHERE data_ref = ? AND machine_id LIKE ?", (dia_ref, like_mid))
+        except Exception:
+            pass
+        try:
+            conn.execute("UPDATE producao_diaria SET produzido = 0, pecas_boas = 0, refugo_total = 0, percentual = 0 WHERE data = ? AND machine_id LIKE ?", (dia_ref, like_mid))
+        except Exception:
+            pass
+        conn.commit()
+    finally:
+        conn.close()
+
 @machine_bp.route("/admin/reset-hour", methods=["POST"])
 def admin_reset_hour():
     if not _admin_token_ok():
@@ -1409,6 +1439,13 @@ def admin_reset_hour():
                 _persistir_bd(scoped_mid, dia_ref, int(esp_abs_now), int(esp_abs_now))
             except Exception:
                 pass
+    except Exception:
+        pass
+
+
+    try:
+        dia_ref_db = dia_operacional_ref_str(now_bahia())
+        _admin_zerar_producao_db_day_hour(machine_id=machine_id, dia_ref=dia_ref_db, cliente_id=cid or None)
     except Exception:
         pass
 
@@ -1694,9 +1731,6 @@ def historico_producao_api():
 
     base = _get_historico_producao(cliente_id, machine_id, inicio, fim) or []
 
-    # IMPORTANTE: historico diario deve usar exclusivamente producao_diaria.
-    # producao_evento eh log incremental e nao entra no calculo do historico (evita duplicar produzido).
-
     base_por_dia = {item.get("data"): item for item in base if item.get("data")}
 
     dias = set(base_por_dia.keys())
@@ -1762,4 +1796,4 @@ def historico_producao_api():
 # - Mantem logica de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
-# git push   ss
+# git push

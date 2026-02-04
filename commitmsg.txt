@@ -1,7 +1,7 @@
-﻿fix: historico diario usa apenas producao_diaria
+﻿fix: zerar producao deve zerar todas as horas e o diario no banco
 
-No /api/producao/historico, remover uso de producao_evento no calculo do produzido
+No reset day+hour (/admin/reset-hour), zerar producao_horaria (todas as horas do dia atual) e producao_diaria do dia atual
 
-Mantem fallback por OP quando produzido vier 0
+Mantem cadastros intactos e nao apaga dias anteriores
 
-Evita duplicacao (produzido em dobro) no historico
+Evita inconsistencias entre configuracao por hora, dashboard e historico
