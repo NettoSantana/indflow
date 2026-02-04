@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 13:25 America/Bahia
-# MOTIVO: Implementar reset remoto do contador no ESP via comando explicito (admin/esp-reset-counter) e ACK (reset_ack), forcando baseline do dia para 0 para iniciar produção do zero.
-# INFO: lines_total=1756 lines_changed=~210 alteracao_pontual=cmd_reset_counter_para_esp
+# LAST_RECODE: 2026-02-04 16:35 America/Bahia
+# MOTIVO: Corrigir (1) contador de parada fora do turno (não ficar 0 min parados) e (2) histórico duplicando produção ao coexistirem registros legacy/scoped.
+# INFO: lines_total=1789 lines_changed=~41 alteracao_pontual=parado_fora_turno_e_historico_sem_dobro
 
 # modules/machine_routes.py
 import os
@@ -1613,7 +1613,19 @@ def machine_status():
             turno_fim = (m.get("turno_fim") or "").strip()
             if isinstance(ss, int):
                 if turno_inicio and turno_fim:
-                    m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
+                    # Fora do turno: conta o tempo todo (evita "0 min parados").
+                    fora_turno_agora = False
+                    try:
+                        from modules.machine_calc import calcular_ultima_hora_idx as _calc_idx
+                        fora_turno_agora = (_calc_idx(m) is None)
+                    except Exception:
+                        fora_turno_agora = False
+
+                    if fora_turno_agora:
+                        diff_ms = max(0, now_ms - int(ss))
+                        m["parado_min"] = int(diff_ms // 60000)
+                    else:
+                        m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
                 else:
                     diff_ms = max(0, now_ms - int(ss))
                     m["parado_min"] = int(diff_ms // 60000)
@@ -1703,6 +1715,27 @@ def historico_producao_api():
             # Nao sobrescrever produzido calculado por producao_diaria/OP quando nao houver eventos (ev==0).
             if ev > 0 or _safe_int(item.get("produzido"), 0) == 0:
                 item["produzido"] = ev
+
+
+        # FIX histórico: usa producao_horaria do dia como fonte de verdade (evita duplicar legacy/scoped)
+        try:
+            from modules.db_indflow import get_db as _get_db
+            conn = _get_db(); cur = conn.cursor()
+            scoped_mid = f"{cliente_id}::{machine_id}" if cliente_id else machine_id
+            cur.execute("SELECT COALESCE(SUM(produzido),0) FROM producao_horaria WHERE machine_id=? AND data_ref=?", (scoped_mid, dia))
+            sum_scoped = int(cur.fetchone()[0] or 0)
+            sum_raw = 0
+            if sum_scoped == 0 and cliente_id:
+                cur.execute("SELECT COALESCE(SUM(produzido),0) FROM producao_horaria WHERE machine_id=? AND data_ref=?", (machine_id, dia))
+                sum_raw = int(cur.fetchone()[0] or 0)
+            try: conn.close()
+            except Exception: pass
+            produzido_hora = sum_scoped if sum_scoped > 0 else sum_raw
+            if produzido_hora > 0:
+                item["produzido"] = int(produzido_hora)
+        except Exception:
+            try: conn.close()
+            except Exception: pass
 
         item["meta"] = _safe_int(item.get("meta"), meta_default)
 
