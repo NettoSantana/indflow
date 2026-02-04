@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
 # LAST_RECODE: 2026-02-04 14:55 America/Bahia
-# MOTIVO: Garantir baseline inicial no primeiro /machine/update e iniciar produção do zero mesmo com contador absoluto do ESP (corrige percentuais absurdos ao criar máquina nova).
-# INFO: lines_total=1486 lines_changed=~40 alteracao_pontual=baseline_inicial_update_machine
+# MOTIVO: Garantir que produção por hora/dia inicie em zero mesmo com contador absoluto do ESP, calculando baseline_hora via soma das horas anteriores (evita percentuais absurdos ao criar máquina nova ou trocar machine_id).
+# INFO: lines_total=1588 lines_changed=~150 alteracao_pontual=baseline_hora_por_soma_horas
 
 # modules/machine_routes.py
 import os
@@ -899,6 +899,41 @@ def configurar_maquina():
     )
 
 
+def _sum_prev_hours_produzido(conn, machine_id: str, cliente_id: str, dia_ref: str, hora_idx: int) -> int:
+    """Soma o produzido de horas anteriores (hora_idx < atual) para o mesmo dia.
+    Isso permite derivar baseline_hora sem depender do reset do ESP nem de baseline_repo.
+    """
+    try:
+        if not isinstance(hora_idx, int) or hora_idx <= 0:
+            return 0
+
+        mid = str(machine_id or "").strip()
+        cid = str(cliente_id or "").strip()
+
+        # Detecta colunas disponíveis (cliente_id pode ou não existir dependendo da migração)
+        cols = []
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(producao_horaria)").fetchall()]
+        except Exception:
+            cols = []
+
+        has_cliente_col = "cliente_id" in cols
+
+        params = [dia_ref, hora_idx, mid]
+        sql = "SELECT COALESCE(SUM(CAST(produzido AS INTEGER)), 0) FROM producao_horaria WHERE data_ref = ? AND hora_idx < ? AND machine_id = ?"
+
+        if has_cliente_col and cid:
+            sql += " AND cliente_id = ?"
+            params.append(cid)
+
+        row = conn.execute(sql, params).fetchone()
+        total = int(row[0] or 0) if row else 0
+        if total < 0:
+            total = 0
+        return total
+    except Exception:
+        return 0
+
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
     data = request.get_json() or {}
@@ -1052,6 +1087,35 @@ def update_machine():
         m["percentual_turno"] = round((producao_atual / m["meta_turno"]) * 100)
     else:
         m["percentual_turno"] = 0
+
+    # Baseline por hora: deriva a produção da hora a partir da soma das horas anteriores no DB.
+    # Assim, ao trocar machine_id ou ao criar máquina nova, o sistema não "herda" o absoluto do ESP como produção da hora.
+    try:
+        agora_bh = now_bahia()
+        dia_ref_h = dia_operacional_ref_str(agora_bh)
+        hora_idx_h = calcular_ultima_hora_idx(m)
+
+        if isinstance(hora_idx_h, int):
+            conn_h = get_db()
+            try:
+                soma_prev = _sum_prev_hours_produzido(conn_h, machine_id=str(machine_id), cliente_id=str(cliente_id), dia_ref=str(dia_ref_h), hora_idx=int(hora_idx_h))
+            finally:
+                conn_h.close()
+
+            try:
+                prod_turno_int = int(m.get("producao_turno", 0) or 0)
+            except Exception:
+                prod_turno_int = 0
+
+            if soma_prev < 0:
+                soma_prev = 0
+            if soma_prev > prod_turno_int:
+                soma_prev = prod_turno_int
+
+            m["ultima_hora"] = int(hora_idx_h)
+            m["baseline_hora"] = int(soma_prev)
+    except Exception:
+        pass
 
     atualizar_producao_hora(m)
 

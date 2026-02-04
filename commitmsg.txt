@@ -1,5 +1,5 @@
-﻿fix: corrigir auth do admin purge (check_admin_auth + get_db_path)
+﻿fix: historico usar producao_diaria (mesmo criterio do dashboard)
 
-- Adiciona get_db_path() para padronizar INDFLOW_DB_PATH (/data/indflow.db)
-- Implementa _check_admin_auth() usando token (INDFLOW_ADMIN_TOKEN/ADMIN_RESET_TOKEN)
-- Remove NameError no POST /admin/purge-production (Railway DEV)
+- /api/producao/historico passa a ler producao_diaria como fonte principal
+- refugo soma por refugo_horaria quando existir
+- OPs retornam apenas como contexto (nao entram no total)
