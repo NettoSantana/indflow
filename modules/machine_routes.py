@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 16:35 America/Bahia
-# MOTIVO: Corrigir (1) contador de parada fora do turno (não ficar 0 min parados) e (2) histórico duplicando produção ao coexistirem registros legacy/scoped.
-# INFO: lines_total=1789 lines_changed=~41 alteracao_pontual=parado_fora_turno_e_historico_sem_dobro
+# LAST_RECODE: 2026-02-04 17:10 America/Bahia
+# MOTIVO: Corrigir historico dobrando produzido ao somar producao_evento em machine_id scoped+unscoped; agora prioriza scoped e faz fallback para legado.
+# INFO: lines_total=1770 lines_changed=~30 alteracao_pontual=historico_eventos_scoping
 
 # modules/machine_routes.py
 import os
@@ -153,6 +153,13 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
     Retorna {dia_ref: produzido} calculado a partir de producao_evento (delta),
     agrupando pelo dia local Bahia usando ts_ms (epoch ms do ESP).
     inicio/fim: ISO YYYY-MM-DD (inclusive).
+
+    IMPORTANTE:
+    - Em ambiente multi-tenant, a tabela pode conter linhas com machine_id "limpo" (ex: maquina004)
+      e também "scoped" (ex: <cliente_id>::maquina004).
+    - Somar os dois ao mesmo tempo dobra o resultado.
+    - Portanto, quando cliente_id existir, priorizamos SEMPRE o scoped_mid.
+      Se não houver dados scoped, fazemos fallback para o mid legado.
     """
     mid = _norm_machine_id(_unscope_machine_id(machine_id))
 
@@ -175,7 +182,7 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
 
         scoped_mid = f"{cliente_id}::{mid}" if cliente_id else None
 
-        def _query_sum(cfilter: str | None) -> dict:
+        def _query_sum(cfilter: str | None, mid_value: str) -> dict:
             params = []
             where_parts = []
 
@@ -183,12 +190,8 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
                 where_parts.append("cliente_id = ?")
                 params.append(cfilter)
 
-            if scoped_mid:
-                where_parts.append("(machine_id = ? OR machine_id = ?)")
-                params.extend([mid, scoped_mid])
-            else:
-                where_parts.append("machine_id = ?")
-                params.append(mid)
+            where_parts.append("machine_id = ?")
+            params.append(mid_value)
 
             where_parts.append("ts_ms >= ?")
             where_parts.append("ts_ms <= ?")
@@ -213,15 +216,26 @@ def _sum_eventos_por_dia(cliente_id: str | None, machine_id: str, inicio: str, f
                 out_local[dia] = _safe_int(r[1], 0)
             return out_local
 
-        out = _query_sum(cliente_id if cliente_id else None)
+        # =====================================================
+        # 1) Se tiver cliente_id: tenta scoped + filtro cliente_id
+        # 2) Fallback: legado (mid limpo) + filtro cliente_id
+        # 3) Se ainda vazio e cliente_id existe: tenta sem filtro cliente_id (banco legado)
+        # =====================================================
+        if cliente_id and scoped_mid:
+            out = _query_sum(cliente_id, scoped_mid)
+            if not out:
+                out = _query_sum(cliente_id, mid)
+            if not out:
+                out = _query_sum(None, scoped_mid)
+            if not out:
+                out = _query_sum(None, mid)
+            return out
 
-        if cliente_id and not out:
-            out = _query_sum(None)
+        # Sem cliente_id: usa apenas o mid limpo
+        return _query_sum(None, mid)
 
-        return out
     finally:
         conn.close()
-
 def _looks_like_uuid(v: str) -> bool:
     """
     Validacao simples para evitar usar session['cliente_id'] errado (ex: id de usuario).
@@ -1613,19 +1627,7 @@ def machine_status():
             turno_fim = (m.get("turno_fim") or "").strip()
             if isinstance(ss, int):
                 if turno_inicio and turno_fim:
-                    # Fora do turno: conta o tempo todo (evita "0 min parados").
-                    fora_turno_agora = False
-                    try:
-                        from modules.machine_calc import calcular_ultima_hora_idx as _calc_idx
-                        fora_turno_agora = (_calc_idx(m) is None)
-                    except Exception:
-                        fora_turno_agora = False
-
-                    if fora_turno_agora:
-                        diff_ms = max(0, now_ms - int(ss))
-                        m["parado_min"] = int(diff_ms // 60000)
-                    else:
-                        m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
+                    m["parado_min"] = _calc_minutos_parados_somente_turno(int(ss), now_ms, turno_inicio, turno_fim)
                 else:
                     diff_ms = max(0, now_ms - int(ss))
                     m["parado_min"] = int(diff_ms // 60000)
@@ -1715,27 +1717,6 @@ def historico_producao_api():
             # Nao sobrescrever produzido calculado por producao_diaria/OP quando nao houver eventos (ev==0).
             if ev > 0 or _safe_int(item.get("produzido"), 0) == 0:
                 item["produzido"] = ev
-
-
-        # FIX histórico: usa producao_horaria do dia como fonte de verdade (evita duplicar legacy/scoped)
-        try:
-            from modules.db_indflow import get_db as _get_db
-            conn = _get_db(); cur = conn.cursor()
-            scoped_mid = f"{cliente_id}::{machine_id}" if cliente_id else machine_id
-            cur.execute("SELECT COALESCE(SUM(produzido),0) FROM producao_horaria WHERE machine_id=? AND data_ref=?", (scoped_mid, dia))
-            sum_scoped = int(cur.fetchone()[0] or 0)
-            sum_raw = 0
-            if sum_scoped == 0 and cliente_id:
-                cur.execute("SELECT COALESCE(SUM(produzido),0) FROM producao_horaria WHERE machine_id=? AND data_ref=?", (machine_id, dia))
-                sum_raw = int(cur.fetchone()[0] or 0)
-            try: conn.close()
-            except Exception: pass
-            produzido_hora = sum_scoped if sum_scoped > 0 else sum_raw
-            if produzido_hora > 0:
-                item["produzido"] = int(produzido_hora)
-        except Exception:
-            try: conn.close()
-            except Exception: pass
 
         item["meta"] = _safe_int(item.get("meta"), meta_default)
 
