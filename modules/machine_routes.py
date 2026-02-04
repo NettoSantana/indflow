@@ -1,7 +1,7 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 02:38 America/Bahia
-# MOTIVO: Historico: nao sobrescrever "produzido" com 0 quando nao houver eventos; manter valor de producao_diaria/OP.
-# INFO: lines_total=1485 lines_changed=~6
+# LAST_RECODE: 2026-02-04 08:00 America/Bahia
+# MOTIVO: Corrigir status_ui (PRODUZINDO/PARADA) usando run e timeout de contagem, evitando ficar travado em PRODUZINDO.
+# INFO: Linhas totais: 1522 | Linhas alteradas: 201 | Alteracao pontual no bloco de status_ui/parado_min.
 
 # modules/machine_routes.py
 import os
@@ -1312,14 +1312,51 @@ def machine_status():
         except Exception:
             sem_contar = 0
 
-        if status == "AUTO" and thr >= 5 and sem_contar >= thr:
+                run_val = int(m.get("run") or 0)
+        thr = int(m.get("no_count_stop_sec") or 0)
+        sem_contar = 0
+        try:
+            if isinstance(m.get("_last_count_ts_ms"), int) and now_ms >= int(m.get("_last_count_ts_ms")):
+                sem_contar = int((now_ms - int(m.get("_last_count_ts_ms"))) / 1000)
+        except Exception:
+            sem_contar = 0
+
+        stopped_by_no_count = bool(thr >= 5 and sem_contar >= thr)
+
+        if status == "AUTO":
+            if run_val == 0 or stopped_by_no_count:
+                m["status_ui"] = "PARADA"
+                ss = _get_stopped_since_ms(machine_id)
+                if ss is None:
+                    try:
+                        updated_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
+                        _set_stopped_since_ms(machine_id, int(m.get("_last_count_ts_ms", now_ms)), updated_at)
+                    except Exception:
+                        pass
+                    ss = _get_stopped_since_ms(machine_id)
+                if isinstance(ss, int) and now_ms >= ss:
+                    m["parado_min"] = int((now_ms - ss) / 60000)
+                else:
+                    m["parado_min"] = None
+            else:
+                m["status_ui"] = "PRODUZINDO"
+                m["parado_min"] = None
+                _clear_stopped_since_ms(machine_id)
+        else:
             m["status_ui"] = "PARADA"
             ss = _get_stopped_since_ms(machine_id)
             if ss is None:
                 try:
                     updated_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
-                    _set_stopped_since_ms(machine_id, int(m.get("_last_count_ts_ms", now_ms)), updated_at)
+                    _set_stopped_since_ms(machine_id, now_ms, updated_at)
                 except Exception:
+                    pass
+                ss = _get_stopped_since_ms(machine_id)
+            if isinstance(ss, int) and now_ms >= ss:
+                m["parado_min"] = int((now_ms - ss) / 60000)
+            else:
+                m["parado_min"] = None
+except Exception:
                     pass
                 ss = _get_stopped_since_ms(machine_id)
             turno_inicio = (m.get("turno_inicio") or "").strip()
