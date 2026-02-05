@@ -1,4 +1,4 @@
-﻿fix: corrigir /admin/reset-date (zerar por data) retornando 500
+﻿fix: corrigir 500 no /admin/reset-date
 
-- Troca funcao inexistente _extract_cliente_id_from_request() por _get_cliente_id_for_request()
-- Mantem logica atual do endpoint
+- Remove uso de current_user (não definido) em admin_reset_date
+- Mantém rota protegida por login_required

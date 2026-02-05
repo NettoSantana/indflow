@@ -1,18 +1,18 @@
 <!--
-PATH: templates/historico.html
-LAST_RECODE: 2026-02-04 23:05 America/Bahia
-MOTIVO: Adicionar botão 'Zerar produção por data' no histórico (chama /admin/reset-date com dia_ref).
+Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\historico.html
+Ultimo recode: 2026-02-05 10:15 (America/Bahia)
+Motivo: Corrigir botao "Zerar producao por data": habilitar apenas com data valida, ajustar layout do filtro, e corrigir chamada para /admin/reset-date (dia_ref).
 -->
 
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-02 15:25 (America/Bahia)
-Motivo: Ajustar endpoint do historico para usar o prefixo /producao e exibir sub-itens de OPs por dia.
+Ultimo recode: 2026-02-04 19:35 (America/Bahia)
+Motivo: Adicionar botao na tela Historico para zerar producao por data (frontend).
 -->
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\historico.html
-LAST_RECODE: 2026-02-01 12:10 America/Bahia
-MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada do arquivo original.
+LAST_RECODE: 2026-02-04 19:35 America/Bahia
+MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend).
 -->
 
 {% extends "base.html" %}
@@ -56,6 +56,13 @@ MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada
     flex-wrap:wrap;
     margin-bottom:14px;
   }
+  .filter-row{
+    display:flex;
+    align-items:flex-end;
+    gap:14px;
+    flex-wrap:wrap;
+  }
+
 
   .filter-group label{
     display:block;
@@ -86,7 +93,7 @@ MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada
   .hint{
     font-size:12px;
     color:#64748b;
-    margin-left:auto;
+    
     padding-bottom:6px;
     white-space:nowrap;
   }
@@ -166,25 +173,27 @@ MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada
     color:#334155;
     border:1px solid #e2e8f0;
   }
-
-    .filter-actions {
-      margin-left: auto;
+    .actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
     }
-
     .btn-danger {
-      padding: 10px 14px;
-      border: 0;
-      border-radius: 10px;
-      font-weight: 700;
-      cursor: pointer;
       background: #dc3545;
       color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-danger:hover {
+      filter: brightness(0.95);
     }
     .btn-danger:disabled {
-      opacity: 0.5;
+      opacity: 0.6;
       cursor: not-allowed;
     }
-
 </style>
 
 <div class="page">
@@ -206,11 +215,9 @@ MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada
       </div>
 
       <div class="hint">Selecione uma data para filtrar (opcional)</div>
-
-      <div class="filter-actions">
-        <button id="btn-reset-date" class="btn-danger" type="button">Zerar producao por data</button>
+      <div class="actions">
+        <button id="btn-reset-date" type="button" class="btn-danger">Zerar producao por data</button>
       </div>
-
     </div>
 
     <!-- EMBAIXO: TABELA POR DIA -->
@@ -342,66 +349,111 @@ MOTIVO: Exibir OPs (campo ops) abaixo de cada dia no Historico, sem remover nada
 
   let cache = [];
 
-  fetch(url)
-    .then(r => r.json())
-    .then(rows => {
+  async function loadHistorico() {
+    const url = `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`;
+    try {
+      const resp = await fetch(url);
+      const rows = await resp.json();
       cache = Array.isArray(rows) ? rows : [];
-      renderRows(cache, "");
-    })
-    .catch(() => {
+    } catch (e) {
       cache = [];
-      renderRows(cache, "");
-    });
+    }
+
+    const fd = document.getElementById('filter-date');
+    const selected = (fd && fd.value) ? fd.value : '';
+    renderRows(cache, selected);
+  }
+
+  loadHistorico();
 
   document.getElementById("filter-date").addEventListener("change", (e) => {
     renderRows(cache, e?.target?.value || "");
   });
 
-  // Zerar producao por data (dia_ref) para a maquina atual
-  const btnResetDate = document.getElementById("btn-reset-date");
-  function syncResetButtonState() {
-    const diaRef = document.getElementById("filter-date").value;
-    if (!btnResetDate) return;
-    btnResetDate.disabled = !machineId || !diaRef;
-  }
+    function normalizeDateInput(value) {
+      if (!value) return null;
+      const v = String(value).trim();
+      // Aceita YYYY-MM-DD
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      if (iso.test(v)) return v;
+      // Aceita DD/MM/AAAA
+      const br = /^(\d{2})\/(\d{2})\/(\d{4})$/;
+      const m = v.match(br);
+      if (m) {
+        const dd = m[1];
+        const mm = m[2];
+        const yyyy = m[3];
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      return null;
+    }
 
-  if (btnResetDate) {
-    syncResetButtonState();
-    document.getElementById("filter-date").addEventListener("change", syncResetButtonState);
-
-    btnResetDate.addEventListener("click", () => {
-      const diaRef = document.getElementById("filter-date").value;
+    async function zerarProducaoPorData() {
+      const machineId = q('machine_id');
       if (!machineId) {
-        alert("Maquina nao identificada.");
+        alert('machine_id nao encontrado na URL.');
         return;
       }
-      if (!diaRef) {
-        alert("Selecione a data que deseja zerar.");
+
+      const filterDateEl = document.getElementById('filter-date');
+      const defaultDate = (filterDateEl && filterDateEl.value) ? filterDateEl.value : '';
+      const input = prompt('Informe a data para zerar (YYYY-MM-DD ou DD/MM/AAAA):', defaultDate);
+      const data = normalizeDateInput(input);
+      if (!data) {
+        alert('Data invalida. Use YYYY-MM-DD (ex: 2026-02-04) ou DD/MM/AAAA (ex: 04/02/2026).');
         return;
       }
-      const ok = confirm(`Confirma zerar a producao da maquina ${machineId.toUpperCase()} na data ${diaRef}?`);
+
+      const ok = confirm(`Confirma zerar a producao da maquina ${machineId} na data ${data}?`);
       if (!ok) return;
 
-      fetch("/admin/reset-date", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ machine_id: machineId, dia_ref: diaRef }),
-      })
-        .then(async (r) => {
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.json().catch(() => ({}));
-        })
-        .then(() => {
-          alert("Producao zerada para a data selecionada.");
-          // Recarrega a pagina para garantir que a tabela e o cache reflitam o novo valor
-          window.location.reload();
-        })
-        .catch((e) => {
-          alert(`Falha ao zerar producao por data. ${e.message}`);
-        });
-    });
-  }
+      const btn = document.getElementById('btn-reset-date');
+      if (btn) btn.disabled = true;
 
+      try {
+        const resp = await fetch('/producao/admin/reset-date', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ machine_id: machineId, data: data })
+        });
+        const payload = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          alert(payload.error || `Falha ao zerar producao por data. HTTP ${resp.status}`);
+          return;
+        }
+
+        alert(payload.note || 'Reset por data executado.');
+        // Atualiza tabela
+        await loadHistorico();
+      } catch (err) {
+        alert('Erro ao chamar o endpoint de reset por data.');
+      } finally {
+        if (<div class="filter-bar">
+    <div class="filter-row">
+      <div class="filter-group">
+        <label for="filter-date">Selecione uma data para filtrar (opcional)</label>
+        <input type="date" id="filter-date" class="input" />
+      </div>
+
+      <div class="actions">
+        <button id="btn-reset-date" type="button" class="btn btn-danger" disabled>
+          Zerar producao por data
+        </button>
+      </div>
+    </div>
+
+    <div class="hint">
+      Para zerar, selecione uma data. Esta acao apaga os dados de producao do dia selecionado para esta maquina.
+    </div>
+  </div>
+</div> = false;
+      }
+    }
+
+    const btnResetDate = document.getElementById('btn-reset-date');
+    if (btnResetDate) {
+      btnResetDate.addEventListener('click', zerarProducaoPorData);
+    }
 </script>
 
 {% endblock %}
