@@ -1,6 +1,4 @@
-﻿feat: zerar producao por data no historico (frontend)
+﻿fix: corrigir /admin/reset-date (zerar por data) retornando 500
 
-- Adiciona botao na tela Historico para zerar producao por data
-- Prompt de data (YYYY-MM-DD ou DD/MM/AAAA) e confirmacao
-- POST /producao/admin/reset-date com machine_id e data
-- Recarrega a lista apos o reset
+- Troca funcao inexistente _extract_cliente_id_from_request() por _get_cliente_id_for_request()
+- Mantem logica atual do endpoint

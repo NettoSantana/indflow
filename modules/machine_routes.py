@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 20:27 America/Bahia
-# MOTIVO: Corrigir /admin/reset-date (zerar producao por data) que estava retornando HTTP 500 por usar funcao inexistente para cliente_id
+# LAST_RECODE: 2026-02-04 20:42 America/Bahia
+# MOTIVO: Corrigir erro 500 no /admin/reset-date removendo uso de current_user indefinido (rota já protegida por login_required).
 import os
 import hashlib
 import uuid
@@ -1581,9 +1581,6 @@ def admin_reset_date():
       - machine_id: "maquina005"
       - dia_ref: "YYYY-MM-DD" (aceita tambem data_ref/data/date)
     """
-    if not current_user.is_authenticated:
-        return jsonify({"ok": False, "error": "nao autenticado"}), 401
-
     payload = request.get_json(silent=True) or {}
     machine_id = (payload.get("machine_id") or "").strip()
 
@@ -1600,7 +1597,7 @@ def admin_reset_date():
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", dia_ref):
         return jsonify({"ok": False, "error": "dia_ref deve ser YYYY-MM-DD", "dia_ref": dia_ref}), 400
 
-    cid = _get_cliente_id_for_request() or None
+    cid = _extract_cliente_id_from_request() or None
 
     out = _admin_reset_producao_por_data(machine_id=machine_id, dia_ref=dia_ref, cliente_id=cid)
     return jsonify(out)
