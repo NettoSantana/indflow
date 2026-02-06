@@ -1,6 +1,5 @@
-﻿fix: evitar historico dobrando consolidando producao_diaria por maquina+dia
+﻿fix: historico usar somente producao_diaria e evitar dobra por duplicidade no dia
 
-- adiciona rotina anti-duplicacao para producao_diaria (mantem 1 linha por dia)
-- consolida duplicadas por maior valor e remove linhas extras
-- tenta criar indices UNIQUE (quando possivel) para prevenir repeticao
-- executa no /machine/update para corrigir assim que chegar novo heartbeat do ESP
+- /producao/api/producao/historico passa a escolher linha correta em producao_diaria quando existem duplicadas (legado/scoped ou gravacao repetida)
+- caso tipico: 2 valores no dia onde um e exatamente 2x o outro; usa o menor para evitar historico dobrando
+- nao usa producao_evento
