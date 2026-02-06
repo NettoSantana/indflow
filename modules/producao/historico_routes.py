@@ -1,6 +1,6 @@
-# PATH: modules/producao/historico_routes.py
-# LAST_RECODE: 2026-02-06 03:05 America/Bahia
-# MOTIVO: Historico usar somente producao_diaria e evitar dobra quando existem registros duplicados (legado/scoped ou gravacao repetida) escolhendo valor correto do dia.
+# Caminho: indflow/modules/producao/historico_routes.py
+# Ultimo recode: 2026-02-06 19:10:42 -03:00
+# Motivo: corrigir duplicidade no Historico escolhendo valor correto do dia quando existir par X e X/2 no mesmo dia (ex.: duplicacao por join/OPs/gravacao repetida).
 
 from __future__ import annotations
 
@@ -92,10 +92,10 @@ def _resolve_data_col(conn: sqlite3.Connection, table: str) -> str:
 
 def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> str:
     """
-    Regra: usar UMA única fonte por dia.
+    Regra: usar UMA unica fonte por dia.
     - Se vier scoped (<cliente>::maquina), usa direto.
-    - Se não, e existir scoped para o dia, usa SOMENTE scoped.
-    - Caso contrário, usa legacy.
+    - Se nao, e existir scoped para o dia, usa SOMENTE scoped.
+    - Caso contrario, usa legacy.
     """
     mid = (machine_id or "").strip()
     if not mid:
@@ -195,14 +195,21 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
             vals.append(0)
 
     chosen = 0
-    uniq = sorted(set([v for v in vals if v is not None]))
-    if len(uniq) == 2 and uniq[0] > 0 and uniq[1] == 2 * uniq[0]:
-        chosen = uniq[0]
-    else:
-        chosen = max(uniq) if uniq else 0
+    chosen = 0
+    uniq_all = sorted(set([v for v in vals if v is not None]))
+    uniq_pos = [v for v in uniq_all if v > 0]
 
-    chosen_row = None
-    for r in rows:
+    # Heuristica anti-dobro:
+    # - Se existir valor positivo maximo "X" e tambem existir "X/2" no dataset, assume que X foi duplicado (ex.: por join/OPs) e usa X/2.
+    # - Caso contrario, usa o maior valor positivo disponivel.
+    chosen = max(uniq_all) if uniq_all else 0
+    if uniq_pos:
+        max_pos = max(uniq_pos)
+        if (max_pos % 2 == 0) and ((max_pos // 2) in uniq_pos):
+            chosen = max_pos // 2
+        else:
+            chosen = max_pos
+
         try:
             if int(r["produzido"] or 0) == chosen and "::" in str(r["machine_id"] or ""):
                 chosen_row = r

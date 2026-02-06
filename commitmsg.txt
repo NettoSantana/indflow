@@ -1,4 +1,4 @@
-﻿fix: historico nao dobrar (producao_diaria absoluto)
+﻿fix: historico nao dobrar (remover linha duplicada cliente::machine em producao_diaria)
 
-- /machine/update agora sincroniza producao_diaria com valor absoluto de producao_turno
-- evita "dobro" no Historico mesmo sem linhas duplicadas
+- Ao sincronizar producao_diaria por valor absoluto, remove duplicidade de machine_id escopado
+- Evita Historico somar 2 linhas do mesmo dia (maquina e cliente::maquina)
