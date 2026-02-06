@@ -75,7 +75,6 @@ def _has_coluna(conn: sqlite3.Connection, table: str, col: str) -> bool:
     try:
         rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
         for r in rows:
-            # r: cid, name, type, notnull, dflt_value, pk
             if str(r[1]).lower() == col.lower():
                 return True
     except Exception:
@@ -84,22 +83,20 @@ def _has_coluna(conn: sqlite3.Connection, table: str, col: str) -> bool:
 
 
 def _resolve_data_col(conn: sqlite3.Connection, table: str) -> str:
-    # Tenta padroes: data_ref (novo) ou data (legado)
     if _has_coluna(conn, table, "data_ref"):
         return "data_ref"
     if _has_coluna(conn, table, "data"):
         return "data"
-    # fallback conservador
     return "data_ref"
 
 
 def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> str:
-    '''
-    Regra Opção 2: usar UMA única fonte por dia.
-    - Se o caller já passa scoped (<cliente>::maquina), usa direto.
-    - Se não, e existir dado scoped para aquele dia, usa SOMENTE o scoped (evita somar 2x).
-    - Se não existir scoped, usa legacy (machine_id puro).
-    '''
+    """
+    Regra: usar UMA única fonte por dia.
+    - Se vier scoped (<cliente>::maquina), usa direto.
+    - Se não, e existir scoped para o dia, usa SOMENTE scoped.
+    - Caso contrário, usa legacy.
+    """
     mid = (machine_id or "").strip()
     if not mid:
         return mid
@@ -107,7 +104,6 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
         return mid
 
     col = _resolve_data_col(conn, "producao_diaria")
-    # Procura qualquer scoped para esse dia e essa maquina (prioriza o que tiver maior produzido)
     sql = f"""
         SELECT machine_id
           FROM producao_diaria
@@ -116,7 +112,7 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
          ORDER BY produzido DESC
          LIMIT 1
     """
-    like = f"%::{mid.lower()}"  # machine_id na base costuma estar em lower
+    like = f"%::{mid.lower()}"
     try:
         row = _fetch_one(conn, sql, (data_ref, like))
         if row and row["machine_id"]:
@@ -127,7 +123,6 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
 
 
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
-    # Tenta os nomes de coluna mais provaveis para refugo_horaria e data_ref/data
     col = _resolve_data_col(conn, "refugo_horaria")
     tentativas = [
         (f"SELECT COALESCE(SUM(refugo), 0) FROM refugo_horaria WHERE machine_id = ? AND {col} = ?", (machine_id, data_ref)),
@@ -143,7 +138,6 @@ def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
 
 
 def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
-    # Fonte única: producao_diaria. Resolve coluna data_ref/data e escolhe machine_id efetivo (scoped vs legacy).
     col = _resolve_data_col(conn, "producao_diaria")
     eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref)
 
@@ -153,7 +147,6 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
         (eff_mid, data_ref),
     )
     if not row and eff_mid != machine_id:
-        # fallback para legacy se scoped não tiver linha (caso raro)
         row = _fetch_one(
             conn,
             f"SELECT produzido, meta, percentual FROM producao_diaria WHERE machine_id = ? AND {col} = ? LIMIT 1",
@@ -172,30 +165,20 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
     }
 
 
-
 def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> list[dict]:
-    # OPs apenas como informacao contextual (nao entram no calculo do produzido).
-    # Usa o mesmo machine_id efetivo (scoped vs legacy) para não "duplicar contexto".
     col = _resolve_data_col(conn, "ordens_producao")
     eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref)
 
     sql = f"""
-        SELECT
-            op,
-            lote,
-            operador,
-            inicio_iso,
-            fim_iso,
-            status
-        FROM ordens_producao
-        WHERE machine_id = ?
-          AND {col} = ?
-        ORDER BY inicio_iso ASC
+        SELECT op, lote, operador, inicio_iso, fim_iso, status
+          FROM ordens_producao
+         WHERE machine_id = ?
+           AND {col} = ?
+         ORDER BY inicio_iso ASC
     """
     try:
         rows = conn.execute(sql, (eff_mid, data_ref)).fetchall()
     except Exception:
-        # fallback legacy se scoped falhar
         try:
             rows = conn.execute(sql, (machine_id, data_ref)).fetchall()
         except Exception:
@@ -216,7 +199,6 @@ def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> li
     return itens
 
 
-# Inicializa DB (idempotente) quando disponivel
 if callable(init_db):
     try:
         init_db()
@@ -264,7 +246,6 @@ def api_producao_historico():
             return jsonify({"ok": True, "machine_id": machine_id, "dados": dados})
         return jsonify(dados)
     finally:
-        # Se vier do get_db, pode ser gerenciado pelo app; nao fecha.
         if not callable(get_db):
             try:
                 conn.close()
