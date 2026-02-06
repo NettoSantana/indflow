@@ -1,7 +1,7 @@
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-05 22:06 (America/Bahia)
-Motivo: Corrigir JavaScript corrompido no historico.html que impedia o carregamento do historico e da maquina; manter reset por data e filtro funcionando.
+Ultimo recode: 2026-02-05 21:30 (America/Bahia)
+Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferentes (data_ref, data, dia_ref). Ajustar filtro por data para comparar corretamente.
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -234,12 +234,45 @@ Motivo: Corrigir JavaScript corrompido no historico.html que impedia o carregame
 
   function pad2(n){ return String(n).padStart(2, "0"); }
 
-  function isoToBr(iso){
-    if(!iso || typeof iso !== "string") return "-";
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
-    if(!m) return iso;
-    return `${m[3]}/${m[2]}/${m[1]}`;
+  function isoToBr(value){
+    if(!value || typeof value !== "string") return "-";
+    const s = value.trim();
+    if(!s) return "-";
+
+    // Se ja vier em BR (dd/mm/aaaa), devolve como esta
+    if(/^(\d{2})\/(\d{2})\/(\d{4})$/.test(s)) return s;
+
+    // ISO padrao (aaaa-mm-dd)
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if(m) return `${m[3]}/${m[2]}/${m[1]}`;
+
+    return s;
   }
+
+  function dateValueToISO(value){
+    if(!value || typeof value !== "string") return "";
+    const s = value.trim();
+    if(!s) return "";
+
+    // ISO aaaa-mm-dd
+    if(/^(\d{4})-(\d{2})-(\d{2})$/.test(s)) return s;
+
+    // BR dd/mm/aaaa
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    return "";
+  }
+
+  function getRowDateValue(r){
+    if(!r || typeof r !== "object") return "";
+    return String(r.data_ref || r.data || r.dia_ref || r.date || "").trim();
+  }
+
+  function getRowDateISO(r){
+    return dateValueToISO(getRowDateValue(r));
+  }
+
 
   function normalizeDateInput(v){
     const s = String(v || "").trim();
@@ -296,7 +329,7 @@ Motivo: Corrigir JavaScript corrompido no historico.html que impedia o carregame
       const tr = document.createElement("tr");
 
       const tdData = document.createElement("td");
-      tdData.textContent = isoToBr(r.data_ref);
+      tdData.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
 
       const tdProd = document.createElement("td");
       tdProd.className = "text-right";
@@ -356,7 +389,7 @@ Motivo: Corrigir JavaScript corrompido no historico.html que impedia o carregame
       renderRows(cache);
       return;
     }
-    const filtered = cache.filter((r) => String(r.data_ref || "") === iso);
+    const filtered = cache.filter((r) => getRowDateISO(r) === iso);
     renderRows(filtered);
   }
 
