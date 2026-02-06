@@ -1,6 +1,6 @@
 # CAMINHO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# ULTIMO_RECODE: 2026-02-06 00:10 America/Bahia
-# MOTIVO: Evitar duplicacao de producao_diaria causada por chamadas de status (polling); atualizar_producao_hora nao roda em /machine/status, apenas em /machine/update.
+# ULTIMO_RECODE: 2026-02-06 09:52 America/Bahia
+# MOTIVO: Garantir unicidade de producao_diaria por maquina e dia (UPSERT/anti-duplicacao) para evitar historico dobrando quando a persistencia roda mais de uma vez.
 #
 # Caminho: indflow/modules/machine_routes.py
 # Ultimo recode: 2026-02-05 22:45 (America/Bahia)
@@ -1931,8 +1931,7 @@ def machine_status():
 
     carregar_baseline_diario(m, machine_id)
 
-    # TRAVA: nao persiste producao (hora/dia) no endpoint de status para evitar contagem duplicada por polling do front.
-    # atualizar_producao_hora(m)
+    atualizar_producao_hora(m)
     calcular_tempo_medio(m)
     aplicar_derivados_ml(m)
 

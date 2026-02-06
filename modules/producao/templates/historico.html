@@ -1,7 +1,7 @@
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-05 21:30 (America/Bahia)
-Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferentes (data_ref, data, dia_ref). Ajustar filtro por data para comparar corretamente.
+Ultimo recode: 2026-02-06 07:25 (America/Bahia)
+Motivo: Voltar a exibir OPs no Historico (linha auxiliar por dia), usando o campo ops retornado pelo backend, sem alterar os totais.
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -81,7 +81,7 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
   .hint{
     font-size:12px;
     color:#64748b;
-    
+
     padding-bottom:6px;
     white-space:nowrap;
   }
@@ -124,7 +124,7 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
   }
 
   /* ===============================
-     OPs no historico (adicao)
+     OPs no historico
      =============================== */
   .op-row td{
     background:#f8fafc;
@@ -161,27 +161,28 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
     color:#334155;
     border:1px solid #e2e8f0;
   }
-    .actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-    .btn-danger {
-      background: #dc3545;
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 10px 14px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    .btn-danger:hover {
-      filter: brightness(0.95);
-    }
-    .btn-danger:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .btn-danger {
+    background: #dc3545;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-danger:hover {
+    filter: brightness(0.95);
+  }
+  .btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
 </style>
 
 <div class="page">
@@ -232,17 +233,13 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
 (function(){
   "use strict";
 
-  function pad2(n){ return String(n).padStart(2, "0"); }
-
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
     const s = value.trim();
     if(!s) return "-";
 
-    // Se ja vier em BR (dd/mm/aaaa), devolve como esta
     if(/^(\d{2})\/(\d{2})\/(\d{4})$/.test(s)) return s;
 
-    // ISO padrao (aaaa-mm-dd)
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
     if(m) return `${m[3]}/${m[2]}/${m[1]}`;
 
@@ -254,10 +251,8 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
     const s = value.trim();
     if(!s) return "";
 
-    // ISO aaaa-mm-dd
     if(/^(\d{4})-(\d{2})-(\d{2})$/.test(s)) return s;
 
-    // BR dd/mm/aaaa
     const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
     if(m) return `${m[3]}-${m[2]}-${m[1]}`;
 
@@ -273,13 +268,9 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
     return dateValueToISO(getRowDateValue(r));
   }
 
-
   function normalizeDateInput(v){
     const s = String(v || "").trim();
     if(!s) return "";
-    // Aceita:
-    // - input[type=date] => YYYY-MM-DD
-    // - texto => DD/MM/YYYY
     if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
     const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
     if(m) return `${m[3]}-${m[2]}-${m[1]}`;
@@ -290,6 +281,33 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
     const x = Number(n);
     if(!Number.isFinite(x)) return "0";
     return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
+  }
+
+  function safeText(v){
+    if(v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  function buildOpLabel(op){
+    const opNum = safeText(op && op.op).trim();
+    const lote = safeText(op && op.lote).trim();
+    const operador = safeText(op && op.operador).trim();
+    const status = safeText(op && op.status).trim();
+
+    let parts = [];
+    if(opNum) parts.push("OP " + opNum);
+    if(lote) parts.push("Lote " + lote);
+    if(operador) parts.push("Operador " + operador);
+    if(status) parts.push(status);
+
+    return parts.join(" | ");
+  }
+
+  function statusClass(status){
+    const s = safeText(status).toUpperCase();
+    if(s.includes("ATIV") || s.includes("ABERT") || s.includes("EM_ANDAMENTO")) return "op-pill-ativa";
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return "op-pill-encerrada";
+    return "op-pill-unk";
   }
 
   const qs = new URLSearchParams(window.location.search);
@@ -314,6 +332,33 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
     td.textContent = msg;
     tr.appendChild(td);
     tbody.appendChild(tr);
+  }
+
+  function appendOpsRows(r){
+    if(!tbody) return;
+    const ops = r && r.ops;
+    if(!Array.isArray(ops) || ops.length === 0) return;
+
+    ops.forEach((op) => {
+      const trOp = document.createElement("tr");
+      trOp.className = "op-row";
+
+      const tdOp = document.createElement("td");
+      tdOp.colSpan = 4;
+
+      const pill = document.createElement("span");
+      pill.className = "op-pill " + statusClass(op && op.status);
+      pill.textContent = "OP";
+
+      const label = document.createElement("span");
+      label.textContent = " " + buildOpLabel(op);
+
+      tdOp.appendChild(pill);
+      tdOp.appendChild(label);
+
+      trOp.appendChild(tdOp);
+      tbody.appendChild(trOp);
+    });
   }
 
   function renderRows(rows){
@@ -349,6 +394,8 @@ Motivo: Exibir datas no historico mesmo quando o backend retorna campos diferent
       tr.appendChild(tdRef);
 
       tbody.appendChild(tr);
+
+      appendOpsRows(r);
     });
   }
 
