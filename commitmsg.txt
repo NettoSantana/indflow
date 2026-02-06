@@ -1,5 +1,4 @@
-﻿fix(front): habilitar reset por data e corrigir rota/payload
+﻿fix: corrigir /admin/reset-date (remover current_user inexistente)
 
-- Botao "Zerar producao por data" fica habilitado somente com data valida
-- Ajusta layout do filtro (hint em linha separada)
-- Corrige chamada para /admin/reset-date e payload com dia_ref
+- Remove checagem current_user.is_authenticated que causava NameError e 500
+- Mantem protecao do endpoint via login_required
