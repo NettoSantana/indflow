@@ -1,9 +1,6 @@
-# CAMINHO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# ULTIMO_RECODE: 2026-02-06 12:55 America/Bahia
-# MOTIVO: Corrigir anti-duplicacao de producao_diaria: nao filtrar cliente_id como 'None', permitindo consolidar 1 linha por dia e evitar Historico dobrar.
 #
-# Caminho: indflow/modules/machine_routes.py
-# Ultimo recode: 2026-02-05 22:45 (America/Bahia)
+# ULTIMO_RECODE: 2026-02-06 13:20 America/Bahia
+# MOTIVO: Fixar produzido diario como valor absoluto (producao_turno) para evitar Historico dobrar mesmo sem linhas duplicadas; manter reset-date apagando OPs do dia.
 # Motivo: Corrigir /admin/reset-date 500 trocando chamada inexistente _extract_cliente_id_from_request por _get_cliente_id_for_request.
 #
 
@@ -1064,6 +1061,107 @@ def _sum_prev_hours_produzido(conn, machine_id: str, cliente_id: str, dia_ref: s
         return total
     except Exception:
         return 0
+def _sync_producao_diaria_absoluta(machine_id: str, cliente_id: str | None, dia_ref: str, produzido_abs: int, meta: int | None = None) -> None:
+    """
+    Garante que producao_diaria reflita o valor absoluto (producao_turno) e nao um acumulado incremental.
+    Isso elimina o efeito de "dobrar" quando o mesmo pacote do ESP e processado mais de uma vez.
+    """
+    mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+    dia_ref = (dia_ref or "").strip()
+    if not dia_ref:
+        return
+
+    try:
+        produzido_abs = int(produzido_abs or 0)
+    except Exception:
+        produzido_abs = 0
+    if produzido_abs < 0:
+        produzido_abs = 0
+
+    try:
+        meta_int = int(meta or 0)
+    except Exception:
+        meta_int = 0
+    if meta_int < 0:
+        meta_int = 0
+
+    percentual = 0
+    try:
+        if meta_int > 0:
+            percentual = int(round((produzido_abs / float(meta_int)) * 100))
+    except Exception:
+        percentual = 0
+
+    conn = get_db()
+    try:
+        cols = []
+        try:
+            cols = conn.execute("PRAGMA table_info(producao_diaria)").fetchall()
+        except Exception:
+            cols = []
+
+        colnames = {str(c[1]).lower(): True for c in (cols or [])}
+        has_cliente_id = ("cliente_id" in colnames)
+
+        set_parts = ["produzido = ?", "percentual = ?"]
+        params_base = [produzido_abs, percentual]
+
+        if "pecas_boas" in colnames:
+            set_parts.append("pecas_boas = ?")
+            params_base.append(produzido_abs)
+        if "refugo_total" in colnames:
+            set_parts.append("refugo_total = ?")
+            params_base.append(0)
+        if "meta" in colnames:
+            set_parts.append("meta = ?")
+            params_base.append(meta_int)
+
+        set_sql = ", ".join(set_parts)
+
+        mids = [mid_raw] + ([f"{cid}::{mid_raw}"] if cid else [])
+
+        # Atualiza primeiro (se existir)
+        updated_any = False
+        for mid in mids:
+            try:
+                if has_cliente_id and cid is not None:
+                    cur = conn.execute(
+                        f"UPDATE producao_diaria SET {set_sql} WHERE data = ? AND machine_id = ? AND cliente_id = ?",
+                        tuple(params_base + [dia_ref, mid, cid]),
+                    )
+                else:
+                    cur = conn.execute(
+                        f"UPDATE producao_diaria SET {set_sql} WHERE data = ? AND machine_id = ?",
+                        tuple(params_base + [dia_ref, mid]),
+                    )
+                if cur and getattr(cur, "rowcount", 0) > 0:
+                    updated_any = True
+            except Exception:
+                pass
+
+        # Se nao existia, insere uma linha minima
+        if not updated_any:
+            try:
+                if has_cliente_id and cid is not None:
+                    conn.execute(
+                        "INSERT INTO producao_diaria (machine_id, cliente_id, data, produzido, meta, percentual) VALUES (?, ?, ?, ?, ?, ?)",
+                        (mids[0], cid, dia_ref, produzido_abs, meta_int, percentual),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO producao_diaria (machine_id, data, produzido, meta, percentual) VALUES (?, ?, ?, ?, ?)",
+                        (mids[0], dia_ref, produzido_abs, meta_int, percentual),
+                    )
+            except Exception:
+                pass
+
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 @machine_bp.route("/machine/update", methods=["POST"])
 def update_machine():
@@ -1273,6 +1371,22 @@ def update_machine():
 
     atualizar_producao_hora(m)
 
+    # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
+    try:
+        dia_ref_pd = dia_operacional_ref_str(now_bahia())
+        try:
+            prod_abs = int(m.get("producao_turno", 0) or 0)
+        except Exception:
+            prod_abs = 0
+        try:
+            meta_abs = int(m.get("meta_turno", 0) or 0)
+        except Exception:
+            meta_abs = 0
+        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=cliente_id, dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
+    except Exception:
+        pass
+
+
     try:
         agora_np = now_bahia()
         processar_nao_programado(m=m, machine_id=machine_id, cliente_id=cliente_id, esp_absoluto=int(m.get("esp_absoluto", 0) or 0), agora=agora_np)
@@ -1281,14 +1395,6 @@ def update_machine():
             processar_nao_programado(m, machine_id, cliente_id)
         except Exception:
             pass
-
-    # Anti-duplicacao: garante 1 linha na producao_diaria por maquina/dia (evita Historico dobrando)
-    try:
-        dia_ref_pd = dia_operacional_ref_str(now_bahia())
-        _ensure_unique_producao_diaria_por_dia(machine_id=str(machine_id), dia_ref=str(dia_ref_pd), cliente_id=cliente_id)
-    except Exception:
-        pass
-
 
     resp = {
         "message": "OK",
@@ -1484,146 +1590,6 @@ def _pick_date_col(cols: set[str]) -> str | None:
             return c
     return None
 
-def _ensure_unique_producao_diaria_por_dia(machine_id: str, dia_ref: str, cliente_id: str | None) -> None:
-    """
-    Anti-duplicacao de producao_diaria:
-    - Alguns fluxos podem persistir a diaria mais de uma vez no mesmo dia.
-    - Quando existem 2+ linhas para o mesmo (machine_id, dia), o Historico soma/duplica.
-    - Esta rotina consolida mantendo 1 linha (maior valor) e remove duplicadas.
-    - Tenta criar indice UNIQUE para evitar repeticao quando o schema permitir.
-    """
-    mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
-    if not mid_raw:
-        return
-    dia = (dia_ref or "").strip()
-    if not dia:
-        return
-
-    cid = (cliente_id or "").strip() if cliente_id else ""
-    if cid.lower() in ("none", "null", "undefined"):
-        cid = ""
-    conn = get_db()
-    try:
-        cols = _db_cols(conn, "producao_diaria")
-        if not cols or "machine_id" not in cols:
-            return
-
-        date_col = _pick_date_col(cols)
-        if not date_col:
-            return
-
-        has_cid = "cliente_id" in cols
-
-        mids = [mid_raw]
-        if cid:
-            mids.extend([f"{cid}::{mid_raw}", f"{cid}:{mid_raw}"])
-
-        m0 = mids[0]
-        m1 = mids[1] if len(mids) > 1 else mids[0]
-        m2 = mids[2] if len(mids) > 2 else mids[0]
-
-        like0 = f"%::{mid_raw}"
-        like1 = f"%:{mid_raw}"
-
-        fields = []
-        for f in ["produzido", "pecas_boas", "refugo_total", "refugo", "meta", "percentual", "op_pcs"]:
-            if f in cols:
-                fields.append(f)
-
-        # Sempre seleciona rowid e machine_id; demais campos so se existirem
-        sel = ["rowid", "machine_id", date_col]
-        sel.extend(fields)
-
-        sql = (
-            f"SELECT {', '.join(sel)} "
-            f"FROM producao_diaria "
-            f"WHERE (machine_id=? OR machine_id=? OR machine_id=? OR machine_id LIKE ? OR machine_id LIKE ?) "
-            f"AND ({date_col}=? OR {date_col} LIKE ?)"
-        )
-        params = [m0, m1, m2, like0, like1, dia, f"{dia}%"]
-
-        if has_cid and cid:
-            sql += " AND cliente_id=?"
-            params.append(cid)
-
-        sql += " ORDER BY rowid ASC"
-
-        rows = conn.execute(sql, tuple(params)).fetchall()
-        if not rows or len(rows) <= 1:
-            # tenta criar indice unique mesmo assim
-            try:
-                _try_create_unique_pd_index(conn, cols, date_col)
-            except Exception:
-                pass
-            return
-
-        # Consolida por maior valor em cada campo numerico
-        keep_rowid = rows[0][0]
-        max_vals = {}
-        for f in fields:
-            max_vals[f] = 0
-
-        for r in rows:
-            # r = (rowid, machine_id, date, <fields...>)
-            offset = 3
-            for idx_f, f in enumerate(fields):
-                try:
-                    v = r[offset + idx_f]
-                    if v is None:
-                        continue
-                    iv = int(v)
-                    if iv > max_vals[f]:
-                        max_vals[f] = iv
-                except Exception:
-                    continue
-
-        if fields:
-            set_sql = ", ".join([f"{f}=?" for f in fields] + (["cliente_id=?"] if (has_cid and cid) else []))
-            params_up = [max_vals[f] for f in fields]
-            if has_cid and cid:
-                params_up.append(cid)
-            params_up.append(keep_rowid)
-            conn.execute(f"UPDATE producao_diaria SET {set_sql} WHERE rowid=?", tuple(params_up))
-
-        # Remove duplicadas
-        del_ids = [r[0] for r in rows[1:]]
-        for rid in del_ids:
-            try:
-                conn.execute("DELETE FROM producao_diaria WHERE rowid=?", (rid,))
-            except Exception:
-                pass
-
-        # tenta criar indice unique para nao voltar a duplicar
-        try:
-            _try_create_unique_pd_index(conn, cols, date_col)
-        except Exception:
-            pass
-
-        conn.commit()
-    finally:
-        conn.close()
-
-def _try_create_unique_pd_index(conn, cols: set[str], date_col: str) -> None:
-    """Cria indice UNIQUE na producao_diaria quando possivel. Ignora falhas."""
-    if not cols or not date_col:
-        return
-
-    if "cliente_id" in cols:
-        try:
-            conn.execute(
-                f"CREATE UNIQUE INDEX IF NOT EXISTS ux_pd_cid_mid_date ON producao_diaria(cliente_id, machine_id, {date_col})"
-            )
-        except Exception:
-            pass
-
-    try:
-        conn.execute(
-            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_pd_mid_date ON producao_diaria(machine_id, {date_col})"
-        )
-    except Exception:
-        pass
-
-
 def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: str | None = None) -> dict:
     """
     Zera/remover producao de uma maquina em um DIA especifico.
@@ -1634,7 +1600,7 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
     conn = get_db()
     cur = conn.cursor()
 
-    mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
+    mid_raw = (machine_id or "").strip()
     if not mid_raw:
         return {"ok": False, "error": "machine_id vazio"}
 
@@ -1647,11 +1613,11 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
     # match por: machine_id puro, e (cliente_id:machine_id) quando existir
     mids = [mid_raw]
     if cid:
-        mids.extend([f"{cid}::{mid_raw}", f"{cid}:{mid_raw}"])
+        mids.append(f"{cid}:{mid_raw}")
 
     # alguns dados podem ter machine_id com prefixo de cliente_id mesmo quando cid nao foi passado
     # entao tambem tentamos LIKE '%:mid'
-    like_suffixes = [f"%::{mid_raw}", f"%:{mid_raw}"]
+    like_suffix = f"%:{mid_raw}"
 
     tables = [
         "producao_diaria",
@@ -1662,8 +1628,6 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
         "nao_programado_diario",
         "nao_programado_horaria",
         "refugo_horaria",
-        # OPs (ordens_producao) também devem ser zeradas quando o usuário zera a produção por data
-        "ordens_producao",
     ]
 
     result = {"ok": True, "machine_id": mid_raw, "dia_ref": dia, "cliente_id": cid, "tables": {}}
@@ -1682,19 +1646,8 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
             where_date_sql = f" AND ({date_col} = ? OR {date_col} LIKE ?)"
             params_date = [dia, f"{dia}%"]
         else:
-            # sem coluna de data: por seguranca, nao mexe.
-            # EXCECAO: ordens_producao (OPs) precisa ser removida no reset por data.
-            # Se nao houver coluna de data padrao, tentamos filtrar por created_at (se existir).
-            # Se nem created_at existir, removemos apenas por machine_id (+cliente_id quando houver).
-            if t == "ordens_producao":
-                if "created_at" in cols:
-                    where_date_sql = " AND (created_at LIKE ?)"
-                    params_date = [f"{dia}%"]
-                else:
-                    where_date_sql = ""
-                    params_date = []
-            else:
-                continue
+            # sem coluna de data, nao mexe (evita apagar tudo)
+            continue
 
         # se tiver cliente_id na tabela e cid foi informado, filtra por cliente_id tambem
         where_cid_sql = ""
@@ -1712,35 +1665,25 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
             if c in cols:
                 set_parts.append(f"{c}=0")
         if set_parts:
-            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ? OR machine_id = ?) OR (machine_id LIKE ? OR machine_id LIKE ?)"
+            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
             # adiciona data e cid
             sql_up += where_date_sql
             sql_up += where_cid_sql
 
             try:
-                m0 = mids[0]
-                m1 = mids[1] if len(mids) > 1 else mids[0]
-                m2 = mids[2] if len(mids) > 2 else mids[0]
-                l0 = like_suffixes[0]
-                l1 = like_suffixes[1]
-                cur.execute(sql_up, [m0, m1, m2, l0, l1] + params_date + params_cid)
+                cur.execute(sql_up, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
                 updated += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
             except Exception:
                 # ignora e tenta delete
                 pass
 
         # 2) Sempre tenta DELETE para remover linhas (horas/eventos)
-        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ? OR machine_id = ?) OR (machine_id LIKE ? OR machine_id LIKE ?)"
+        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
         sql_del += where_date_sql
         sql_del += where_cid_sql
 
         try:
-            m0 = mids[0]
-            m1 = mids[1] if len(mids) > 1 else mids[0]
-            m2 = mids[2] if len(mids) > 2 else mids[0]
-            l0 = like_suffixes[0]
-            l1 = like_suffixes[1]
-            cur.execute(sql_del, [m0, m1, m2, l0, l1] + params_date + params_cid)
+            cur.execute(sql_del, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
             deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         except Exception:
             pass
@@ -1947,6 +1890,22 @@ def machine_status():
     carregar_baseline_diario(m, machine_id)
 
     atualizar_producao_hora(m)
+
+    # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
+    try:
+        dia_ref_pd = dia_operacional_ref_str(now_bahia())
+        try:
+            prod_abs = int(m.get("producao_turno", 0) or 0)
+        except Exception:
+            prod_abs = 0
+        try:
+            meta_abs = int(m.get("meta_turno", 0) or 0)
+        except Exception:
+            meta_abs = 0
+        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=cliente_id, dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
+    except Exception:
+        pass
+
     calcular_tempo_medio(m)
     aplicar_derivados_ml(m)
 

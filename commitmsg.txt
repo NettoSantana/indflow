@@ -1,4 +1,5 @@
-﻿fix: reset-date tambem limpar OPs mesmo sem coluna de data padrao
+﻿fix: anti-duplicacao producao_diaria nao filtrar cliente_id como 'None'
 
-- normaliza machine_id no reset por data
-- ordens_producao: se nao houver coluna de data padrao, usa created_at (se existir) ou remove por machine_id
+- chamada de _ensure_unique_producao_diaria_por_dia passa cliente_id sem str()
+- rotina ignora cliente_id invalido ('none/null/undefined') para consolidar 1 linha/dia
+- evita historico dobrar quando existirem linhas duplicadas no mesmo dia
