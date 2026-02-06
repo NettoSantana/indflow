@@ -1,4 +1,4 @@
-﻿fix: reset-date 500 (cliente_id)
+﻿fix: historico exibir data (data_ref/data/dia_ref) e filtro por data
 
-- admin_reset_date usava func inexistente _extract_cliente_id_from_request
-- trocar por _get_cliente_id_for_request para evitar NameError e 500
+- Coluna Data agora aceita campos diferentes vindos do backend
+- Filtro por data compara por ISO mesmo se vier dd/mm/aaaa

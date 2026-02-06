@@ -1,3 +1,6 @@
+# CAMINHO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
+# ULTIMO_RECODE: 2026-02-05 09:40 America/Bahia
+# MOTIVO: Corrigir reset de producao por data para considerar machine_id scoped com '::' e evitar historico dobrando apos reset.
 #
 # Caminho: indflow/modules/machine_routes.py
 # Ultimo recode: 2026-02-05 22:45 (America/Bahia)
@@ -1496,11 +1499,11 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
     # match por: machine_id puro, e (cliente_id:machine_id) quando existir
     mids = [mid_raw]
     if cid:
-        mids.append(f"{cid}:{mid_raw}")
+        mids.extend([f"{cid}::{mid_raw}", f"{cid}:{mid_raw}"])
 
     # alguns dados podem ter machine_id com prefixo de cliente_id mesmo quando cid nao foi passado
     # entao tambem tentamos LIKE '%:mid'
-    like_suffix = f"%:{mid_raw}"
+    like_suffixes = [f"%::{mid_raw}", f"%:{mid_raw}"]
 
     tables = [
         "producao_diaria",
@@ -1548,25 +1551,35 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
             if c in cols:
                 set_parts.append(f"{c}=0")
         if set_parts:
-            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
+            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ? OR machine_id = ?) OR (machine_id LIKE ? OR machine_id LIKE ?)"
             # adiciona data e cid
             sql_up += where_date_sql
             sql_up += where_cid_sql
 
             try:
-                cur.execute(sql_up, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
+                m0 = mids[0]
+                m1 = mids[1] if len(mids) > 1 else mids[0]
+                m2 = mids[2] if len(mids) > 2 else mids[0]
+                l0 = like_suffixes[0]
+                l1 = like_suffixes[1]
+                cur.execute(sql_up, [m0, m1, m2, l0, l1] + params_date + params_cid)
                 updated += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
             except Exception:
                 # ignora e tenta delete
                 pass
 
         # 2) Sempre tenta DELETE para remover linhas (horas/eventos)
-        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
+        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ? OR machine_id = ?) OR (machine_id LIKE ? OR machine_id LIKE ?)"
         sql_del += where_date_sql
         sql_del += where_cid_sql
 
         try:
-            cur.execute(sql_del, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
+            m0 = mids[0]
+            m1 = mids[1] if len(mids) > 1 else mids[0]
+            m2 = mids[2] if len(mids) > 2 else mids[0]
+            l0 = like_suffixes[0]
+            l1 = like_suffixes[1]
+            cur.execute(sql_del, [m0, m1, m2, l0, l1] + params_date + params_cid)
             deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         except Exception:
             pass
