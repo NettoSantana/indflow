@@ -1,6 +1,6 @@
 # CAMINHO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# ULTIMO_RECODE: 2026-02-06 12:17 America/Bahia
-# MOTIVO: Ao zerar produção por data (/admin/reset-date), também remover OPs do dia na tabela ordens_producao para não ficar 'histórico de OP' após reset.
+# ULTIMO_RECODE: 2026-02-06 12:55 America/Bahia
+# MOTIVO: Corrigir anti-duplicacao de producao_diaria: nao filtrar cliente_id como 'None', permitindo consolidar 1 linha por dia e evitar Historico dobrar.
 #
 # Caminho: indflow/modules/machine_routes.py
 # Ultimo recode: 2026-02-05 22:45 (America/Bahia)
@@ -1285,7 +1285,7 @@ def update_machine():
     # Anti-duplicacao: garante 1 linha na producao_diaria por maquina/dia (evita Historico dobrando)
     try:
         dia_ref_pd = dia_operacional_ref_str(now_bahia())
-        _ensure_unique_producao_diaria_por_dia(machine_id=str(machine_id), dia_ref=str(dia_ref_pd), cliente_id=str(cliente_id))
+        _ensure_unique_producao_diaria_por_dia(machine_id=str(machine_id), dia_ref=str(dia_ref_pd), cliente_id=cliente_id)
     except Exception:
         pass
 
@@ -1500,6 +1500,8 @@ def _ensure_unique_producao_diaria_por_dia(machine_id: str, dia_ref: str, client
         return
 
     cid = (cliente_id or "").strip() if cliente_id else ""
+    if cid.lower() in ("none", "null", "undefined"):
+        cid = ""
     conn = get_db()
     try:
         cols = _db_cols(conn, "producao_diaria")
