@@ -1,5 +1,4 @@
-﻿fix: anti-duplicacao producao_diaria nao filtrar cliente_id como 'None'
+﻿fix: historico nao dobrar (producao_diaria absoluto)
 
-- chamada de _ensure_unique_producao_diaria_por_dia passa cliente_id sem str()
-- rotina ignora cliente_id invalido ('none/null/undefined') para consolidar 1 linha/dia
-- evita historico dobrar quando existirem linhas duplicadas no mesmo dia
+- /machine/update agora sincroniza producao_diaria com valor absoluto de producao_turno
+- evita "dobro" no Historico mesmo sem linhas duplicadas

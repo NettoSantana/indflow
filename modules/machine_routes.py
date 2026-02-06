@@ -1,6 +1,6 @@
 #
-# ULTIMO_RECODE: 2026-02-06 13:20 America/Bahia
-# MOTIVO: Fixar produzido diario como valor absoluto (producao_turno) para evitar Historico dobrar mesmo sem linhas duplicadas; manter reset-date apagando OPs do dia.
+# ULTIMO_RECODE: 2026-02-06 15:44 America/Bahia
+# MOTIVO: Anti-duplicacao no Historico: ao salvar producao_diaria, remover linha duplicada com machine_id escopado (cliente::machine) quando a tabela nao tem cliente_id.
 # Motivo: Corrigir /admin/reset-date 500 trocando chamada inexistente _extract_cliente_id_from_request por _get_cliente_id_for_request.
 #
 
@@ -1155,6 +1155,19 @@ def _sync_producao_diaria_absoluta(machine_id: str, cliente_id: str | None, dia_
                     )
             except Exception:
                 pass
+
+        # Anti-duplicacao: pode existir 2 linhas no producao_diaria (machine_id puro e machine_id escopado 'cliente::machine').
+        # O endpoint de Historico normalmente soma por dia; se existirem as duas, o total fica dobrado.
+        # Padrao adotado: manter apenas o machine_id SEM escopo na producao_diaria quando a tabela nao tem cliente_id.
+        try:
+            if (cid is not None) and (not has_cliente_id):
+                scoped_mid = f"{cid}::{mid_raw}"
+                conn.execute(
+                    "DELETE FROM producao_diaria WHERE data = ? AND machine_id = ?",
+                    (dia_ref, scoped_mid),
+                )
+        except Exception:
+            pass
 
         conn.commit()
     finally:
