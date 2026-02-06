@@ -1,4 +1,4 @@
-﻿fix: reset por data também apagar OPs do dia (ordens_producao)
+﻿fix: historico exibir data (data_ref/data/dia_ref) e filtro por data
 
-- /admin/reset-date agora remove registros da tabela ordens_producao no dia zerado
-- evita OP ficar aparecendo no histórico após reset de produção
+- Coluna Data agora aceita campos diferentes vindos do backend
+- Filtro por data compara por ISO mesmo se vier dd/mm/aaaa
