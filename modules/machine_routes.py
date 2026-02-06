@@ -1632,7 +1632,7 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
     conn = get_db()
     cur = conn.cursor()
 
-    mid_raw = (machine_id or "").strip()
+    mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
     if not mid_raw:
         return {"ok": False, "error": "machine_id vazio"}
 
@@ -1680,8 +1680,19 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
             where_date_sql = f" AND ({date_col} = ? OR {date_col} LIKE ?)"
             params_date = [dia, f"{dia}%"]
         else:
-            # sem coluna de data, nao mexe (evita apagar tudo)
-            continue
+            # sem coluna de data: por seguranca, nao mexe.
+            # EXCECAO: ordens_producao (OPs) precisa ser removida no reset por data.
+            # Se nao houver coluna de data padrao, tentamos filtrar por created_at (se existir).
+            # Se nem created_at existir, removemos apenas por machine_id (+cliente_id quando houver).
+            if t == "ordens_producao":
+                if "created_at" in cols:
+                    where_date_sql = " AND (created_at LIKE ?)"
+                    params_date = [f"{dia}%"]
+                else:
+                    where_date_sql = ""
+                    params_date = []
+            else:
+                continue
 
         # se tiver cliente_id na tabela e cid foi informado, filtra por cliente_id tambem
         where_cid_sql = ""
