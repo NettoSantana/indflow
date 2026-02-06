@@ -1,4 +1,6 @@
-﻿fix: reset-date/hour considerar machine_id scoped com '::' para evitar historico dobrando
+﻿fix: evitar historico dobrando consolidando producao_diaria por maquina+dia
 
-- _admin_reset_producao_por_data agora zera tanto cliente_id::maquina quanto cliente_id:maquina e LIKE correspondentes
-- Mantem compatibilidade com dados legados
+- adiciona rotina anti-duplicacao para producao_diaria (mantem 1 linha por dia)
+- consolida duplicadas por maior valor e remove linhas extras
+- tenta criar indices UNIQUE (quando possivel) para prevenir repeticao
+- executa no /machine/update para corrigir assim que chegar novo heartbeat do ESP

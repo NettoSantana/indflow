@@ -1,6 +1,6 @@
 # PATH: modules/producao/historico_routes.py
-# LAST_RECODE: 2026-02-04 17:25 America/Bahia
-# MOTIVO: Evitar historico dobrado/mismatch escolhendo UMA fonte (scoped OU legacy) por dia; corrigir DB env (INDFLOW_DB_PATH) e tolerar coluna data/data_ref.
+# LAST_RECODE: 2026-02-06 03:05 America/Bahia
+# MOTIVO: Historico usar somente producao_diaria e evitar dobra quando existem registros duplicados (legado/scoped ou gravacao repetida) escolhendo valor correto do dia.
 
 from __future__ import annotations
 
@@ -141,29 +141,91 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
     col = _resolve_data_col(conn, "producao_diaria")
     eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref)
 
-    row = _fetch_one(
-        conn,
-        f"SELECT produzido, meta, percentual FROM producao_diaria WHERE machine_id = ? AND {col} = ? LIMIT 1",
-        (eff_mid, data_ref),
-    )
-    if not row and eff_mid != machine_id:
-        row = _fetch_one(
-            conn,
-            f"SELECT produzido, meta, percentual FROM producao_diaria WHERE machine_id = ? AND {col} = ? LIMIT 1",
-            (machine_id, data_ref),
-        )
-        eff_mid = machine_id
+    # Coleta candidatos do dia para evitar dobrar quando existem registros duplicados
+    # (ex.: legado + scoped, ou gravacao repetida).
+    mid_raw = (machine_id or "").strip()
+    mid_uns = mid_raw.split("::", 1)[1] if "::" in mid_raw else mid_raw
 
-    if not row:
+    mids = set()
+    if eff_mid:
+        mids.add(str(eff_mid))
+    if mid_raw:
+        mids.add(str(mid_raw))
+
+    # Quando o request vem sem scope, considere tambem possiveis variacoes no banco.
+    like_scoped = None
+    like_legacy = None
+    if "::" not in mid_raw and mid_uns:
+        like_scoped = f"%::{mid_uns.lower()}"
+        like_legacy = f"%:{mid_uns.lower()}"
+
+    where = [f"{col} = ?"]
+    params = [data_ref]
+
+    if mids:
+        where.append("machine_id IN ({})".format(",".join(["?"] * len(mids))))
+        params.extend(list(mids))
+
+    if like_scoped:
+        where.append("machine_id LIKE ?")
+        params.append(like_scoped)
+    if like_legacy:
+        where.append("machine_id LIKE ?")
+        params.append(like_legacy)
+
+    sql = (
+        "SELECT machine_id, produzido, meta, percentual "
+        "FROM producao_diaria "
+        "WHERE " + " AND ".join(where)
+    )
+
+    try:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    except Exception:
+        rows = []
+
+    if not rows:
         return {"produzido": 0, "meta": None, "percentual": None, "_mid": eff_mid}
 
-    return {
-        "produzido": _safe_int(row["produzido"], 0),
-        "meta": _safe_int(row["meta"], 0) if row["meta"] is not None else None,
-        "percentual": _safe_int(row["percentual"], 0) if row["percentual"] is not None else None,
-        "_mid": eff_mid,
-    }
+    vals = []
+    for r in rows:
+        try:
+            vals.append(int(r["produzido"] or 0))
+        except Exception:
+            vals.append(0)
 
+    chosen = 0
+    uniq = sorted(set([v for v in vals if v is not None]))
+    if len(uniq) == 2 and uniq[0] > 0 and uniq[1] == 2 * uniq[0]:
+        chosen = uniq[0]
+    else:
+        chosen = max(uniq) if uniq else 0
+
+    chosen_row = None
+    for r in rows:
+        try:
+            if int(r["produzido"] or 0) == chosen and "::" in str(r["machine_id"] or ""):
+                chosen_row = r
+                break
+        except Exception:
+            continue
+    if not chosen_row:
+        for r in rows:
+            try:
+                if int(r["produzido"] or 0) == chosen:
+                    chosen_row = r
+                    break
+            except Exception:
+                continue
+    if not chosen_row:
+        chosen_row = rows[0]
+
+    return {
+        "produzido": _safe_int(chosen_row["produzido"], 0),
+        "meta": _safe_int(chosen_row["meta"], 0) if chosen_row["meta"] is not None else None,
+        "percentual": _safe_int(chosen_row["percentual"], 0) if chosen_row["percentual"] is not None else None,
+        "_mid": str(chosen_row["machine_id"] or eff_mid),
+    }
 
 def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> list[dict]:
     col = _resolve_data_col(conn, "ordens_producao")
