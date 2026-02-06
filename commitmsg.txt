@@ -1,4 +1,4 @@
-﻿fix: historico exibir data (data_ref/data/dia_ref) e filtro por data
+﻿fix: reset-date/hour considerar machine_id scoped com '::' para evitar historico dobrando
 
-- Coluna Data agora aceita campos diferentes vindos do backend
-- Filtro por data compara por ISO mesmo se vier dd/mm/aaaa
+- _admin_reset_producao_por_data agora zera tanto cliente_id::maquina quanto cliente_id:maquina e LIKE correspondentes
+- Mantem compatibilidade com dados legados
