@@ -1,5 +1,4 @@
-﻿fix: historico voltar a exibir OPs por dia (linhas auxiliares)
+﻿fix: reset por data também apagar OPs do dia (ordens_producao)
 
-- historico.html agora renderiza o campo ops retornado pela API
-- adiciona linhas abaixo de cada dia com OP, lote, operador e status
-- nao altera calculo nem totais do historico
+- /admin/reset-date agora remove registros da tabela ordens_producao no dia zerado
+- evita OP ficar aparecendo no histórico após reset de produção
