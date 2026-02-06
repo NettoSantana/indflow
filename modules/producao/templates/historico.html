@@ -1,7 +1,7 @@
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-06 07:25 (America/Bahia)
-Motivo: Voltar a exibir OPs no Historico (linha auxiliar por dia), usando o campo ops retornado pelo backend, sem alterar os totais.
+Ultimo recode: 2026-02-06 17:15 (America/Bahia)
+Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /machine/status (producao_turno), evitando acumulacao.
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -386,7 +386,8 @@ Motivo: Voltar a exibir OPs no Historico (linha auxiliar por dia), usando o camp
 
       const tdRef = document.createElement("td");
       tdRef.className = "text-right";
-      tdRef.textContent = fmtNum(r.refugo);
+      tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
+
 
       tr.appendChild(tdData);
       tr.appendChild(tdProd);
@@ -400,6 +401,69 @@ Motivo: Voltar a exibir OPs no Historico (linha auxiliar por dia), usando o camp
   }
 
   let cache = null;
+
+  let liveTimer = null;
+
+  async function fetchStatus(){
+    if(!machineId) return null;
+
+    const url = `/machine/status?machine_id=${encodeURIComponent(machineId)}`;
+    const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+    if(!resp.ok){
+      throw new Error("Falha ao buscar status (HTTP " + resp.status + ")");
+    }
+    return await resp.json();
+  }
+
+  function applyLiveOverride(status){
+    if(!status || !cache || !Array.isArray(cache)) return;
+
+    const dayIso = normalizeDateInput(status.ultimo_dia || status._bd_dia_ref || status._ph_data_ref || "");
+    const v = Number(status.producao_turno);
+
+    if(!dayIso) return;
+    if(!Number.isFinite(v)) return;
+
+    let row = cache.find((r) => getRowDateISO(r) === dayIso);
+    if(!row){
+      row = {
+        data: dayIso,
+        data_ref: dayIso,
+        machine_id: machineId,
+        meta: Number(status.meta_turno) || 0,
+        ops: [],
+        produzido: 0,
+        pecas_boas: 0,
+        refugo_total: 0,
+        percentual: 0
+      };
+      cache.unshift(row);
+    }
+
+    row.produzido = v;
+    row.pecas_boas = v;
+
+    if(row.refugo_total === undefined && row.refugo !== undefined){
+      row.refugo_total = row.refugo;
+    }
+
+    const p = Number(status.percentual_turno);
+    if(Number.isFinite(p)){
+      row.percentual = p;
+    }
+  }
+
+  async function refreshLive(){
+    if(!machineId) return;
+    try{
+      const status = await fetchStatus();
+      applyLiveOverride(status);
+      applyFilterAndRender();
+    }catch(e){
+      // silencioso: historico continua com cache
+    }
+  }
+
 
   async function fetchHistorico(){
     if(!machineId){
@@ -417,6 +481,9 @@ Motivo: Voltar a exibir OPs no Historico (linha auxiliar por dia), usando o camp
       }
       const data = await resp.json();
       cache = Array.isArray(data) ? data : [];
+
+      // Para o dia atual, usar a mesma fonte do card (/machine/status -> producao_turno)
+      await refreshLive();
     }catch(err){
       cache = [];
       renderMsgRow("Falha ao carregar historico.");
@@ -483,6 +550,14 @@ Motivo: Voltar a exibir OPs no Historico (linha auxiliar por dia), usando o camp
 
   function init(){
     fetchHistorico();
+
+    if(liveTimer){
+      clearInterval(liveTimer);
+      liveTimer = null;
+    }
+
+    // Mantem o valor do dia atual alinhado com o card
+    liveTimer = setInterval(refreshLive, 5000);
   }
 
   if(document.readyState === "loading"){
