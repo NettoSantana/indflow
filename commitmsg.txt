@@ -1,5 +1,4 @@
-﻿fix: historico usar somente producao_diaria e evitar dobra por duplicidade no dia
+﻿fix: trava de persistencia no status para evitar producao dobrada
 
-- /producao/api/producao/historico passa a escolher linha correta em producao_diaria quando existem duplicadas (legado/scoped ou gravacao repetida)
-- caso tipico: 2 valores no dia onde um e exatamente 2x o outro; usa o menor para evitar historico dobrando
-- nao usa producao_evento
+- /machine/status nao chama atualizar_producao_hora (evita gravar/persistir por polling)
+- Persistencia de producao fica somente no /machine/update (ESP)
