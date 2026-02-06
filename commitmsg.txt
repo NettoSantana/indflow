@@ -1,4 +1,5 @@
-﻿fix: trava de persistencia no status para evitar producao dobrada
+﻿fix: historico voltar a exibir OPs por dia (linhas auxiliares)
 
-- /machine/status nao chama atualizar_producao_hora (evita gravar/persistir por polling)
-- Persistencia de producao fica somente no /machine/update (ESP)
+- historico.html agora renderiza o campo ops retornado pela API
+- adiciona linhas abaixo de cada dia com OP, lote, operador e status
+- nao altera calculo nem totais do historico

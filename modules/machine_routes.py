@@ -1,6 +1,6 @@
 # CAMINHO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# ULTIMO_RECODE: 2026-02-06 09:52 America/Bahia
-# MOTIVO: Garantir unicidade de producao_diaria por maquina e dia (UPSERT/anti-duplicacao) para evitar historico dobrando quando a persistencia roda mais de uma vez.
+# ULTIMO_RECODE: 2026-02-06 12:17 America/Bahia
+# MOTIVO: Ao zerar produção por data (/admin/reset-date), também remover OPs do dia na tabela ordens_producao para não ficar 'histórico de OP' após reset.
 #
 # Caminho: indflow/modules/machine_routes.py
 # Ultimo recode: 2026-02-05 22:45 (America/Bahia)
@@ -1660,6 +1660,8 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
         "nao_programado_diario",
         "nao_programado_horaria",
         "refugo_horaria",
+        # OPs (ordens_producao) também devem ser zeradas quando o usuário zera a produção por data
+        "ordens_producao",
     ]
 
     result = {"ok": True, "machine_id": mid_raw, "dia_ref": dia, "cliente_id": cid, "tables": {}}
