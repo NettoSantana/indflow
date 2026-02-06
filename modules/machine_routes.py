@@ -1,6 +1,6 @@
 # PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-04 20:42 America/Bahia
-# MOTIVO: Corrigir erro 500 no /admin/reset-date removendo uso de current_user indefinido (rota já protegida por login_required).
+# LAST_RECODE: 2026-02-05 09:00 America/Bahia
+# MOTIVO: Corrigir erro 500 no /admin/reset-date removendo uso de current_user inexistente; manter protecao via login_required.
 import os
 import hashlib
 import uuid
@@ -1581,6 +1581,7 @@ def admin_reset_date():
       - machine_id: "maquina005"
       - dia_ref: "YYYY-MM-DD" (aceita tambem data_ref/data/date)
     """
+
     payload = request.get_json(silent=True) or {}
     machine_id = (payload.get("machine_id") or "").strip()
 

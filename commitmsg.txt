@@ -1,4 +1,5 @@
-﻿fix: corrigir 500 no /admin/reset-date
+﻿fix(front): habilitar reset por data e corrigir rota/payload
 
-- Remove uso de current_user (não definido) em admin_reset_date
-- Mantém rota protegida por login_required
+- Botao "Zerar producao por data" fica habilitado somente com data valida
+- Ajusta layout do filtro (hint em linha separada)
+- Corrige chamada para /admin/reset-date e payload com dia_ref
