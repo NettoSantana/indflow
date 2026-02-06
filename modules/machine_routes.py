@@ -1,3 +1,9 @@
+#
+# Caminho: indflow/modules/machine_routes.py
+# Ultimo recode: 2026-02-05 22:45 (America/Bahia)
+# Motivo: Corrigir /admin/reset-date 500 trocando chamada inexistente _extract_cliente_id_from_request por _get_cliente_id_for_request.
+#
+
 # PATH: indflow/modules/machine_routes.py
 # LAST_RECODE: 2026-02-05 09:00 America/Bahia
 # MOTIVO: Corrigir erro 500 no /admin/reset-date removendo uso de current_user inexistente; manter protecao via login_required.
@@ -1598,7 +1604,7 @@ def admin_reset_date():
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", dia_ref):
         return jsonify({"ok": False, "error": "dia_ref deve ser YYYY-MM-DD", "dia_ref": dia_ref}), 400
 
-    cid = _extract_cliente_id_from_request() or None
+    cid = _get_cliente_id_for_request()  # FIX: reset-date usa helper existente; evita NameError
 
     out = _admin_reset_producao_por_data(machine_id=machine_id, dia_ref=dia_ref, cliente_id=cid)
     return jsonify(out)
