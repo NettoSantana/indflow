@@ -1,4 +1,4 @@
-﻿fix: corrigir /admin/reset-date (remover current_user inexistente)
+﻿fix: /admin/reset-date sem current_user (evita 500)
 
-- Remove checagem current_user.is_authenticated que causava NameError e 500
-- Mantem protecao do endpoint via login_required
+- Corrige NameError current_user em admin_reset_date
+- Mantem protecao via @login_required (wrapper admin)

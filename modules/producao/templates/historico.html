@@ -1,20 +1,8 @@
-<!--
-Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\historico.html
-Ultimo recode: 2026-02-05 10:15 (America/Bahia)
-Motivo: Corrigir botao "Zerar producao por data": habilitar apenas com data valida, ajustar layout do filtro, e corrigir chamada para /admin/reset-date (dia_ref).
--->
-
-<!--
+{#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-04 19:35 (America/Bahia)
-Motivo: Adicionar botao na tela Historico para zerar producao por data (frontend).
--->
-<!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\historico.html
-LAST_RECODE: 2026-02-04 19:35 America/Bahia
-MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend).
--->
-
+Ultimo recode: 2026-02-05 22:06 (America/Bahia)
+Motivo: Corrigir JavaScript corrompido no historico.html que impedia o carregamento do historico e da maquina; manter reset por data e filtro funcionando.
+#}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
@@ -241,219 +229,188 @@ MOTIVO: Adicionar botao na tela Historico para zerar producao por data (frontend
 </div>
 
 <script>
-  function fmtInt(n){
-    try { return new Intl.NumberFormat("pt-BR").format(Math.floor(Number(n) || 0)); }
-    catch(e){ return String(Math.floor(Number(n) || 0)); }
+(function(){
+  "use strict";
+
+  function pad2(n){ return String(n).padStart(2, "0"); }
+
+  function isoToBr(iso){
+    if(!iso || typeof iso !== "string") return "-";
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+    if(!m) return iso;
+    return `${m[3]}/${m[2]}/${m[1]}`;
   }
 
-  function q(name){
-    return new URLSearchParams(window.location.search).get(name) || "";
+  function normalizeDateInput(v){
+    const s = String(v || "").trim();
+    if(!s) return "";
+    // Aceita:
+    // - input[type=date] => YYYY-MM-DD
+    // - texto => DD/MM/YYYY
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return "";
   }
 
-  // ===============================
-  // OPs helpers (adicao)
-  // ===============================
-  function safeStr(v){
-    return String(v === undefined || v === null ? "" : v);
+  function fmtNum(n){
+    const x = Number(n);
+    if(!Number.isFinite(x)) return "0";
+    return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
   }
 
-  function fmtOpTime(s){
-    // esperado ISO: YYYY-MM-DDTHH:MM:SS
-    const t = safeStr(s).trim();
-    if(!t) return "—";
-    return t.replace("T", " ");
+  const qs = new URLSearchParams(window.location.search);
+  const machineId = qs.get("machine_id") || qs.get("machine") || "";
+
+  const elMachine = document.getElementById("machine-name");
+  const elDate = document.getElementById("filter-date");
+  const elBtnReset = document.getElementById("btn-reset-date");
+  const tbody = document.getElementById("historico-body");
+
+  if(elMachine){
+    elMachine.textContent = machineId ? machineId.toUpperCase() : "-";
   }
 
-  function opPillClass(status){
-    const st = safeStr(status).trim().toUpperCase();
-    if(st === "ATIVA") return "op-pill op-pill-ativa";
-    if(st === "ENCERRADA") return "op-pill op-pill-encerrada";
-    return "op-pill op-pill-unk";
+  function renderMsgRow(msg){
+    if(!tbody) return;
+    tbody.innerHTML = "";
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "text-center";
+    td.textContent = msg;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
   }
 
-  function renderRows(rows, filtroData){
-    const tbody = document.getElementById("historico-body");
+  function renderRows(rows){
+    if(!tbody) return;
     tbody.innerHTML = "";
 
-    const dataFiltrada = (filtroData || "").trim();
-
-    const list = (Array.isArray(rows) ? rows : [])
-      .filter(r => {
-        const d = String(r?.data || "").trim();
-        return dataFiltrada ? d === dataFiltrada : true;
-      });
-
-    if(!list.length){
-      tbody.innerHTML = `<tr class="loading"><td colspan="4">Nenhum registro encontrado</td></tr>`;
+    if(!Array.isArray(rows) || rows.length === 0){
+      renderMsgRow("Nenhum dado encontrado.");
       return;
     }
 
-    // Ordena por data desc (YYYY-MM-DD)
-    list.sort((a,b) => String(b.data||"").localeCompare(String(a.data||"")));
+    rows.forEach((r) => {
+      const tr = document.createElement("tr");
 
-    for(const r of list){
-      const data = String(r?.data || "");
-      const produzido = fmtInt(r?.produzido ?? 0);
-      const boas = fmtInt(r?.pecas_boas ?? 0);
-      const refugo = fmtInt(r?.refugo_total ?? r?.refugo ?? 0);
+      const tdData = document.createElement("td");
+      tdData.textContent = isoToBr(r.data_ref);
 
-      tbody.innerHTML += `
-        <tr>
-          <td>${data}</td>
-          <td class="r">${produzido}</td>
-          <td class="r">${boas}</td>
-          <td class="r">${refugo}</td>
-        </tr>
-      `;
+      const tdProd = document.createElement("td");
+      tdProd.className = "text-right";
+      tdProd.textContent = fmtNum(r.produzido);
 
-      // ===============================
-      // OPs abaixo do dia (adicao)
-      // ===============================
-      const ops = Array.isArray(r?.ops) ? r.ops : [];
-      for(const op of ops){
-        const st = safeStr(op?.status).trim().toUpperCase();
-        const pillCls = opPillClass(st);
-        const os = safeStr(op?.os).trim() || "—";
-        const lote = safeStr(op?.lote).trim() || "—";
-        const operador = safeStr(op?.operador).trim() || "—";
-        const ini = fmtOpTime(op?.started_at);
-        const fimRaw = safeStr(op?.ended_at).trim();
-        const fim = fimRaw ? fmtOpTime(fimRaw) : "—";
+      const tdBoas = document.createElement("td");
+      tdBoas.className = "text-right";
+      tdBoas.textContent = fmtNum(r.pecas_boas);
 
-        const periodo = (st === "ATIVA")
-          ? `${ini} ate agora`
-          : `${ini} ate ${fim}`;
+      const tdRef = document.createElement("td");
+      tdRef.className = "text-right";
+      tdRef.textContent = fmtNum(r.refugo);
 
-        tbody.innerHTML += `
-          <tr class="op-row">
-            <td colspan="4">
-              <span class="${pillCls}">${st || "OP"}</span>
-              OP ${os} | Lote ${lote} | Operador ${operador} | ${periodo}
-            </td>
-          </tr>
-        `;
-      }
-    }
+      tr.appendChild(tdData);
+      tr.appendChild(tdProd);
+      tr.appendChild(tdBoas);
+      tr.appendChild(tdRef);
+
+      tbody.appendChild(tr);
+    });
   }
 
-  const machineId = q("machine_id");
-  document.getElementById("machine-name").textContent =
-    `Máquina: ${machineId ? machineId.toUpperCase() : "—"}`;
+  let cache = null;
 
-  // ✅ IMPORTANTE:
-  // A tela (HTML) é /producao/historico
-  // O JSON deve vir da API /api/producao/historico
-  const url = machineId
-    ? `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`
-    : "/producao/api/producao/historico";
+  async function fetchHistorico(){
+    if(!machineId){
+      renderMsgRow("Selecione uma maquina.");
+      return;
+    }
 
-  let cache = [];
+    renderMsgRow("Carregando historico...");
 
-  async function loadHistorico() {
-    const url = `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`;
-    try {
-      const resp = await fetch(url);
-      const rows = await resp.json();
-      cache = Array.isArray(rows) ? rows : [];
-    } catch (e) {
+    try{
+      const url = `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`;
+      const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+      if(!resp.ok){
+        throw new Error("Falha ao buscar historico (HTTP " + resp.status + ")");
+      }
+      const data = await resp.json();
+      cache = Array.isArray(data) ? data : [];
+    }catch(err){
       cache = [];
+      renderMsgRow("Falha ao carregar historico.");
+      return;
     }
 
-    const fd = document.getElementById('filter-date');
-    const selected = (fd && fd.value) ? fd.value : '';
-    renderRows(cache, selected);
+    applyFilterAndRender();
   }
 
-  loadHistorico();
+  function applyFilterAndRender(){
+    const iso = normalizeDateInput(elDate ? elDate.value : "");
+    if(!cache){
+      renderMsgRow("Carregando historico...");
+      return;
+    }
+    if(!iso){
+      renderRows(cache);
+      return;
+    }
+    const filtered = cache.filter((r) => String(r.data_ref || "") === iso);
+    renderRows(filtered);
+  }
 
-  document.getElementById("filter-date").addEventListener("change", (e) => {
-    renderRows(cache, e?.target?.value || "");
-  });
+  async function resetByDate(){
+    if(!machineId){ alert("Maquina nao selecionada."); return; }
 
-    function normalizeDateInput(value) {
-      if (!value) return null;
-      const v = String(value).trim();
-      // Aceita YYYY-MM-DD
-      const iso = /^\d{4}-\d{2}-\d{2}$/;
-      if (iso.test(v)) return v;
-      // Aceita DD/MM/AAAA
-      const br = /^(\d{2})\/(\d{2})\/(\d{4})$/;
-      const m = v.match(br);
-      if (m) {
-        const dd = m[1];
-        const mm = m[2];
-        const yyyy = m[3];
-        return `${yyyy}-${mm}-${dd}`;
-      }
-      return null;
+    const iso = normalizeDateInput(elDate ? elDate.value : "");
+    if(!iso){ alert("Selecione uma data."); return; }
+
+    if(!confirm("CONFIRMAR RESET DA PRODUCAO NA DATA " + isoToBr(iso) + "?\nEssa acao zera a producao do dia e reancora o baseline.")){
+      return;
     }
 
-    async function zerarProducaoPorData() {
-      const machineId = q('machine_id');
-      if (!machineId) {
-        alert('machine_id nao encontrado na URL.');
-        return;
+    try{
+      const resp = await fetch("/admin/reset-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machine_id: machineId, date: iso })
+      });
+
+      let payload = null;
+      try{ payload = await resp.json(); }catch(e){ payload = null; }
+
+      if(!resp.ok){
+        const msg = (payload && (payload.error || payload.message)) ? (payload.error || payload.message) : ("Falha no reset (HTTP " + resp.status + ")");
+        throw new Error(msg);
       }
 
-      const filterDateEl = document.getElementById('filter-date');
-      const defaultDate = (filterDateEl && filterDateEl.value) ? filterDateEl.value : '';
-      const input = prompt('Informe a data para zerar (YYYY-MM-DD ou DD/MM/AAAA):', defaultDate);
-      const data = normalizeDateInput(input);
-      if (!data) {
-        alert('Data invalida. Use YYYY-MM-DD (ex: 2026-02-04) ou DD/MM/AAAA (ex: 04/02/2026).');
-        return;
-      }
-
-      const ok = confirm(`Confirma zerar a producao da maquina ${machineId} na data ${data}?`);
-      if (!ok) return;
-
-      const btn = document.getElementById('btn-reset-date');
-      if (btn) btn.disabled = true;
-
-      try {
-        const resp = await fetch('/producao/admin/reset-date', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ machine_id: machineId, data: data })
-        });
-        const payload = await resp.json().catch(() => ({}));
-        if (!resp.ok) {
-          alert(payload.error || `Falha ao zerar producao por data. HTTP ${resp.status}`);
-          return;
-        }
-
-        alert(payload.note || 'Reset por data executado.');
-        // Atualiza tabela
-        await loadHistorico();
-      } catch (err) {
-        alert('Erro ao chamar o endpoint de reset por data.');
-      } finally {
-        if (<div class="filter-bar">
-    <div class="filter-row">
-      <div class="filter-group">
-        <label for="filter-date">Selecione uma data para filtrar (opcional)</label>
-        <input type="date" id="filter-date" class="input" />
-      </div>
-
-      <div class="actions">
-        <button id="btn-reset-date" type="button" class="btn btn-danger" disabled>
-          Zerar producao por data
-        </button>
-      </div>
-    </div>
-
-    <div class="hint">
-      Para zerar, selecione uma data. Esta acao apaga os dados de producao do dia selecionado para esta maquina.
-    </div>
-  </div>
-</div> = false;
-      }
+      alert("Reset por data executado.");
+      await fetchHistorico();
+    }catch(err){
+      alert(String(err && err.message ? err.message : err));
     }
+  }
 
-    const btnResetDate = document.getElementById('btn-reset-date');
-    if (btnResetDate) {
-      btnResetDate.addEventListener('click', zerarProducaoPorData);
-    }
+  if(elDate){
+    elDate.addEventListener("change", applyFilterAndRender);
+    elDate.addEventListener("input", applyFilterAndRender);
+  }
+
+  if(elBtnReset){
+    elBtnReset.addEventListener("click", resetByDate);
+  }
+
+  function init(){
+    fetchHistorico();
+  }
+
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", init);
+  }else{
+    init();
+  }
+})();
 </script>
 
 {% endblock %}
