@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-07 17:25 America/Bahia
-# MOTIVO: OP passa a iniciar com baseline automatico (esp_absoluto atual) e contabilizar producao da OP por diferenca (esp_atual - baseline).
+# LAST_RECODE: 2026-02-07 18:10 America/Bahia
+# MOTIVO: Corrigir erro 500 no endpoint /producao/op/encerrar (variaveis indefinidas bobinas/conv/_safe_float).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -1448,7 +1448,13 @@ def op_encerrar():
     # Calculo da OP:
     # - metros = soma das bobinas informadas (metros)
     # - pcs = diferenca do contador absoluto do ESP (esp_atual - baseline_pcs)
-    op_metros = sum(_safe_float(x) for x in bobinas)
+    bobinas = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
+    op_metros = 0
+    for b in bobinas:
+        try:
+            op_metros += int(float(str(b).strip()))
+        except Exception:
+            continue
 
     with _get_conn() as conn:
         esp_atual = _get_current_esp_abs(conn, machine_id)
@@ -1457,11 +1463,17 @@ def op_encerrar():
     op_pcs = max(0, int(esp_atual) - int(baseline_pcs))
 
     try:
+        conv = float(op.get("op_conv_m_por_pcs") or 0)
+    except Exception:
+        conv = 0.0
+    if conv <= 0:
+        conv = _get_conv_m_por_pcs(machine_id)
+
+    try:
         if op_id > 0:
             _close_op_row_v2(op_id, ended_at, op_metros, op_pcs, conv)
     except Exception:
         return jsonify({"error": "Falha ao encerrar OP no banco"}), 500
-
 
     # Atualiza historico diario: produzido += op_pcs no dia do encerramento
     try:
@@ -1473,4 +1485,15 @@ def op_encerrar():
     with _op_lock:
         op_active.pop(machine_id, None)
 
-    return jsonify({"status": "ok", "active": False, "machine_id": machine_id, "ended_at": ended_at, "op_metros": op_metros, "op_pcs": op_pcs, "op_conv_m_por_pcs": conv})
+    return jsonify(
+        {
+            "status": "ok",
+            "active": False,
+            "machine_id": machine_id,
+            "ended_at": ended_at,
+            "op_metros": op_metros,
+            "op_pcs": op_pcs,
+            "op_conv_m_por_pcs": conv,
+        }
+    )
+
