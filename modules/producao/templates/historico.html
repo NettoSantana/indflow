@@ -1,7 +1,6 @@
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-06 22:40 (America/Bahia)
-Motivo: Deixar OPs clicaveis e abrir modal no layout atual com campos de OP (azul somente leitura, amarelo editavel).
+Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -607,6 +606,41 @@ Motivo: Deixar OPs clicaveis e abrir modal no layout atual com campos de OP (azu
 
   let currentOp = null;
 
+  function isOpEncerrada(op){
+    const s = safeText(op && op.status).toUpperCase();
+    return s.includes("ENCERR");
+  }
+
+  function setOpEditEnabled(enabled){
+    const on = !!enabled;
+
+    if(ope_mat_bom){
+      ope_mat_bom.readOnly = !on;
+      ope_mat_bom.disabled = !on;
+    }
+    if(ope_cost_elas){
+      ope_cost_elas.readOnly = !on;
+      ope_cost_elas.disabled = !on;
+    }
+    if(ope_refugo){
+      ope_refugo.readOnly = !on;
+      ope_refugo.disabled = !on;
+    }
+    if(ope_saco_caixa){
+      ope_saco_caixa.readOnly = !on;
+      ope_saco_caixa.disabled = !on;
+    }
+    if(ope_obs){
+      ope_obs.readOnly = !on;
+      ope_obs.disabled = !on;
+    }
+
+    if(modalSave){
+      modalSave.disabled = !on;
+      modalSave.style.display = on ? "inline-block" : "none";
+    }
+  }
+
   if(elMachine){
     elMachine.textContent = machineId ? machineId.toUpperCase() : "-";
   }
@@ -637,6 +671,8 @@ Motivo: Deixar OPs clicaveis e abrir modal no layout atual com campos de OP (azu
     if(ope_refugo) ope_refugo.value = "";
     if(ope_saco_caixa) ope_saco_caixa.value = "";
     if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
+
+    setOpEditEnabled(!isOpEncerrada(op));
 
     if(modalBackdrop){
       modalBackdrop.style.display = "flex";
@@ -673,6 +709,11 @@ Motivo: Deixar OPs clicaveis e abrir modal no layout atual com campos de OP (azu
     modalSave.addEventListener("click", async function(){
       if(!currentOp || !currentOp.id){
         alert("OP invalida.");
+        return;
+      }
+
+      if(isOpEncerrada(currentOp)){
+        alert("OP encerrada: somente leitura.");
         return;
       }
 
