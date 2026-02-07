@@ -1,6 +1,6 @@
 # PATH: modules/machine_routes.py
-# LAST_RECODE: 2026-02-07 00:52 America/Bahia
-# MOTIVO: Ajustar /admin/reset-date para reancorar baseline do dia e encerrar/excluir OPs do dia, mantendo o restante inalterado.
+# LAST_RECODE: 2026-02-07 05:06 America/Bahia
+# MOTIVO: Enriquecer OPs no /producao/api/producao/historico com qtd_mat_bom_esp (contagem do ESP via producao_evento no intervalo da OP), sem alterar demais rotas.
 
 import os
 import hashlib
@@ -394,6 +394,83 @@ def _get_ts_ms_from_payload(data: dict) -> int | None:
         return None
 
     return iv
+
+
+def _iso_to_ts_ms_bahia(value: str):
+    s = (value or "").strip()
+    if not s:
+        return None
+
+    # Aceitar "YYYY-MM-DD HH:MM:SS" e "YYYY-MM-DDTHH:MM:SS"
+    if " " in s and "T" not in s:
+        s = s.replace(" ", "T", 1)
+
+    # Aceitar sufixo Z
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+
+    try:
+        dt = datetime.fromisoformat(s)
+    except Exception:
+        return None
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TZ_BAHIA)
+
+    return int(dt.timestamp() * 1000)
+
+
+def _enrich_ops_with_esp_counts(conn, cliente_id: str, machine_id: str, rows: list):
+    if not cliente_id or not machine_id or not isinstance(rows, list):
+        return
+
+    cur = conn.cursor()
+
+    now_ms = int(datetime.now(TZ_BAHIA).timestamp() * 1000)
+
+    for r in rows:
+        ops = r.get("ops") if isinstance(r, dict) else None
+        if not isinstance(ops, list) or not ops:
+            continue
+
+        for op in ops:
+            if not isinstance(op, dict):
+                continue
+
+            start_ms = _iso_to_ts_ms_bahia(op.get("started_at") or "")
+            end_ms = _iso_to_ts_ms_bahia(op.get("ended_at") or "") or now_ms
+
+            if start_ms is None:
+                op["qtd_mat_bom_esp"] = None
+                continue
+
+            if end_ms < start_ms:
+                end_ms = start_ms
+
+            # Soma do delta (mais confiavel do que max-min em layouts com leituras espaçadas)
+            row_sum = cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(delta), 0) AS sum_delta,
+                    MIN(esp_absoluto) AS esp_ini,
+                    MAX(esp_absoluto) AS esp_fim
+                FROM producao_evento
+                WHERE cliente_id = ?
+                  AND lower(machine_id) = lower(?)
+                  AND ts_ms >= ?
+                  AND ts_ms <= ?
+                """,
+                (cliente_id, machine_id, int(start_ms), int(end_ms)),
+            ).fetchone()
+
+            if row_sum:
+                op["qtd_mat_bom_esp"] = int(row_sum[0] or 0)
+                op["esp_ini"] = int(row_sum[1]) if row_sum[1] is not None else None
+                op["esp_fim"] = int(row_sum[2]) if row_sum[2] is not None else None
+            else:
+                op["qtd_mat_bom_esp"] = 0
+                op["esp_ini"] = None
+                op["esp_fim"] = None
 
 def _backfill_producao_diaria_cliente_id_all(machine_id: str, cliente_id: str) -> None:
     """
@@ -2203,6 +2280,8 @@ def historico_producao_api():
 
     m = get_machine(machine_id)
     meta_default = _safe_int(m.get("meta_turno"), 0)
+    conn = get_db()
+
 
     out = []
     for dia in sorted(dias, reverse=True):
@@ -2220,6 +2299,9 @@ def historico_producao_api():
         # Fallback: se tem OPs no dia mas produzido esta 0, calcula pelo somatorio das OPs ENCERRADAS.
         try:
             ops_list = item.get("ops") or []
+            # Enriquecer OPs com qtd_mat_bom_esp (soma do delta do ESP no intervalo da OP)
+            _enrich_ops_with_esp_counts(conn, cliente_id, machine_id, [item])
+
             if produzido == 0 and isinstance(ops_list, list) and len(ops_list) > 0:
                 produzido_ops = _calc_produzido_from_ops(ops_list)
                 if produzido_ops > 0:

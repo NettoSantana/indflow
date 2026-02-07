@@ -1,5 +1,4 @@
-﻿fix(frontend): historico usa mesma fonte do card no dia atual
+﻿fix: historico nao dobrar (remover linha duplicada cliente::machine em producao_diaria)
 
-- Para o dia atual, sobrescreve produzido/pecas_boas com /machine/status (producao_turno)
-- Corrige refugo na tabela para aceitar refugo_total do backend
-- Mantem a listagem de OPs do historico sem alterar backend
+- Ao sincronizar producao_diaria por valor absoluto, remove duplicidade de machine_id escopado
+- Evita Historico somar 2 linhas do mesmo dia (maquina e cliente::maquina)
