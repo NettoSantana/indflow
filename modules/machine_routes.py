@@ -1,7 +1,12 @@
-# PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-06 17:35 America/Bahia
-# MOTIVO: /admin/reset-date passa a encerrar/excluir OPs do dia junto com o reset; manter compatibilidade de machine_id com cliente::machine e cliente:machine.
+#
+# ULTIMO_RECODE: 2026-02-06 15:44 America/Bahia
+# MOTIVO: Anti-duplicacao no Historico: ao salvar producao_diaria, remover linha duplicada com machine_id escopado (cliente::machine) quando a tabela nao tem cliente_id.
+# Motivo: Corrigir /admin/reset-date 500 trocando chamada inexistente _extract_cliente_id_from_request por _get_cliente_id_for_request.
+#
 
+# PATH: indflow/modules/machine_routes.py
+# LAST_RECODE: 2026-02-05 09:00 America/Bahia
+# MOTIVO: Corrigir erro 500 no /admin/reset-date removendo uso de current_user inexistente; manter protecao via login_required.
 import os
 import hashlib
 import uuid
@@ -1598,145 +1603,6 @@ def _pick_date_col(cols: set[str]) -> str | None:
             return c
     return None
 
-
-def _pick_date_col_ops(cols: set[str]) -> str | None:
-    for c in [
-        "dia_ref",
-        "data_ref",
-        "data",
-        "date_ref",
-        "date",
-        "started_at",
-        "start_at",
-        "inicio",
-        "ts",
-        "timestamp",
-        "created_at",
-    ]:
-        if c in cols:
-            return c
-    return None
-
-def _list_db_tables(conn) -> list[str]:
-    try:
-        rows = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").fetchall()
-        return [r[0] for r in rows if r and r[0]]
-    except Exception:
-        return []
-
-def _looks_like_op_table(table_name: str, cols: set[str]) -> bool:
-    tn = (table_name or "").lower()
-
-    # Precisa ter machine_id
-    if "machine_id" not in cols:
-        return False
-
-    # Heuristica: nome ou colunas sugerem OP
-    name_hint = ("op" in tn) or ("ordem" in tn) or ("producao_op" in tn) or tn.startswith("op_")
-    cols_hint = ("op_id" in cols) or ("lote" in cols) or ("os" in cols) or ("operador" in cols)
-
-    if not (name_hint or cols_hint):
-        return False
-
-    # Precisa ter alguma coluna de data para filtrar por dia
-    date_col = _pick_date_col_ops(cols)
-    if not date_col:
-        return False
-
-    return True
-
-def _admin_reset_ops_por_data(conn, cur, machine_ids_exact: list[str], like_patterns: list[str], dia_ref: str, cliente_id: str | None) -> dict:
-    """
-    Zera OPs do dia para a maquina:
-      - Preferencia: ENCERRAR (status='ENCERRADA' e ended_at preenchido) se existir coluna status.
-      - Fallback: DELETE das linhas do dia se nao for possivel encerrar.
-    Heuristica para descobrir tabelas de OP sem depender de nome fixo.
-    """
-    cid = (cliente_id or "").strip() if cliente_id else None
-    result = {}
-
-    now_iso = now_bahia().isoformat(timespec="seconds")
-
-    tables = _list_db_tables(conn)
-    for t in tables:
-        cols = _db_cols(conn, t)
-        if not cols:
-            continue
-        if not _looks_like_op_table(t, cols):
-            continue
-
-        date_col = _pick_date_col_ops(cols)
-        if not date_col:
-            continue
-
-        where_date_sql = f" AND ({date_col} = ? OR {date_col} LIKE ?)"
-        params_date = [dia_ref, f"{dia_ref}%"]
-
-        where_cid_sql = ""
-        params_cid = []
-        if cid and "cliente_id" in cols:
-            where_cid_sql = " AND cliente_id = ?"
-            params_cid = [cid]
-
-        # WHERE machine_id exato (ate 3) + LIKE (ate 2)
-        sql_where_machine = "(machine_id = ? OR machine_id = ? OR machine_id = ?) OR machine_id LIKE ? OR machine_id LIKE ?"
-        params_machine = [
-            machine_ids_exact[0] if len(machine_ids_exact) > 0 else "",
-            machine_ids_exact[1] if len(machine_ids_exact) > 1 else (machine_ids_exact[0] if machine_ids_exact else ""),
-            machine_ids_exact[2] if len(machine_ids_exact) > 2 else (machine_ids_exact[0] if machine_ids_exact else ""),
-            like_patterns[0] if len(like_patterns) > 0 else "",
-            like_patterns[1] if len(like_patterns) > 1 else (like_patterns[0] if like_patterns else ""),
-        ]
-
-        updated = 0
-        deleted = 0
-
-        # 1) Tenta ENCERRAR
-        if "status" in cols:
-            set_parts = ["status='ENCERRADA'"]
-            if "ended_at" in cols:
-                # se ended_at esta vazio, preenche com now
-                set_parts.append(f"ended_at=CASE WHEN ended_at IS NULL OR TRIM(ended_at)='' THEN ? ELSE ended_at END")
-            if "encerrada_em" in cols:
-                set_parts.append(f"encerrada_em=CASE WHEN encerrada_em IS NULL OR TRIM(encerrada_em)='' THEN ? ELSE encerrada_em END")
-
-            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE ({sql_where_machine})"
-            sql_up += where_date_sql
-            sql_up += where_cid_sql
-
-            try:
-                up_params = params_machine[:]
-                if "ended_at" in cols:
-                    up_params.insert(0, now_iso)
-                if "encerrada_em" in cols:
-                    # se ambos existem, precisa de dois placeholders no comeco
-                    if "ended_at" in cols:
-                        up_params.insert(1, now_iso)
-                    else:
-                        up_params.insert(0, now_iso)
-
-                cur.execute(sql_up, up_params + params_date + params_cid)
-                updated = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-            except Exception:
-                updated = 0
-
-        # 2) Se nao conseguiu encerrar, tenta DELETE
-        if updated == 0:
-            sql_del = f"DELETE FROM {t} WHERE ({sql_where_machine})"
-            sql_del += where_date_sql
-            sql_del += where_cid_sql
-            try:
-                cur.execute(sql_del, params_machine + params_date + params_cid)
-                deleted = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
-            except Exception:
-                deleted = 0
-
-        if updated or deleted:
-            result[t] = {"updated": updated, "deleted": deleted}
-
-    return result
-
-
 def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: str | None = None) -> dict:
     """
     Zera/remover producao de uma maquina em um DIA especifico.
@@ -1757,13 +1623,14 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
 
     cid = (cliente_id or "").strip() if cliente_id else None
 
-    # match por: machine_id puro e formas escopadas (cliente:machine e cliente::machine)
-    mids_exact = [mid_raw, mid_raw, mid_raw]
+    # match por: machine_id puro, e (cliente_id:machine_id) quando existir
+    mids = [mid_raw]
     if cid:
-        mids_exact = [mid_raw, f"{cid}::{mid_raw}", f"{cid}:{mid_raw}"]
+        mids.append(f"{cid}:{mid_raw}")
 
-    # alguns dados podem ter machine_id com prefixo do cliente, entao tentamos LIKE '%:mid' e '%::mid'
-    like_patterns = [f"%:{mid_raw}", f"%::{mid_raw}"]
+    # alguns dados podem ter machine_id com prefixo de cliente_id mesmo quando cid nao foi passado
+    # entao tambem tentamos LIKE '%:mid'
+    like_suffix = f"%:{mid_raw}"
 
     tables = [
         "producao_diaria",
@@ -1811,47 +1678,31 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
             if c in cols:
                 set_parts.append(f"{c}=0")
         if set_parts:
-            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ? OR machine_id = ?) OR machine_id LIKE ? OR machine_id LIKE ?"
+            sql_up = f"UPDATE {t} SET {', '.join(set_parts)} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
             # adiciona data e cid
             sql_up += where_date_sql
             sql_up += where_cid_sql
 
             try:
-                cur.execute(sql_up, [mids_exact[0], mids_exact[1], mids_exact[2], like_patterns[0], like_patterns[1]] + params_date + params_cid)
+                cur.execute(sql_up, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
                 updated += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
             except Exception:
                 # ignora e tenta delete
                 pass
 
         # 2) Sempre tenta DELETE para remover linhas (horas/eventos)
-        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ? OR machine_id = ?) OR machine_id LIKE ? OR machine_id LIKE ?"
+        sql_del = f"DELETE FROM {t} WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
         sql_del += where_date_sql
         sql_del += where_cid_sql
 
         try:
-            cur.execute(sql_del, [mids_exact[0], mids_exact[1], mids_exact[2], like_patterns[0], like_patterns[1]] + params_date + params_cid)
+            cur.execute(sql_del, [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix] + params_date + params_cid)
             deleted += cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
         except Exception:
             pass
 
         if updated or deleted:
             result["tables"][t] = {"updated": updated, "deleted": deleted}
-
-
-    # 3) OPs: encerrar (ou excluir) OPs do dia da maquina
-    try:
-        ops_tables = _admin_reset_ops_por_data(
-            conn=conn,
-            cur=cur,
-            machine_ids_exact=mids_exact,
-            like_patterns=like_patterns,
-            dia_ref=dia,
-            cliente_id=cid,
-        )
-        for tname, info in (ops_tables or {}).items():
-            result["tables"][tname] = info
-    except Exception:
-        pass
 
     conn.commit()
     return result
