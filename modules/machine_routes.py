@@ -1,12 +1,7 @@
-#
-# ULTIMO_RECODE: 2026-02-06 15:44 America/Bahia
-# MOTIVO: Anti-duplicacao no Historico: ao salvar producao_diaria, remover linha duplicada com machine_id escopado (cliente::machine) quando a tabela nao tem cliente_id.
-# Motivo: Corrigir /admin/reset-date 500 trocando chamada inexistente _extract_cliente_id_from_request por _get_cliente_id_for_request.
-#
+# PATH: modules/machine_routes.py
+# LAST_RECODE: 2026-02-07 00:52 America/Bahia
+# MOTIVO: Ajustar /admin/reset-date para reancorar baseline do dia e encerrar/excluir OPs do dia, mantendo o restante inalterado.
 
-# PATH: indflow/modules/machine_routes.py
-# LAST_RECODE: 2026-02-05 09:00 America/Bahia
-# MOTIVO: Corrigir erro 500 no /admin/reset-date removendo uso de current_user inexistente; manter protecao via login_required.
 import os
 import hashlib
 import uuid
@@ -1704,6 +1699,124 @@ def _admin_reset_producao_por_data(machine_id: str, dia_ref: str, cliente_id: st
         if updated or deleted:
             result["tables"][t] = {"updated": updated, "deleted": deleted}
 
+    # 3) Reancora baseline do DIA para o valor atual do contador do ESP (para o status/card voltar a 0 apos reset).
+    try:
+        esp_abs_now = None
+        mcs_cols = _db_cols(conn, 'machine_count_state') or set()
+        # tenta ler o ultimo absoluto conhecido do ESP
+        if mcs_cols and 'machine_id' in mcs_cols:
+            # escolhe uma coluna possivel para o absoluto
+            cand_abs = None
+            for c in ['esp_absoluto', 'esp_abs', 'esp_last', 'last_esp', 'last_esp_abs', 'last_esp_abs_seen', '_last_esp_abs_seen', '_bd_esp_last', '_np_last_esp']:
+                if c in mcs_cols:
+                    cand_abs = c
+                    break
+            if cand_abs:
+                sql_mcs = f"SELECT {cand_abs} FROM machine_count_state WHERE (machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
+                params = [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix]
+                if cid and 'cliente_id' in mcs_cols:
+                    sql_mcs += " AND cliente_id = ?"
+                    params.append(cid)
+                row = cur.execute(sql_mcs + " LIMIT 1", params).fetchone()
+                if row and row[0] is not None:
+                    try:
+                        esp_abs_now = int(float(row[0]))
+                    except Exception:
+                        esp_abs_now = None
+
+        # aplica baseline_diario = esp_abs_now para este dia_ref (se a tabela existir e tiver colunas suportadas)
+        if esp_abs_now is not None:
+            b_cols = _db_cols(conn, 'baseline_diario') or set()
+            if b_cols and 'machine_id' in b_cols:
+                b_date_col = _pick_date_col(b_cols)
+                # coluna onde gravamos o baseline
+                b_val_col = None
+                for c in ['baseline_diario', 'baseline', 'valor', 'value', 'baseline_pcs', 'baseline_count']:
+                    if c in b_cols:
+                        b_val_col = c
+                        break
+                if b_date_col and b_val_col:
+                    # tenta UPDATE, se nao existir linha faz INSERT
+                    where = f"(machine_id = ? OR machine_id = ?) OR machine_id LIKE ?"
+                    params = [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix]
+                    if cid and 'cliente_id' in b_cols:
+                        where += " AND cliente_id = ?"
+                        params.append(cid)
+                    where += f" AND {b_date_col} = ?"
+                    params.append(dia)
+                    sql_up_base = f"UPDATE baseline_diario SET {b_val_col} = ? WHERE " + where
+                    cur.execute(sql_up_base, [esp_abs_now] + params)
+                    base_updated = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                    base_inserted = 0
+                    if base_updated == 0:
+                        cols_ins = ['machine_id', b_date_col, b_val_col]
+                        vals_ins = [mids[0], dia, esp_abs_now]
+                        if cid and 'cliente_id' in b_cols:
+                            cols_ins.insert(0, 'cliente_id')
+                            vals_ins.insert(0, cid)
+                        placeholders = ','.join(['?'] * len(cols_ins))
+                        sql_ins = f"INSERT INTO baseline_diario ({', '.join(cols_ins)}) VALUES ({placeholders})"
+                        try:
+                            cur.execute(sql_ins, vals_ins)
+                            base_inserted = 1
+                        except Exception:
+                            base_inserted = 0
+
+                    if base_updated or base_inserted:
+                        result['tables']['baseline_diario'] = {'updated': int(base_updated), 'inserted': int(base_inserted), 'baseline_set_to': int(esp_abs_now)}
+    except Exception:
+        # baseline é melhor-esforco: nao deixa o reset falhar por isso
+        pass
+
+    # 4) Zera/encerra OPs do DIA (somente tabelas que se parecem com 'OP')
+    try:
+        now_iso = datetime.now().isoformat(timespec='seconds')
+        # lista tabelas e tenta identificar uma tabela de OP
+        trows = cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        for (tname,) in trows:
+            if not tname or not isinstance(tname, str):
+                continue
+            # evita mexer em tabelas do proprio reset e do sistema
+            if tname in ('sqlite_sequence',):
+                continue
+            cols = _db_cols(conn, tname) or set()
+            if 'machine_id' not in cols:
+                continue
+            # heuristica: tabela tem cara de OP se tiver started_at e status e (lote ou operador ou os ou op_id)
+            if 'started_at' not in cols or 'status' not in cols:
+                continue
+            if not ({'lote', 'operador', 'os', 'op_id', 'op'} & set(cols)):
+                continue
+
+            # filtra por data no started_at (YYYY-MM-DD) e por machine_id
+            where = "((machine_id = ? OR machine_id = ?) OR machine_id LIKE ?) AND (started_at = ? OR started_at LIKE ?)"
+            params = [mids[0], mids[1] if len(mids) > 1 else mids[0], like_suffix, dia, f"{dia}%"]
+            if cid and 'cliente_id' in cols:
+                where += " AND cliente_id = ?"
+                params.append(cid)
+
+            op_updated = 0
+            op_deleted = 0
+
+            # se tiver ended_at, encerra; senao exclui
+            if 'ended_at' in cols:
+                try:
+                    cur.execute(f"UPDATE {tname} SET status='ENCERRADA', ended_at=? WHERE " + where, [now_iso] + params)
+                    op_updated = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+                except Exception:
+                    op_updated = 0
+
+            # sempre tenta DELETE tambem (garante que some do historico)
+            try:
+                cur.execute(f"DELETE FROM {tname} WHERE " + where, params)
+                op_deleted = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+            except Exception:
+                op_deleted = 0
+
+            if op_updated or op_deleted:
+                result['tables'][f"ops:{tname}"] = {'updated': int(op_updated), 'deleted': int(op_deleted)}
+    except Exception:
+        pass
     conn.commit()
     return result
 
