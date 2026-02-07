@@ -1,6 +1,6 @@
 # PATH: modules/machine_routes.py
-# LAST_RECODE: 2026-02-07 12:00 America/Bahia
-# MOTIVO: Criar endpoint admin /admin/baseline-manual para definir baseline do dia manualmente (ancorar contador absoluto do ESP).
+# LAST_RECODE: 2026-02-07 06:10 America/Bahia
+# MOTIVO: Adicionar endpoint /admin/baseline-manual para definir baseline manual do dia.
 
 import os
 import hashlib
@@ -1958,105 +1958,6 @@ def admin_esp_reset_counter():
     except Exception as e:
         return jsonify({"ok": False, "error": "falha ao registrar comando", "detail": str(e)}), 500
 
-
-@machine_bp.route("/admin/baseline-manual", methods=["POST"])
-def admin_baseline_manual():
-    """
-    Cria/atualiza manualmente o baseline do dia.
-
-    baseline_esp = valor do contador absoluto do ESP que vira o "zero" do dia.
-    A producao do dia passa a ser: max(esp_absoluto - baseline_esp, 0).
-
-    Body JSON:
-      - machine_id (obrigatorio)
-      - baseline_esp (opcional; se omitido tenta usar esp_absoluto atual em memoria)
-      - dia_ref (opcional; default = dia operacional atual)
-      - cliente_id (opcional)
-    """
-    if not _admin_token_ok():
-        return jsonify({"ok": False, "error": "unauthorized"}), 401
-
-    payload = request.get_json(silent=True) or {}
-    machine_id = _norm_machine_id(payload.get("machine_id", ""))
-    cliente_id_in = (payload.get("cliente_id") or "").strip() or None
-    dia_ref = (payload.get("dia_ref") or "").strip() or dia_operacional_ref_str(now_bahia())
-
-    if not machine_id:
-        return jsonify({"ok": False, "error": "machine_id obrigatório"}), 400
-
-    baseline_esp_in = payload.get("baseline_esp", None)
-
-    if baseline_esp_in is None:
-        # Atalho: se nao vier baseline_esp, tenta "ancorar agora" usando o esp_absoluto atual em memoria
-        try:
-            m = get_machine(machine_id)
-            baseline_esp_in = m.get("esp_absoluto", None)
-        except Exception:
-            baseline_esp_in = None
-
-    if baseline_esp_in is None:
-        return jsonify({"ok": False, "error": "baseline_esp obrigatório (ou a maquina precisa ter esp_absoluto em memoria)"}), 400
-
-    try:
-        baseline_esp = int(baseline_esp_in)
-    except Exception:
-        return jsonify({"ok": False, "error": "baseline_esp inválido"}), 400
-
-    if baseline_esp < 0:
-        baseline_esp = 0
-
-    try:
-        conn = get_db()
-        try:
-            updated_at = now_bahia().isoformat()
-
-            mid_raw = _norm_machine_id(_unscope_machine_id(machine_id))
-            _force_baseline_for_day(
-                conn=conn,
-                machine_id=mid_raw,
-                dia_ref=dia_ref,
-                baseline_esp=baseline_esp,
-                updated_at=updated_at,
-                cliente_id=cliente_id_in,
-            )
-
-            conn.commit()
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
-        # Atualiza estado em memoria (se existir) para refletir o baseline novo
-        try:
-            m = get_machine(machine_id)
-            m["baseline_diario"] = baseline_esp
-            try:
-                esp_abs_now = int(m.get("esp_absoluto") or 0)
-            except Exception:
-                esp_abs_now = 0
-            if esp_abs_now < 0:
-                esp_abs_now = 0
-            produzido_abs = esp_abs_now - baseline_esp
-            if produzido_abs < 0:
-                produzido_abs = 0
-            m["producao_turno"] = produzido_abs
-        except Exception:
-            pass
-
-        return jsonify(
-            {
-                "ok": True,
-                "machine_id": machine_id,
-                "cliente_id": cliente_id_in,
-                "dia_ref": dia_ref,
-                "baseline_esp": baseline_esp,
-                "note": "Baseline do dia atualizado. A producao do dia vira max(esp_absoluto - baseline_esp, 0).",
-            }
-        )
-    except Exception as e:
-        return jsonify({"ok": False, "error": "falha ao gravar baseline", "detail": str(e)}), 500
-
 @machine_bp.route("/admin/reset-manual", methods=["POST"])
 def reset_manual():
     data = request.get_json() or {}
@@ -2110,6 +2011,81 @@ def reset_manual():
 
     return jsonify({"status": "resetado", "machine_id": machine_id})
 
+
+@machine_bp.route("/admin/baseline-manual", methods=["POST"])
+def admin_baseline_manual():
+    """
+    Define o baseline do dia manualmente para uma máquina.
+
+    Baseline é o valor de referência do contador do ESP no início do dia. A produção do dia
+    é calculada como (esp_last - baseline_esp).
+
+    Body JSON:
+      - machine_id (obrigatório)
+      - dia_ref (opcional, YYYY-MM-DD). Se não vier, usa o dia atual (Bahia).
+      - baseline_esp (opcional) ou esp_absoluto (opcional). Um dos dois deve vir.
+      - cliente_id (opcional)
+
+    Auth:
+      - Se INDFLOW_ADMIN_TOKEN estiver definido, exige header: X-Admin-Token
+      - Se INDFLOW_ADMIN_TOKEN não estiver definido (ambiente local), aceita header: Admin=admin
+    """
+    data = request.get_json(silent=True) or {}
+
+    expected = os.getenv("INDFLOW_ADMIN_TOKEN", "").strip()
+    if expected:
+        token_in = (request.headers.get("X-Admin-Token") or "").strip()
+        if not _admin_token_ok(token_in):
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+    else:
+        if (request.headers.get("Admin") or "").strip() != "admin":
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+
+    machine_id = (data.get("machine_id") or "").strip()
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id é obrigatório"}), 400
+
+    dia_ref = (data.get("dia_ref") or "").strip()
+    if not dia_ref:
+        dia_ref = dia_operacional_ref_str(now_bahia())
+
+    baseline_esp = data.get("baseline_esp", None)
+    if baseline_esp is None:
+        baseline_esp = data.get("esp_absoluto", None)
+    if baseline_esp is None:
+        return jsonify({"ok": False, "error": "baseline_esp ou esp_absoluto é obrigatório"}), 400
+
+    try:
+        baseline_esp = int(baseline_esp)
+    except Exception:
+        return jsonify({"ok": False, "error": "baseline_esp inválido (precisa ser inteiro)"}), 400
+
+    cliente_id = data.get("cliente_id", None)
+    if cliente_id is not None:
+        cliente_id = str(cliente_id).strip() or None
+
+    updated_at = now_bahia().isoformat()
+    conn = get_db()
+    try:
+        _force_baseline_for_day(
+            conn, machine_id=machine_id, dia_ref=dia_ref, baseline_esp=baseline_esp, updated_at=updated_at, cliente_id=cliente_id
+        )
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    return jsonify({
+        "ok": True,
+        "machine_id": machine_id,
+        "dia_ref": dia_ref,
+        "baseline_esp": baseline_esp,
+        "updated_at": updated_at,
+        "cliente_id": cliente_id,
+        "note": "Baseline definido. A produção do dia passa a contar a partir deste valor."
+    })
 @machine_bp.route("/machine/refugo", methods=["POST"])
 def salvar_refugo():
     data = request.get_json() or {}
