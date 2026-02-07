@@ -1497,3 +1497,93 @@ def op_encerrar():
         }
     )
 
+
+
+# =====================================================
+# OP - SALVAR FECHAMENTO MANUAL (JSON)
+# POST /producao/op/salvar
+# Body:
+# {
+#   "op_id": 1,
+#   "qtd_mat_bom": 0,
+#   "qtd_cost_elas": 0,
+#   "refugo": 0,
+#   "qtd_saco_caixa": 0,
+#   "observacoes": ""
+# }
+# =====================================================
+@producao_bp.route("/op/salvar", methods=["POST"])
+@login_required
+def op_salvar():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        op_id = int(data.get("op_id", 0))
+    except Exception:
+        op_id = 0
+
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    def _int(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    qtd_mat_bom = _int(data.get("qtd_mat_bom"))
+    qtd_cost_elas = _int(data.get("qtd_cost_elas"))
+    refugo = _int(data.get("refugo"))
+    qtd_saco_caixa = _int(data.get("qtd_saco_caixa"))
+    observacoes = (data.get("observacoes") or "").strip()
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        # migracao defensiva
+        for col, ddl in [
+            ("qtd_mat_bom", "INTEGER DEFAULT 0"),
+            ("qtd_cost_elas", "INTEGER DEFAULT 0"),
+            ("refugo", "INTEGER DEFAULT 0"),
+            ("qtd_saco_caixa", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE ordens_producao ADD COLUMN {col} {ddl}")
+            except Exception:
+                pass
+
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET qtd_mat_bom = ?,
+                qtd_cost_elas = ?,
+                refugo = ?,
+                qtd_saco_caixa = ?,
+                observacoes = ?
+            WHERE id = ?
+            """,
+            (
+                qtd_mat_bom,
+                qtd_cost_elas,
+                refugo,
+                qtd_saco_caixa,
+                observacoes,
+                op_id,
+            ),
+        )
+
+        if cur.rowcount == 0:
+            return jsonify({"error": "OP nao encontrada"}), 404
+
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        return jsonify({"error": "Falha ao salvar fechamento da OP"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return jsonify({"status": "ok", "op_id": op_id})
