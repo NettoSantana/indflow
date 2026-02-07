@@ -670,8 +670,48 @@ Motivo: Deixar OPs clicaveis e abrir modal no layout atual com campos de OP (azu
   });
 
   if(modalSave){
-    modalSave.addEventListener("click", function(){
-      alert("Salvar OP ainda nao foi implementado no backend.");
+    modalSave.addEventListener("click", async function(){
+      if(!currentOp || !currentOp.id){
+        alert("OP invalida.");
+        return;
+      }
+
+      const payload = {
+        op_id: currentOp.id,
+        qtd_mat_bom: Number(ope_mat_bom.value || 0),
+        qtd_cost_elas: Number(ope_cost_elas.value || 0),
+        refugo: Number(ope_refugo.value || 0),
+        qtd_saco_caixa: Number(ope_saco_caixa.value || 0),
+        observacoes: ope_obs.value || ""
+      };
+
+      modalSave.disabled = true;
+
+      try{
+        const resp = await fetch("/producao/op/salvar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json().catch(() => null);
+
+        if(!resp.ok){
+          const msg = data && (data.error || data.message)
+            ? (data.error || data.message)
+            : ("Erro HTTP " + resp.status);
+          throw new Error(msg);
+        }
+
+        alert("OP salva com sucesso.");
+        closeModal();
+        await fetchHistorico();
+
+      }catch(err){
+        alert("Falha ao salvar OP: " + (err.message || err));
+      }finally{
+        modalSave.disabled = false;
+      }
     });
   }
 
