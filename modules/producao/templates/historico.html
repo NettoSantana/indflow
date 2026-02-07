@@ -1,7 +1,7 @@
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-06 17:15 (America/Bahia)
-Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /machine/status (producao_turno), evitando acumulacao.
+Ultimo recode: 2026-02-06 22:40 (America/Bahia)
+Motivo: Deixar OPs clicaveis e abrir modal no layout atual com campos de OP (azul somente leitura, amarelo editavel).
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -51,7 +51,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
     flex-wrap:wrap;
   }
 
-
   .filter-group label{
     display:block;
     font-size:12px;
@@ -81,7 +80,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
   .hint{
     font-size:12px;
     color:#64748b;
-
     padding-bottom:6px;
     white-space:nowrap;
   }
@@ -134,6 +132,14 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
     border-bottom:1px solid #e5e7eb;
   }
 
+  .op-row{
+    cursor:pointer;
+  }
+
+  .op-row:hover td{
+    background:#eef2ff;
+  }
+
   .op-pill{
     display:inline-block;
     padding:3px 8px;
@@ -183,6 +189,159 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
     opacity: 0.6;
     cursor: not-allowed;
   }
+
+  /* ===============================
+     Modal OP (respeita layout)
+     =============================== */
+  .op-modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    z-index:9999;
+  }
+
+  .op-modal{
+    width:100%;
+    max-width:1100px;
+    background:#ffffff;
+    border-radius:16px;
+    box-shadow:0 18px 60px rgba(0,0,0,0.30);
+    border:1px solid #e5e7eb;
+    overflow:hidden;
+  }
+
+  .op-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#ffffff;
+  }
+
+  .op-modal-title{
+    font-size:16px;
+    font-weight:900;
+    color:#0f172a;
+  }
+
+  .op-modal-close{
+    border:1px solid #cbd5e1;
+    background:#ffffff;
+    width:36px;
+    height:36px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:18px;
+    line-height:1;
+  }
+
+  .op-modal-body{
+    padding:16px;
+  }
+
+  .op-form-grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap:12px;
+  }
+
+  .op-field{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+
+  .op-field label{
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+  }
+
+  .op-field input,
+  .op-field textarea{
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    padding:10px 10px;
+    font-size:14px;
+    outline:none;
+    background:#ffffff;
+    color:#0f172a;
+  }
+
+  .op-field textarea{
+    min-height:92px;
+    resize:vertical;
+  }
+
+  .op-field input:focus,
+  .op-field textarea:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+
+  .op-ro input,
+  .op-ro textarea{
+    background:#eaf2ff;
+    border-color:#b6d2ff;
+  }
+
+  .op-ro input[readonly],
+  .op-ro textarea[readonly]{
+    color:#0f172a;
+  }
+
+  .op-edit input,
+  .op-edit textarea{
+    background:#fff7d6;
+    border-color:#f2d37a;
+  }
+
+  .op-modal-footer{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    padding:12px 16px;
+    border-top:1px solid #e5e7eb;
+    background:#ffffff;
+  }
+
+  .btn-secondary{
+    background:#ffffff;
+    color:#0f172a;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    padding:10px 14px;
+    font-weight:700;
+    cursor:pointer;
+  }
+
+  .btn-primary{
+    background:#2563eb;
+    color:#ffffff;
+    border:none;
+    border-radius:10px;
+    padding:10px 14px;
+    font-weight:800;
+    cursor:pointer;
+  }
+
+  .btn-primary:disabled{
+    opacity:0.6;
+    cursor:not-allowed;
+  }
+
+  .col-12{ grid-column: span 12; }
+  .col-6{ grid-column: span 6; }
+  .col-4{ grid-column: span 4; }
+  .col-3{ grid-column: span 3; }
+  .col-2{ grid-column: span 2; }
 </style>
 
 <div class="page">
@@ -227,6 +386,98 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
 
   </div>
 
+</div>
+
+<!-- ===============================
+     MODAL OP (abre ao clicar na linha OP)
+     Azul = read-only | Amarelo = editavel
+     =============================== -->
+<div id="op-modal-backdrop" class="op-modal-backdrop" aria-hidden="true">
+  <div class="op-modal" role="dialog" aria-modal="true" aria-labelledby="op-modal-title">
+    <div class="op-modal-header">
+      <div class="op-modal-title" id="op-modal-title">OP</div>
+      <button type="button" id="op-modal-close" class="op-modal-close">x</button>
+    </div>
+
+    <div class="op-modal-body">
+      <div class="op-form-grid">
+        <!-- Linha 1 (read-only / azul) -->
+        <div class="op-field op-ro col-3">
+          <label>Máquina</label>
+          <input id="opv_machine" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Operador</label>
+          <input id="opv_operador" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Lote</label>
+          <input id="opv_lote" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Status</label>
+          <input id="opv_status" type="text" readonly>
+        </div>
+
+        <!-- Linha 2 (read-only / azul) -->
+        <div class="op-field op-ro col-3">
+          <label>OS</label>
+          <input id="opv_os" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Bobina</label>
+          <input id="opv_bobina" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>GR e/ou fio</label>
+          <input id="opv_gr_fio" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Conversão m/pcs</label>
+          <input id="opv_conv" type="text" readonly>
+        </div>
+
+        <!-- Linha 3 (read-only / azul) -->
+        <div class="op-field op-ro col-6">
+          <label>HS-inicial</label>
+          <input id="opv_started" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-6">
+          <label>HS-término</label>
+          <input id="opv_ended" type="text" readonly>
+        </div>
+
+        <!-- Linha 4 (editavel / amarelo) -->
+        <div class="op-field op-edit col-3">
+          <label>Qtd. mat bom</label>
+          <input id="ope_mat_bom" type="number" inputmode="numeric" min="0" step="1">
+        </div>
+        <div class="op-field op-edit col-3">
+          <label>Qtd. cost. elas.</label>
+          <input id="ope_cost_elas" type="number" inputmode="numeric" min="0" step="1">
+        </div>
+        <div class="op-field op-edit col-3">
+          <label>Refugo</label>
+          <input id="ope_refugo" type="number" inputmode="numeric" min="0" step="1">
+        </div>
+        <div class="op-field op-edit col-3">
+          <label>Qtd. saco ou caixa</label>
+          <input id="ope_saco_caixa" type="number" inputmode="numeric" min="0" step="1">
+        </div>
+
+        <!-- Observações (editavel / amarelo) -->
+        <div class="op-field op-edit col-12">
+          <label>Observações</label>
+          <textarea id="ope_obs"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="op-modal-footer">
+      <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
+      <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -289,13 +540,11 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
   }
 
   function buildOpLabel(op){
-    const opNum = safeText(op && op.op).trim();
     const lote = safeText(op && op.lote).trim();
     const operador = safeText(op && op.operador).trim();
     const status = safeText(op && op.status).trim();
 
     let parts = [];
-    if(opNum) parts.push("OP " + opNum);
     if(lote) parts.push("Lote " + lote);
     if(operador) parts.push("Operador " + operador);
     if(status) parts.push(status);
@@ -310,6 +559,20 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
     return "op-pill-unk";
   }
 
+  function anyText(v){
+    const s = safeText(v).trim();
+    return s ? s : "-";
+  }
+
+  function fmtIsoDateTimeLocal(v){
+    const s = safeText(v).trim();
+    if(!s) return "-";
+    if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+      return s.replace("T", " ").slice(0, 19);
+    }
+    return s;
+  }
+
   const qs = new URLSearchParams(window.location.search);
   const machineId = qs.get("machine_id") || qs.get("machine") || "";
 
@@ -318,8 +581,98 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
   const elBtnReset = document.getElementById("btn-reset-date");
   const tbody = document.getElementById("historico-body");
 
+  /* Modal */
+  const modalBackdrop = document.getElementById("op-modal-backdrop");
+  const modalClose = document.getElementById("op-modal-close");
+  const modalCancel = document.getElementById("op-modal-cancel");
+  const modalSave = document.getElementById("op-modal-save");
+  const modalTitle = document.getElementById("op-modal-title");
+
+  const opv_machine = document.getElementById("opv_machine");
+  const opv_operador = document.getElementById("opv_operador");
+  const opv_lote = document.getElementById("opv_lote");
+  const opv_status = document.getElementById("opv_status");
+  const opv_os = document.getElementById("opv_os");
+  const opv_bobina = document.getElementById("opv_bobina");
+  const opv_gr_fio = document.getElementById("opv_gr_fio");
+  const opv_conv = document.getElementById("opv_conv");
+  const opv_started = document.getElementById("opv_started");
+  const opv_ended = document.getElementById("opv_ended");
+
+  const ope_mat_bom = document.getElementById("ope_mat_bom");
+  const ope_cost_elas = document.getElementById("ope_cost_elas");
+  const ope_refugo = document.getElementById("ope_refugo");
+  const ope_saco_caixa = document.getElementById("ope_saco_caixa");
+  const ope_obs = document.getElementById("ope_obs");
+
+  let currentOp = null;
+
   if(elMachine){
     elMachine.textContent = machineId ? machineId.toUpperCase() : "-";
+  }
+
+  function openModal(op){
+    currentOp = op || null;
+
+    if(modalTitle){
+      const lote = safeText(op && op.lote).trim();
+      modalTitle.textContent = lote ? ("OP - Lote " + lote) : "OP";
+    }
+
+    if(opv_machine) opv_machine.value = anyText(op && op.machine_id ? op.machine_id : machineId);
+    if(opv_operador) opv_operador.value = anyText(op && op.operador);
+    if(opv_lote) opv_lote.value = anyText(op && op.lote);
+    if(opv_status) opv_status.value = anyText(op && op.status);
+
+    if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
+    if(opv_bobina) opv_bobina.value = anyText(op && op.bobina);
+    if(opv_gr_fio) opv_gr_fio.value = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
+    if(opv_conv) opv_conv.value = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
+
+    if(opv_started) opv_started.value = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
+    if(opv_ended) opv_ended.value = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+
+    if(ope_mat_bom) ope_mat_bom.value = "";
+    if(ope_cost_elas) ope_cost_elas.value = "";
+    if(ope_refugo) ope_refugo.value = "";
+    if(ope_saco_caixa) ope_saco_caixa.value = "";
+    if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
+
+    if(modalBackdrop){
+      modalBackdrop.style.display = "flex";
+      modalBackdrop.setAttribute("aria-hidden", "false");
+    }
+  }
+
+  function closeModal(){
+    currentOp = null;
+    if(modalBackdrop){
+      modalBackdrop.style.display = "none";
+      modalBackdrop.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  if(modalClose) modalClose.addEventListener("click", closeModal);
+  if(modalCancel) modalCancel.addEventListener("click", closeModal);
+
+  if(modalBackdrop){
+    modalBackdrop.addEventListener("click", function(e){
+      if(e && e.target === modalBackdrop){
+        closeModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", function(e){
+    if(e && e.key === "Escape" && modalBackdrop && modalBackdrop.style.display === "flex"){
+      closeModal();
+    }
+  });
+
+  if(modalSave){
+    modalSave.addEventListener("click", function(){
+      alert("Salvar OP ainda nao foi implementado no backend.");
+    });
   }
 
   function renderMsgRow(msg){
@@ -358,6 +711,10 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
 
       trOp.appendChild(tdOp);
       tbody.appendChild(trOp);
+
+      trOp.addEventListener("click", function(){
+        openModal(op);
+      });
     });
   }
 
@@ -388,7 +745,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
       tdRef.className = "text-right";
       tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
 
-
       tr.appendChild(tdData);
       tr.appendChild(tdProd);
       tr.appendChild(tdBoas);
@@ -401,7 +757,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
   }
 
   let cache = null;
-
   let liveTimer = null;
 
   async function fetchStatus(){
@@ -464,7 +819,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
     }
   }
 
-
   async function fetchHistorico(){
     if(!machineId){
       renderMsgRow("Selecione uma maquina.");
@@ -482,7 +836,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
       const data = await resp.json();
       cache = Array.isArray(data) ? data : [];
 
-      // Para o dia atual, usar a mesma fonte do card (/machine/status -> producao_turno)
       await refreshLive();
     }catch(err){
       cache = [];
@@ -556,7 +909,6 @@ Motivo: No Historico (tabela), usar a mesma fonte do card para o dia atual via /
       liveTimer = null;
     }
 
-    // Mantem o valor do dia atual alinhado com o card
     liveTimer = setInterval(refreshLive, 5000);
   }
 
