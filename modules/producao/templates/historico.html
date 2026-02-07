@@ -1,3 +1,9 @@
+<!--
+PATH: modules/producao/templates/historico.html
+LAST_RECODE: 2026-02-07 22:31 America/Bahia
+MOTIVO: Preencher campos editaveis do modal OP com valores vindos do backend (qtd_mat_bom, refugo, etc) e fallback para op_pcs.
+-->
+
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
@@ -665,14 +671,21 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     if(opv_started) opv_started.value = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
     if(opv_ended) opv_ended.value = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+    // Campos editaveis: preencher com valores salvos (quando existirem)
+    // Fallback: se qtd_mat_bom nao vier, tenta usar op.op_pcs (pecas produzidas calculadas no encerramento)
+    const v_mat_bom = (op && (op.qtd_mat_bom ?? op.mat_bom ?? op.pecas_boas ?? op.op_pcs ?? op.op_pieces ?? op.produzido ?? op.qtd_pecas ?? ""));
+    const v_cost_elas = (op && (op.qtd_cost_elas ?? op.cost_elas ?? ""));
+    const v_refugo = (op && (op.refugo ?? op.refugo_total ?? ""));
+    const v_saco_caixa = (op && (op.qtd_saco_caixa ?? op.saco_caixa ?? ""));
 
-    if(ope_mat_bom) ope_mat_bom.value = "";
-    if(ope_cost_elas) ope_cost_elas.value = "";
-    if(ope_refugo) ope_refugo.value = "";
-    if(ope_saco_caixa) ope_saco_caixa.value = "";
+    if(ope_mat_bom) ope_mat_bom.value = (v_mat_bom === null || v_mat_bom === undefined) ? "" : String(v_mat_bom);
+    if(ope_cost_elas) ope_cost_elas.value = (v_cost_elas === null || v_cost_elas === undefined) ? "" : String(v_cost_elas);
+    if(ope_refugo) ope_refugo.value = (v_refugo === null || v_refugo === undefined) ? "" : String(v_refugo);
+    if(ope_saco_caixa) ope_saco_caixa.value = (v_saco_caixa === null || v_saco_caixa === undefined) ? "" : String(v_saco_caixa);
+
+    // Observacoes
     if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
-
-    setOpEditEnabled(!isOpEncerrada(op));
+setOpEditEnabled(!isOpEncerrada(op));
 
     if(modalBackdrop){
       modalBackdrop.style.display = "flex";
