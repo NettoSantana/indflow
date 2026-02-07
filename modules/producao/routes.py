@@ -1,11 +1,12 @@
-# PATH: modules/producao/routes.py
-# LAST_RECODE: 2026-02-02 22:35 America/Bahia
-# MOTIVO: Historico: se nao achar contagem real no DB, somar op_pcs das OPs do dia para preencher produzido/pecas_boas; timezone: exibir started_at/ended_at convertidos para America/Bahia (-03:00) assumindo UTC quando naive.
+# PATH: indflow/modules/producao/routes.py
+# LAST_RECODE: 2026-02-07 17:25 America/Bahia
+# MOTIVO: OP passa a iniciar com baseline automatico (esp_absoluto atual) e contabilizar producao da OP por diferenca (esp_atual - baseline).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import sqlite3
+import os
 from pathlib import Path
 from threading import Lock
 
@@ -68,6 +69,44 @@ def _now_local():
 # =====================================================
 machine_data = {}
 
+
+
+def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
+    """Retorna o ultimo valor absoluto (esp_last) conhecido para a maquina.
+    Fonte primaria: baseline_diario. Fallback: producao_horaria.
+    """
+    try:
+        cur = conn.cursor()
+
+        row = cur.execute(
+            """
+            SELECT esp_last
+            FROM baseline_diario
+            WHERE lower(machine_id)=lower(?)
+            ORDER BY dia_ref DESC, updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (machine_id,),
+        ).fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+
+        row = cur.execute(
+            """
+            SELECT esp_last
+            FROM producao_horaria
+            WHERE lower(machine_id)=lower(?)
+            ORDER BY data_ref DESC, hora_idx DESC, updated_at DESC, id DESC
+            LIMIT 1
+            """,
+            (machine_id,),
+        ).fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+
+        return 0
+    except Exception:
+        return 0
 
 def get_machine(machine_id: str):
     if machine_id not in machine_data:
@@ -1175,11 +1214,20 @@ def op_status():
     if not op:
         return jsonify({"active": False})
 
+
+    # Producao atual da OP = (esp_atual - baseline_pcs)
+    with _get_conn() as conn:
+        esp_atual = _get_current_esp_abs(conn, machine_id)
+    baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+    op_pcs_live = max(0, int(esp_atual) - int(baseline_pcs))
     return jsonify(
         {
             "active": True,
             "op_id": op.get("op_id"),
             "machine_id": machine_id,
+            "esp_atual": int(esp_atual),
+            "baseline_pcs": int(baseline_pcs),
+            "op_pcs": int(op_pcs_live),
             "os": op.get("os"),
             "lote": op.get("lote"),
             "operador": op.get("operador"),
@@ -1242,20 +1290,12 @@ def op_iniciar():
     unidade_1 = _as_str(data.get("unidade_1"))
     unidade_2 = _as_str(data.get("unidade_2"))
 
-    baseline_in = data.get("baseline") if isinstance(data.get("baseline"), dict) else {}
-    try:
-        baseline_pcs = int(baseline_in.get("pcs") or 0)
-    except Exception:
-        baseline_pcs = 0
-    try:
-        baseline_u1 = float(baseline_in.get("u1") or 0)
-    except Exception:
-        baseline_u1 = 0.0
-    try:
-        baseline_u2 = float(baseline_in.get("u2") or 0)
-    except Exception:
-        baseline_u2 = 0.0
-
+    # Baseline da OP: valor absoluto atual do ESP. A OP sempre inicia com 0 (esp_atual - baseline).
+    with _get_conn() as conn:
+        esp_atual = _get_current_esp_abs(conn, machine_id)
+    baseline_pcs = int(esp_atual)
+    baseline_u1 = float(esp_atual)
+    baseline_u2 = 0.0
     started_at = _now_iso()
 
     row_payload = {
@@ -1405,26 +1445,16 @@ def op_encerrar():
     ended_at = _now_iso()
     op_id = int(op.get("op_id") or 0)
 
-    # Calculo da OP por regra: metros = soma das bobinas informadas (metros).
-    # pcs = floor(metros / conv_m_por_pcs da maquina).
-    bobinas = op.get("bobinas")
-    if not isinstance(bobinas, list) or bobinas is None:
-        bobinas = _parse_bobinas_from_str(op.get("bobina") or "") or []
+    # Calculo da OP:
+    # - metros = soma das bobinas informadas (metros)
+    # - pcs = diferenca do contador absoluto do ESP (esp_atual - baseline_pcs)
+    op_metros = sum(_safe_float(x) for x in bobinas)
 
-    try:
-        op_metros = int(sum(int(x or 0) for x in bobinas))
-    except Exception:
-        op_metros = 0
+    with _get_conn() as conn:
+        esp_atual = _get_current_esp_abs(conn, machine_id)
 
-    conv = 0.0
-    try:
-        conv = float(op.get("op_conv_m_por_pcs") or 0)
-    except Exception:
-        conv = 0.0
-    if conv <= 0:
-        conv = _get_conv_m_por_pcs(machine_id)
-
-    op_pcs = _calc_pcs_from_metros(op_metros, conv)
+    baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+    op_pcs = max(0, int(esp_atual) - int(baseline_pcs))
 
     try:
         if op_id > 0:
