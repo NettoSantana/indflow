@@ -1,7 +1,7 @@
 # PATH: modules/machine_calc.py
-#// LAST_RECODE: 2026-02-04 12:34 America/Bahia
-#// MOTIVO: Recalcular producao_diaria em tempo real a partir da producao_horaria para eliminar diaria=0 e diff negativa no historico.
-#// INFO: lines_total=849 lines_changed=~67
+# LAST_RECODE: 2026-02-09 12:43 America/Bahia
+# MOTIVO: Corrigir reset da producao por hora ao virar a hora, evitando acumulacao intermitente (baseline/DB inconsistente).
+#
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -499,6 +499,24 @@ def atualizar_producao_hora(m):
                 baseline = get_baseline_for_hora(machine_id, data_ref, idx)
             except Exception:
                 baseline = None
+
+
+        # FIX: se ao "abrir a hora" o baseline vindo do DB implicar producao != 0,
+        # forca baseline = esp_abs (hora inicia zerada). Isso evita acumulacao intermitente
+        # quando o DB traz baseline antigo/inconsistente para a hora atual.
+        try:
+            existing_val = None
+            if isinstance(m.get("producao_por_hora"), list) and 0 <= idx < len(m["producao_por_hora"]):
+                existing_val = m["producao_por_hora"][idx]
+            if (existing_val is None or int(existing_val or 0) == 0) and baseline is not None:
+                try:
+                    b = int(baseline)
+                except Exception:
+                    b = None
+                if b is None or (esp_abs - b) != 0:
+                    baseline = esp_abs
+        except Exception:
+            pass
 
         if baseline is None:
             baseline = esp_abs
