@@ -1,6 +1,10 @@
-# PATH: modules/producao/routes.py
-# LAST_RECODE: 2026-02-09 12:40 America/Bahia
-# MOTIVO: Encerrar OP calculando qtd_mat_bom automaticamente pela soma de producao_horaria no intervalo [hs_inicial, hs_termino].
+# PATH: indflow/modules/producao/routes.py
+# LAST_RECODE: 2026-02-09 15:38 (America/Bahia)
+# REASON: Ajustar timestamps de OP (hs_inicial/hs_termino) para usar fuso America/Bahia ao gerar started_at/ended_at.
+
+# PATH: indflow/modules/producao/routes.py
+# LAST_RECODE: 2026-02-07 18:10 America/Bahia
+# MOTIVO: Corrigir erro 500 no endpoint /producao/op/encerrar (variaveis indefinidas bobinas/conv/_safe_float).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -162,81 +166,6 @@ def _to_bahia_iso(iso_str: str) -> str:
     except Exception:
         return dt.isoformat(timespec="seconds")
 
-
-def _parse_iso_to_local_dt(iso_str: str) -> datetime:
-    """Parse ISO para datetime no fuso local (America/Bahia).
-    Regra:
-      - Se vier com timezone, converte para o TZ local.
-      - Se vier sem timezone (naive), assume que JA esta no TZ local.
-    """
-    s = (iso_str or '').strip()
-    if not s:
-        return None
-    try:
-        dt = datetime.fromisoformat(s)
-    except Exception:
-        try:
-            if s.endswith('Z'):
-                dt = datetime.fromisoformat(s[:-1]).replace(tzinfo=timezone.utc)
-            else:
-                return None
-        except Exception:
-            return None
-
-    tz = _get_tz()
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=tz)
-    try:
-        return dt.astimezone(tz)
-    except Exception:
-        return dt
-
-
-def _sum_producao_horaria_interval(conn: sqlite3.Connection, machine_id: str, start_dt: datetime, end_dt: datetime) -> tuple[int, int]:
-    """Soma producao_horaria.produzido (pcs) dentro do intervalo [start_dt, end_dt].
-    Retorna (soma_pcs, qtd_linhas_encontradas).
-    Observacao:
-      - Considera buckets horarios (hora_idx) que intersectam o intervalo.
-      - Se end_dt cair EXATAMENTE no inicio de uma hora (min=0,sec=0), essa hora nao entra.
-    """
-    if not conn or not machine_id or not start_dt or not end_dt:
-        return (0, 0)
-
-    if end_dt < start_dt:
-        start_dt, end_dt = end_dt, start_dt
-
-    # Define fim exclusivo por hora
-    end_is_on_boundary = (end_dt.minute == 0 and end_dt.second == 0 and end_dt.microsecond == 0)
-    end_exclusive = end_dt.replace(minute=0, second=0, microsecond=0)
-    if not end_is_on_boundary:
-        end_exclusive = end_exclusive + timedelta(hours=1)
-
-    cur = conn.cursor()
-    total = 0
-    rows = 0
-
-    t = start_dt.replace(minute=0, second=0, microsecond=0)
-    while t < end_exclusive:
-        dia = t.date().isoformat()
-        hora_idx = int(t.hour)
-        try:
-            r = cur.execute(
-                """
-                SELECT COALESCE(produzido, 0)
-                FROM producao_horaria
-                WHERE machine_id = ? AND data_ref = ? AND hora_idx = ?
-                LIMIT 1
-                """,
-                (machine_id, dia, hora_idx),
-            ).fetchone()
-            if r is not None:
-                total += int(r[0] or 0)
-                rows += 1
-        except Exception:
-            pass
-        t = t + timedelta(hours=1)
-
-    return (int(total), int(rows))
 def _sum_ops_pcs(ops_list) -> int:
     try:
         return int(sum(int((o or {}).get("op_pcs") or 0) for o in (ops_list or [])))
@@ -641,7 +570,10 @@ except Exception:
 
 
 def _now_iso():
-    return datetime.now().isoformat(timespec="seconds")
+    tz = _get_tz()
+    if tz is None:
+        return datetime.now().isoformat(timespec="seconds")
+    return datetime.now(tz).isoformat(timespec="seconds")
 
 
 def _sanitize_mid(v: str) -> str:
@@ -1534,14 +1466,9 @@ def op_encerrar():
     with _get_conn() as conn:
         esp_atual = _get_current_esp_abs(conn, machine_id)
 
-        # Regra: OP = soma dos buckets horarios dentro do intervalo [started_at, ended_at]
-        start_dt = _parse_iso_to_local_dt(_as_str(op.get('started_at')))
-        end_dt = _parse_iso_to_local_dt(ended_at)
-        op_pcs_h, op_pcs_rows = _sum_producao_horaria_interval(conn, machine_id, start_dt, end_dt)
+    baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+    op_pcs = max(0, int(esp_atual) - int(baseline_pcs))
 
-    baseline_pcs = int(((op.get('baseline') or {}).get('pcs')) or 0)
-    op_pcs_diff = max(0, int(esp_atual) - int(baseline_pcs))
-    op_pcs = int(op_pcs_h) if int(op_pcs_rows) > 0 else int(op_pcs_diff)
     try:
         conv = float(op.get("op_conv_m_por_pcs") or 0)
     except Exception:
@@ -1577,3 +1504,93 @@ def op_encerrar():
         }
     )
 
+
+
+# =====================================================
+# OP - SALVAR FECHAMENTO MANUAL (JSON)
+# POST /producao/op/salvar
+# Body:
+# {
+#   "op_id": 1,
+#   "qtd_mat_bom": 0,
+#   "qtd_cost_elas": 0,
+#   "refugo": 0,
+#   "qtd_saco_caixa": 0,
+#   "observacoes": ""
+# }
+# =====================================================
+@producao_bp.route("/op/salvar", methods=["POST"])
+@login_required
+def op_salvar():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        op_id = int(data.get("op_id", 0))
+    except Exception:
+        op_id = 0
+
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    def _int(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    qtd_mat_bom = _int(data.get("qtd_mat_bom"))
+    qtd_cost_elas = _int(data.get("qtd_cost_elas"))
+    refugo = _int(data.get("refugo"))
+    qtd_saco_caixa = _int(data.get("qtd_saco_caixa"))
+    observacoes = (data.get("observacoes") or "").strip()
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+
+        # migracao defensiva
+        for col, ddl in [
+            ("qtd_mat_bom", "INTEGER DEFAULT 0"),
+            ("qtd_cost_elas", "INTEGER DEFAULT 0"),
+            ("refugo", "INTEGER DEFAULT 0"),
+            ("qtd_saco_caixa", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                cur.execute(f"ALTER TABLE ordens_producao ADD COLUMN {col} {ddl}")
+            except Exception:
+                pass
+
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET qtd_mat_bom = ?,
+                qtd_cost_elas = ?,
+                refugo = ?,
+                qtd_saco_caixa = ?,
+                observacoes = ?
+            WHERE id = ?
+            """,
+            (
+                qtd_mat_bom,
+                qtd_cost_elas,
+                refugo,
+                qtd_saco_caixa,
+                observacoes,
+                op_id,
+            ),
+        )
+
+        if cur.rowcount == 0:
+            return jsonify({"error": "OP nao encontrada"}), 404
+
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        return jsonify({"error": "Falha ao salvar fechamento da OP"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+    return jsonify({"status": "ok", "op_id": op_id})
