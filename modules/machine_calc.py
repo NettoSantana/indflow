@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-10 12:04 America/Bahia
-# MOTIVO: virar hora usando timestamp do ESP (quando disponível) com fallback no relógio do backend.
+# LAST_RECODE: 2026-02-10 13:44 America/Bahia
+# MOTIVO: abrir nova hora sempre zerada (baseline=esp_absoluto), evitando herdar contagem da hora anterior.
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -516,13 +516,17 @@ def atualizar_producao_hora(m):
         # abre a nova hora (e PERSISTE zero imediatamente)
         m["ultima_hora"] = idx
 
-        baseline = None
+        baseline_db = None
         if machine_id:
             try:
                 ensure_producao_horaria_table()
-                baseline = get_baseline_for_hora(machine_id, data_ref, idx)
+                baseline_db = get_baseline_for_hora(machine_id, data_ref, idx)
             except Exception:
-                baseline = None
+                baseline_db = None
+
+        # OPCAO 1: ao abrir uma nova hora, sempre iniciar zerado.
+        # Ignora baseline do DB para a hora atual para evitar herdar contagem anterior.
+        baseline = esp_abs
 
 
         # FIX: se ao "abrir a hora" o baseline vindo do DB implicar producao != 0,
