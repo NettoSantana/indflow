@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-10 02:07 America/Bahia
-# MOTIVO: corrigir 'arrasto' de producao entre horas forcando zeragem do bucket atual ao virar a hora (backend).
+# LAST_RECODE: 2026-02-10 12:04 America/Bahia
+# MOTIVO: virar hora usando timestamp do ESP (quando disponível) com fallback no relógio do backend.
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -20,6 +20,29 @@ DIA_OPERACIONAL_VIRA = time(00,1)
 def now_bahia():
     return datetime.now(TZ_BAHIA)
 
+
+
+def agora_ref(m, fallback: datetime | None = None) -> datetime:
+    """Hora de referência p/ bucket: prioriza timestamp do ESP; fallback backend."""
+    if fallback is None:
+        fallback = now_bahia()
+    if not isinstance(m, dict):
+        return fallback
+    if (m.get("_last_esp_ts_source") or "").strip().lower() != "esp":
+        return fallback
+    ms = m.get("_last_esp_ts_ms_seen")
+    if ms not in (None, "", "none"):
+        try:
+            return datetime.fromtimestamp(int(ms) / 1000.0, TZ_BAHIA)
+        except Exception:
+            pass
+    iso = m.get("_last_esp_ts_iso_local")
+    if isinstance(iso, str) and iso.strip():
+        try:
+            return datetime.strptime(iso.strip(), "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_BAHIA)
+        except Exception:
+            pass
+    return fallback
 
 def _dia_operacional_ref(agora: datetime) -> str:
     """
@@ -146,7 +169,7 @@ def _turno_data_ref(m, agora):
     return agora.date().isoformat()
 
 
-def calcular_ultima_hora_idx(m):
+def calcular_ultima_hora_idx(m, agora: datetime | None = None):
     """
     FIX DO BUG:
     - Se agora estiver fora da janela do turno => None
@@ -156,7 +179,8 @@ def calcular_ultima_hora_idx(m):
     if not horas:
         return None
 
-    agora = now_bahia()
+    if agora is None:
+        agora = now_bahia()
     inicio_dt = get_turno_inicio_dt(m, agora)
     if not inicio_dt:
         return None
@@ -241,7 +265,7 @@ def atualizar_producao_hora(m):
     # ============================================================
     # NOVO: acumular "não programado" (fora do turno)
     # ============================================================
-    agora = now_bahia()
+    agora = agora_ref(m)
 
     # ============================================================
     # FIX (OPÇÃO 1): garantir reset diário sempre que houver cálculo
@@ -255,7 +279,7 @@ def atualizar_producao_hora(m):
         # não quebra o cálculo se alguma máquina estiver mal configurada
         pass
 
-    idx = calcular_ultima_hora_idx(m)
+    idx = calcular_ultima_hora_idx(m, agora=agora)
     dentro_turno = idx is not None
 
     try:
