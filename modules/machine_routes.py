@@ -1,6 +1,6 @@
 # PATH: modules/machine_routes.py
-# LAST_RECODE: 2026-02-07 06:10 America/Bahia
-# MOTIVO: Adicionar endpoint /admin/baseline-manual para definir baseline manual do dia.
+# LAST_RECODE: 2026-02-10 14:14 America/Bahia
+# MOTIVO: Remover pre-set de ultima_hora e baseline_hora antes do calculo horario para evitar heranca na virada da hora.
 
 import os
 import hashlib
@@ -1425,34 +1425,6 @@ def update_machine():
     else:
         m["percentual_turno"] = 0
 
-    # Baseline por hora: deriva a produção da hora a partir da soma das horas anteriores no DB.
-    # Assim, ao trocar machine_id ou ao criar máquina nova, o sistema não "herda" o absoluto do ESP como produção da hora.
-    try:
-        agora_bh = now_bahia()
-        dia_ref_h = dia_operacional_ref_str(agora_bh)
-        hora_idx_h = calcular_ultima_hora_idx(m)
-
-        if isinstance(hora_idx_h, int):
-            conn_h = get_db()
-            try:
-                soma_prev = _sum_prev_hours_produzido(conn_h, machine_id=str(machine_id), cliente_id=str(cliente_id), dia_ref=str(dia_ref_h), hora_idx=int(hora_idx_h))
-            finally:
-                conn_h.close()
-
-            try:
-                prod_turno_int = int(m.get("producao_turno", 0) or 0)
-            except Exception:
-                prod_turno_int = 0
-
-            if soma_prev < 0:
-                soma_prev = 0
-            if soma_prev > prod_turno_int:
-                soma_prev = prod_turno_int
-
-            m["ultima_hora"] = int(hora_idx_h)
-            m["baseline_hora"] = int(soma_prev)
-    except Exception:
-        pass
 
     atualizar_producao_hora(m)
 
