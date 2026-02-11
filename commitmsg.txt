@@ -1,5 +1,6 @@
-﻿feat: mat_bom calculado e nao editavel no modal
+﻿feat: fechamento por bobina (backend)
 
-- QTD. MAT BOM agora e readonly
-- Recalcula: TOTAL_PCS - (COST_ELAS + REFUGO + SACO_CAIXA)
-- Salva o valor calculado no payload do botao Salvar
+- cria tabela ordens_producao_bobinas (1 OP pode ter N bobinas)
+- historico passa a retornar bobinas_itens (pcs_total, metro_consumido, cost/refugo/saco, mat_bom calculado)
+- /producao/op/salvar aceita payload novo com lista de bobinas e faz upsert por idx
+- mantem compatibilidade com fechamento antigo (campos unicos na OP)
