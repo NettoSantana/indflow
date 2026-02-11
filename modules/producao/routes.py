@@ -1,10 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-09 15:38 (America/Bahia)
-# REASON: Ajustar timestamps de OP (hs_inicial/hs_termino) para usar fuso America/Bahia ao gerar started_at/ended_at.
-
-# PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-07 18:10 America/Bahia
-# MOTIVO: Corrigir erro 500 no endpoint /producao/op/encerrar (variaveis indefinidas bobinas/conv/_safe_float).
+# LAST_RECODE: 2026-02-10 22:40 America/Bahia
+# MOTIVO: Suportar fechamento por bobina (lista) no historico e no salvar, com alocacao deterministica de pcs por bobina e persistencia em tabela dedicada; manter compatibilidade com fechamento antigo por OP.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -502,7 +498,7 @@ def _get_conn():
 def init_op_db():
     """
     Cria tabela de OP se nao existir.
-    Mantem tudo simples e compatível com SQLite.
+    Mantem tudo simples e compativel com SQLite.
     """
     conn = _get_conn()
     cur = conn.cursor()
@@ -525,13 +521,10 @@ def init_op_db():
             ended_at TEXT,
             status TEXT NOT NULL,
 
-            -- Baselines capturados ao iniciar OP (delta = atual - baseline)
-            -- Nesta etapa fica preparado; no proximo passo o front envia valores reais.
             baseline_pcs INTEGER NOT NULL DEFAULT 0,
             baseline_u1 REAL NOT NULL DEFAULT 0,
             baseline_u2 REAL NOT NULL DEFAULT 0,
 
-            -- Totais da OP (calculados no encerramento)
             op_metros INTEGER NOT NULL DEFAULT 0,
             op_pcs INTEGER NOT NULL DEFAULT 0,
             op_conv_m_por_pcs REAL NOT NULL DEFAULT 0,
@@ -542,22 +535,63 @@ def init_op_db():
         """
     )
 
+    # Migracoes simples: adicionar colunas novas se a tabela ja existia.
+    for sql in [
+        "ALTER TABLE ordens_producao ADD COLUMN op_metros INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN op_pcs INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN op_conv_m_por_pcs REAL NOT NULL DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN qtd_mat_bom INTEGER DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN qtd_cost_elas INTEGER DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN refugo INTEGER DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN qtd_saco_caixa INTEGER DEFAULT 0",
+    ]:
+        try:
+            cur.execute(sql)
+        except Exception:
+            pass
 
+    # -------------------------------------------------
+    # TABELA: FECHAMENTO POR BOBINA (1 OP pode ter N bobinas)
+    # -------------------------------------------------
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ordens_producao_bobinas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            op_id INTEGER NOT NULL,
+            idx INTEGER NOT NULL DEFAULT 0,
 
-    # Migracao simples: adicionar colunas novas se a tabela ja existia.
-    # SQLite nao tem "ADD COLUMN IF NOT EXISTS", entao usamos try/except.
-    try:
-        cur.execute("ALTER TABLE ordens_producao ADD COLUMN op_metros INTEGER NOT NULL DEFAULT 0")
-    except Exception:
-        pass
-    try:
-        cur.execute("ALTER TABLE ordens_producao ADD COLUMN op_pcs INTEGER NOT NULL DEFAULT 0")
-    except Exception:
-        pass
-    try:
-        cur.execute("ALTER TABLE ordens_producao ADD COLUMN op_conv_m_por_pcs REAL NOT NULL DEFAULT 0")
-    except Exception:
-        pass
+            comprimento_m INTEGER NOT NULL DEFAULT 0,
+            pcs_total INTEGER NOT NULL DEFAULT 0,
+            metro_consumido REAL NOT NULL DEFAULT 0,
+
+            qtd_cost_elas INTEGER NOT NULL DEFAULT 0,
+            refugo INTEGER NOT NULL DEFAULT 0,
+            qtd_saco_caixa INTEGER NOT NULL DEFAULT 0,
+            qtd_mat_bom INTEGER NOT NULL DEFAULT 0,
+
+            updated_at TEXT,
+
+            UNIQUE(op_id, idx)
+        )
+        """
+    )
+
+    # Migracao defensiva para colunas novas (caso tabela exista em formato antigo)
+    for col, ddl in [
+        ("comprimento_m", "INTEGER NOT NULL DEFAULT 0"),
+        ("pcs_total", "INTEGER NOT NULL DEFAULT 0"),
+        ("metro_consumido", "REAL NOT NULL DEFAULT 0"),
+        ("qtd_cost_elas", "INTEGER NOT NULL DEFAULT 0"),
+        ("refugo", "INTEGER NOT NULL DEFAULT 0"),
+        ("qtd_saco_caixa", "INTEGER NOT NULL DEFAULT 0"),
+        ("qtd_mat_bom", "INTEGER NOT NULL DEFAULT 0"),
+        ("updated_at", "TEXT"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE ordens_producao_bobinas ADD COLUMN {col} {ddl}")
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -835,10 +869,123 @@ def _iter_days_inclusive(start_day: str, end_day: str, max_days: int = 40):
     return out
 
 
+
+def _parse_bobinas_csv(csv: str) -> list[int]:
+    s = (csv or "").strip()
+    if not s:
+        return []
+    out: list[int] = []
+    for part in s.split(","):
+        p = part.strip()
+        if not p:
+            continue
+        if p.isdigit():
+            out.append(int(p))
+    return out
+
+
+def _alloc_pcs_by_bobinas(op_pcs_total: int, bobinas_m: list[int], conv_m_por_pcs: float) -> list[int]:
+    """
+    Aloca pcs_total da OP entre bobinas, de forma sequencial (simples e deterministica).
+    - capacidade_pcs_bobina = floor(comprimento_m / conv)
+    - preenche bobina 1, depois 2, etc.
+    - se sobrar pcs alem da capacidade total, joga o restante na ultima bobina.
+    """
+    try:
+        total = int(op_pcs_total or 0)
+    except Exception:
+        total = 0
+
+    if total <= 0:
+        return [0 for _ in bobinas_m] if bobinas_m else [0]
+
+    conv = float(conv_m_por_pcs or 0.0)
+    if conv <= 0:
+        return [total] + [0 for _ in bobinas_m[1:]] if bobinas_m else [total]
+
+    if not bobinas_m:
+        return [total]
+
+    caps: list[int] = []
+    for m in bobinas_m:
+        try:
+            mm = int(m or 0)
+        except Exception:
+            mm = 0
+        if mm <= 0:
+            caps.append(0)
+        else:
+            caps.append(int(mm // conv))
+
+    remaining = total
+    alloc: list[int] = []
+    for cap in caps:
+        take = cap if remaining >= cap else remaining
+        if take < 0:
+            take = 0
+        alloc.append(take)
+        remaining -= take
+
+    if remaining > 0 and alloc:
+        alloc[-1] += remaining
+
+    return alloc
+
+
+def _fetch_bobinas_fechamento(op_id: int) -> dict[int, dict]:
+    out: dict[int, dict] = {}
+    try:
+        oid = int(op_id or 0)
+    except Exception:
+        return out
+    if oid <= 0:
+        return out
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT idx, comprimento_m, pcs_total, metro_consumido,
+                   qtd_cost_elas, refugo, qtd_saco_caixa, qtd_mat_bom
+            FROM ordens_producao_bobinas
+            WHERE op_id = ?
+            ORDER BY idx ASC
+            """,
+            (oid,),
+        )
+        for r in cur.fetchall():
+            try:
+                idx = int(r[0] or 0)
+            except Exception:
+                idx = 0
+            out[idx] = {
+                "idx": idx,
+                "comprimento_m": int(r[1] or 0),
+                "pcs_total": int(r[2] or 0),
+                "metro_consumido": float(r[3] or 0.0),
+                "qtd_cost_elas": int(r[4] or 0),
+                "refugo": int(r[5] or 0),
+                "qtd_saco_caixa": int(r[6] or 0),
+                "qtd_mat_bom": int(r[7] or 0),
+            }
+    except Exception:
+        out = {}
+    finally:
+        if conn:
+            conn.close()
+    return out
+
+
 def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     """
     Busca OPs que cruzam o intervalo [day_min, day_max].
     start_day <= day_max AND (end_day >= day_min OR end_day IS NULL).
+
+    Retorna tambem:
+      - bobinas: lista de comprimentos (metros) cadastrada na OP
+      - bobinas_itens: lista por bobina com pcs_total/metro_consumido + campos de fechamento
     """
     conn = _get_conn()
     cur = conn.cursor()
@@ -846,7 +993,8 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     if machine_id:
         cur.execute(
             """
-            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs,
+                   qtd_mat_bom, qtd_cost_elas, refugo, qtd_saco_caixa
             FROM ordens_producao
             WHERE machine_id = ?
               AND substr(started_at, 1, 10) <= ?
@@ -858,7 +1006,8 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     else:
         cur.execute(
             """
-            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs,
+                   qtd_mat_bom, qtd_cost_elas, refugo, qtd_saco_caixa
             FROM ordens_producao
             WHERE substr(started_at, 1, 10) <= ?
               AND (ended_at IS NULL OR substr(ended_at, 1, 10) >= ?)
@@ -872,25 +1021,102 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
 
     ops = []
     for r in rows:
+        op_id = int(r[0] or 0)
+        bobina_csv = r[5] or ""
+        conv = float(r[13] or 0.0)
+        op_pcs = int(r[12] or 0)
+
+        # bobinas cadastradas na OP (em metros)
+        bobinas_m = _parse_bobinas_csv(bobina_csv)
+
+        # alocacao deterministica de pcs por bobina (para exibicao e calculos por bobina)
+        alloc_pcs = _alloc_pcs_by_bobinas(op_pcs, bobinas_m, conv)
+
+        # fechamento por bobina (se existir)
+        fechamento_map = _fetch_bobinas_fechamento(op_id)
+
+        bobinas_itens = []
+        if bobinas_m:
+            for idx, comprimento_m in enumerate(bobinas_m):
+                pcs_total = alloc_pcs[idx] if idx < len(alloc_pcs) else 0
+                metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+
+                row_f = fechamento_map.get(idx, {})
+                qtd_cost_elas = int(row_f.get("qtd_cost_elas", 0) or 0)
+                refugo = int(row_f.get("refugo", 0) or 0)
+                qtd_saco_caixa = int(row_f.get("qtd_saco_caixa", 0) or 0)
+
+                # mat_bom por bobina (calculado, nao editavel)
+                qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
+                if qtd_mat_bom < 0:
+                    qtd_mat_bom = 0
+
+                bobinas_itens.append(
+                    {
+                        "idx": idx,
+                        "comprimento_m": int(comprimento_m or 0),
+                        "pcs_total": int(pcs_total or 0),
+                        "metro_consumido": float(metro_consumido or 0.0),
+                        "qtd_cost_elas": int(qtd_cost_elas or 0),
+                        "refugo": int(refugo or 0),
+                        "qtd_saco_caixa": int(qtd_saco_caixa or 0),
+                        "qtd_mat_bom": int(qtd_mat_bom or 0),
+                    }
+                )
+        else:
+            # Sem bobinas: mantem compatibilidade (usa fechamento da OP inteira como pseudo-bobina idx=0)
+            try:
+                legacy_mat_bom = int(r[14] or 0)
+            except Exception:
+                legacy_mat_bom = 0
+            try:
+                legacy_cost = int(r[15] or 0)
+            except Exception:
+                legacy_cost = 0
+            try:
+                legacy_refugo = int(r[16] or 0)
+            except Exception:
+                legacy_refugo = 0
+            try:
+                legacy_saco = int(r[17] or 0)
+            except Exception:
+                legacy_saco = 0
+
+            bobinas_itens.append(
+                {
+                    "idx": 0,
+                    "comprimento_m": 0,
+                    "pcs_total": int(op_pcs or 0),
+                    "metro_consumido": float(op_pcs) * conv if conv > 0 else 0.0,
+                    "qtd_cost_elas": legacy_cost,
+                    "refugo": legacy_refugo,
+                    "qtd_saco_caixa": legacy_saco,
+                    "qtd_mat_bom": legacy_mat_bom,
+                }
+            )
+
         ops.append(
             {
-                "op_id": int(r[0]),
+                "op_id": op_id,
                 "machine_id": r[1] or "",
                 "os": r[2] or "",
                 "lote": r[3] or "",
                 "operador": r[4] or "",
-                "bobina": r[5] or "",
+                "bobina": bobina_csv,
+                "bobinas": bobinas_m,
+                "bobinas_itens": bobinas_itens,
                 "gr_fio": r[6] or "",
                 "observacoes": r[7] or "",
                 "started_at": r[8] or "",
                 "ended_at": r[9] or "",
                 "status": r[10] or "",
                 "op_metros": int(r[11] or 0),
-                "op_pcs": int(r[12] or 0),
-                "op_conv_m_por_pcs": float(r[13] or 0),
+                "op_pcs": op_pcs,
+                "op_conv_m_por_pcs": conv,
             }
         )
     return ops
+
 
 
 # =====================================================
@@ -1538,11 +1764,137 @@ def op_salvar():
         except Exception:
             return 0
 
+    observacoes = (data.get("observacoes") or "").strip()
+
+    # Novo formato: salvar por bobina
+    bobinas_payload = data.get("bobinas")
+    if isinstance(bobinas_payload, list):
+        conn = None
+        try:
+            conn = _get_conn()
+            cur = conn.cursor()
+
+            # Garantir colunas legacy na OP (compatibilidade)
+            for col, ddl in [
+                ("qtd_mat_bom", "INTEGER DEFAULT 0"),
+                ("qtd_cost_elas", "INTEGER DEFAULT 0"),
+                ("refugo", "INTEGER DEFAULT 0"),
+                ("qtd_saco_caixa", "INTEGER DEFAULT 0"),
+            ]:
+                try:
+                    cur.execute(f"ALTER TABLE ordens_producao ADD COLUMN {col} {ddl}")
+                except Exception:
+                    pass
+
+            # Buscar dados base da OP (bobinas/csv, op_pcs, conv)
+            cur.execute(
+                """
+                SELECT bobina, op_pcs, op_conv_m_por_pcs
+                FROM ordens_producao
+                WHERE id = ?
+                """,
+                (op_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "OP nao encontrada"}), 404
+
+            bobina_csv = row[0] or ""
+            op_pcs_total = int(row[1] or 0)
+            conv = float(row[2] or 0.0)
+
+            bobinas_m = _parse_bobinas_csv(bobina_csv)
+            alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
+
+            # UPSERT por idx
+            now_iso = _now_iso()
+            sum_mat_bom = 0
+            sum_cost = 0
+            sum_refugo = 0
+            sum_saco = 0
+
+            for item in bobinas_payload:
+                if not isinstance(item, dict):
+                    continue
+                idx = _int(item.get("idx"))
+                qtd_cost_elas = _int(item.get("qtd_cost_elas"))
+                refugo = _int(item.get("refugo"))
+                qtd_saco_caixa = _int(item.get("qtd_saco_caixa"))
+
+                # comprimento e pcs_total derivados da OP (fonte unica)
+                comprimento_m = bobinas_m[idx] if idx >= 0 and idx < len(bobinas_m) else 0
+                pcs_total = alloc_pcs[idx] if idx >= 0 and idx < len(alloc_pcs) else 0
+                metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+
+                qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
+                if qtd_mat_bom < 0:
+                    qtd_mat_bom = 0
+
+                cur.execute(
+                    """
+                    INSERT INTO ordens_producao_bobinas
+                        (op_id, idx, comprimento_m, pcs_total, metro_consumido,
+                         qtd_cost_elas, refugo, qtd_saco_caixa, qtd_mat_bom, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(op_id, idx) DO UPDATE SET
+                        comprimento_m = excluded.comprimento_m,
+                        pcs_total = excluded.pcs_total,
+                        metro_consumido = excluded.metro_consumido,
+                        qtd_cost_elas = excluded.qtd_cost_elas,
+                        refugo = excluded.refugo,
+                        qtd_saco_caixa = excluded.qtd_saco_caixa,
+                        qtd_mat_bom = excluded.qtd_mat_bom,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        op_id,
+                        idx,
+                        int(comprimento_m or 0),
+                        int(pcs_total or 0),
+                        float(metro_consumido or 0.0),
+                        int(qtd_cost_elas or 0),
+                        int(refugo or 0),
+                        int(qtd_saco_caixa or 0),
+                        int(qtd_mat_bom or 0),
+                        now_iso,
+                    ),
+                )
+
+                sum_mat_bom += int(qtd_mat_bom or 0)
+                sum_cost += int(qtd_cost_elas or 0)
+                sum_refugo += int(refugo or 0)
+                sum_saco += int(qtd_saco_caixa or 0)
+
+            # Atualizar resumo legacy na OP (somas)
+            cur.execute(
+                """
+                UPDATE ordens_producao
+                SET qtd_mat_bom = ?,
+                    qtd_cost_elas = ?,
+                    refugo = ?,
+                    qtd_saco_caixa = ?,
+                    observacoes = ?
+                WHERE id = ?
+                """,
+                (sum_mat_bom, sum_cost, sum_refugo, sum_saco, observacoes, op_id),
+            )
+
+            conn.commit()
+        except Exception:
+            if conn:
+                conn.rollback()
+            return jsonify({"error": "Falha ao salvar fechamento por bobina"}), 500
+        finally:
+            if conn:
+                conn.close()
+
+        return jsonify({"status": "ok", "op_id": op_id, "mode": "bobinas"})
+
+    # Formato antigo (compatibilidade): salvar direto na OP
     qtd_mat_bom = _int(data.get("qtd_mat_bom"))
     qtd_cost_elas = _int(data.get("qtd_cost_elas"))
     refugo = _int(data.get("refugo"))
     qtd_saco_caixa = _int(data.get("qtd_saco_caixa"))
-    observacoes = (data.get("observacoes") or "").strip()
 
     conn = None
     try:
@@ -1593,4 +1945,5 @@ def op_salvar():
         if conn:
             conn.close()
 
-    return jsonify({"status": "ok", "op_id": op_id})
+    return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"})
+

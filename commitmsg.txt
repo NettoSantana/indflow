@@ -1,5 +1,5 @@
-﻿feat: mat_bom calculado e nao editavel
+﻿feat: mat_bom calculado e nao editavel no modal
 
-- QTD_MAT_BOM agora e calculado: TOTAL_PCS - (COST_ELAS + REFUGO + SACO_CAIXA)
-- Recalcula em tempo real ao editar os 3 campos
-- Envia mat_bom calculado no payload ao salvar
+- QTD. MAT BOM agora e readonly
+- Recalcula: TOTAL_PCS - (COST_ELAS + REFUGO + SACO_CAIXA)
+- Salva o valor calculado no payload do botao Salvar
