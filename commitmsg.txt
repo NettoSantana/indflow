@@ -1,8 +1,4 @@
-﻿feat: bobina por evento (timestamp) no backend
+﻿feat: exibir tempo de consumo e horarios por bobina no historico
 
-- cria tabela ordens_producao_bobina_eventos (seq, started_at/ended_at, start_abs_pcs/end_abs_pcs)
-- op_iniciar cria evento seq=0 com baseline absoluto
-- op_editar ao adicionar bobina fecha evento atual e cria novo (troca por timestamp)
-- op_encerrar fecha ultimo evento aberto
-- historico por bobina passa a preferir eventos e retorna tempo_consumo_min e pcs_total por intervalo
-- fallback mantido: alocacao por capacidade quando nao houver eventos
+- remove campo Idx do card de bobina
+- adiciona Tempo de consumo (min), Hora inicial e Hora final por bobina no modal
