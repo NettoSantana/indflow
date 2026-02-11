@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-10 22:40 America/Bahia
-# MOTIVO: Suportar fechamento por bobina (lista) no historico e no salvar, com alocacao deterministica de pcs por bobina e persistencia em tabela dedicada; manter compatibilidade com fechamento antigo por OP.
+# LAST_RECODE: 2026-02-11 20:55 America/Bahia
+# MOTIVO: Implementar bobinas por evento (timestamp/baseline) para calcular pcs/metro/tempo por bobina; manter compatibilidade com alocacao por capacidade e fechamento manual.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -592,6 +592,52 @@ def init_op_db():
         except Exception:
             pass
 
+
+    # -------------------------------------------------
+    # TABELA: EVENTOS DE BOBINA (TROCA POR TIMESTAMP)
+    #   Logica: uma bobina "vale" ate a proxima ser inserida.
+    #   Guardamos:
+    #     - started_at / ended_at (ISO)
+    #     - start_abs_pcs / end_abs_pcs (contador absoluto do ESP)
+    #   Assim calculamos pcs_total por bobina = end_abs_pcs - start_abs_pcs.
+    # -------------------------------------------------
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ordens_producao_bobina_eventos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            op_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL DEFAULT 0,
+
+            comprimento_m INTEGER NOT NULL DEFAULT 0,
+
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            start_abs_pcs INTEGER NOT NULL DEFAULT 0,
+            end_abs_pcs INTEGER,
+
+            created_at TEXT,
+            updated_at TEXT,
+
+            UNIQUE(op_id, seq)
+        )
+        """
+    )
+
+    # Migracao defensiva para colunas novas (caso tabela exista em formato antigo)
+    for col, ddl in [
+        ("comprimento_m", "INTEGER NOT NULL DEFAULT 0"),
+        ("started_at", "TEXT NOT NULL DEFAULT ''"),
+        ("ended_at", "TEXT"),
+        ("start_abs_pcs", "INTEGER NOT NULL DEFAULT 0"),
+        ("end_abs_pcs", "INTEGER"),
+        ("created_at", "TEXT"),
+        ("updated_at", "TEXT"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE ordens_producao_bobina_eventos ADD COLUMN {col} {ddl}")
+        except Exception:
+            pass
+
     conn.commit()
     conn.close()
 
@@ -978,6 +1024,161 @@ def _fetch_bobinas_fechamento(op_id: int) -> dict[int, dict]:
     return out
 
 
+
+
+def _safe_parse_iso(dt_str: str):
+    s = _as_str(dt_str)
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        # tentativa com Z
+        try:
+            if s.endswith("Z"):
+                return datetime.fromisoformat(s[:-1]).replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+    return None
+
+
+def _minutes_between_iso(start_iso: str, end_iso: str) -> int:
+    a = _safe_parse_iso(start_iso)
+    b = _safe_parse_iso(end_iso)
+    if not a or not b:
+        return 0
+    try:
+        delta = (b - a).total_seconds()
+        if delta < 0:
+            delta = 0
+        return int(delta // 60)
+    except Exception:
+        return 0
+
+
+def _fetch_bobina_eventos(op_id: int) -> list[dict]:
+    out: list[dict] = []
+    try:
+        oid = int(op_id or 0)
+    except Exception:
+        return out
+    if oid <= 0:
+        return out
+
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs
+            FROM ordens_producao_bobina_eventos
+            WHERE op_id = ?
+            ORDER BY seq ASC
+            """,
+            (oid,),
+        )
+        for r in (cur.fetchall() or []):
+            out.append(
+                {
+                    "seq": int(r[0] or 0),
+                    "comprimento_m": int(r[1] or 0),
+                    "started_at": r[2] or "",
+                    "ended_at": r[3] or "",
+                    "start_abs_pcs": int(r[4] or 0),
+                    "end_abs_pcs": (int(r[5]) if r[5] is not None else None),
+                }
+            )
+    except Exception:
+        return []
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+    return out
+
+
+def _upsert_bobina_event_start(op_id: int, seq: int, comprimento_m: int, started_at: str, start_abs_pcs: int):
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        now_iso = _now_iso()
+        cur.execute(
+            """
+            INSERT INTO ordens_producao_bobina_eventos
+                (op_id, seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)
+            ON CONFLICT(op_id, seq) DO UPDATE SET
+                comprimento_m = excluded.comprimento_m,
+                started_at = excluded.started_at,
+                start_abs_pcs = excluded.start_abs_pcs,
+                updated_at = excluded.updated_at
+            """,
+            (
+                int(op_id),
+                int(seq),
+                int(comprimento_m or 0),
+                _as_str(started_at),
+                int(start_abs_pcs or 0),
+                now_iso,
+                now_iso,
+            ),
+        )
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
+
+
+def _close_last_bobina_event(op_id: int, ended_at: str, end_abs_pcs: int):
+    """Fecha a ultima bobina aberta (ended_at NULL)."""
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        now_iso = _now_iso()
+        cur.execute(
+            """
+            SELECT seq
+            FROM ordens_producao_bobina_eventos
+            WHERE op_id = ?
+              AND (ended_at IS NULL OR ended_at = '')
+            ORDER BY seq DESC
+            LIMIT 1
+            """,
+            (int(op_id),),
+        )
+        row = cur.fetchone()
+        if not row:
+            return
+        seq = int(row[0] or 0)
+
+        cur.execute(
+            """
+            UPDATE ordens_producao_bobina_eventos
+            SET ended_at = ?,
+                end_abs_pcs = ?,
+                updated_at = ?
+            WHERE op_id = ? AND seq = ?
+            """,
+            (_as_str(ended_at), int(end_abs_pcs or 0), now_iso, int(op_id), int(seq)),
+        )
+        conn.commit()
+    except Exception:
+        if conn:
+            conn.rollback()
+        raise
+    finally:
+        if conn:
+            conn.close()
 def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     """
     Busca OPs que cruzam o intervalo [day_min, day_max].
@@ -1029,14 +1230,86 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
         # bobinas cadastradas na OP (em metros)
         bobinas_m = _parse_bobinas_csv(bobina_csv)
 
-        # alocacao deterministica de pcs por bobina (para exibicao e calculos por bobina)
-        alloc_pcs = _alloc_pcs_by_bobinas(op_pcs, bobinas_m, conv)
-
         # fechamento por bobina (se existir)
         fechamento_map = _fetch_bobinas_fechamento(op_id)
 
+        # Eventos de bobina (preferencial): por troca/timestamp
+        eventos = _fetch_bobina_eventos(op_id)
+
+        # Fallback (antigo): alocacao deterministica por capacidade
+        alloc_pcs = _alloc_pcs_by_bobinas(op_pcs, bobinas_m, conv)
+
         bobinas_itens = []
-        if bobinas_m:
+        if eventos:
+            # Preferir eventos (troca de bobina por timestamp/baseline)
+            # pcs_total = end_abs_pcs - start_abs_pcs
+            # tempo_consumo_min = diff(started_at, ended_at)
+            if status := (r[10] or ""):
+                pass
+            # Se OP esta ativa, usamos esp atual como "fim" do ultimo evento em aberto.
+            esp_atual_abs = None
+            if (r[10] or "") == "ATIVA":
+                try:
+                    with _get_conn() as conn2:
+                        esp_atual_abs = _get_current_esp_abs(conn2, r[1] or "")
+                except Exception:
+                    esp_atual_abs = None
+
+            for ev in eventos:
+                seq = int(ev.get("seq", 0) or 0)
+                comprimento_m = int(ev.get("comprimento_m", 0) or 0)
+
+                ev_start = _as_str(ev.get("started_at"))
+                ev_end = _as_str(ev.get("ended_at"))
+
+                start_abs = int(ev.get("start_abs_pcs", 0) or 0)
+                end_abs = ev.get("end_abs_pcs", None)
+
+                if end_abs is None:
+                    # Evento em aberto: se OP ativa, fecha virtualmente com esp atual.
+                    if esp_atual_abs is not None:
+                        end_abs = int(esp_atual_abs)
+                        if not ev_end:
+                            ev_end = _now_iso()
+                    else:
+                        end_abs = start_abs
+                        if not ev_end:
+                            ev_end = ev_start
+
+                pcs_total = int(end_abs) - int(start_abs)
+                if pcs_total < 0:
+                    pcs_total = 0
+
+                metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+                tempo_consumo_min = _minutes_between_iso(ev_start, ev_end) if (ev_start and ev_end) else 0
+
+                row_f = fechamento_map.get(seq, {})
+                qtd_cost_elas = int(row_f.get("qtd_cost_elas", 0) or 0)
+                refugo = int(row_f.get("refugo", 0) or 0)
+                qtd_saco_caixa = int(row_f.get("qtd_saco_caixa", 0) or 0)
+
+                qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
+                if qtd_mat_bom < 0:
+                    qtd_mat_bom = 0
+
+                bobinas_itens.append(
+                    {
+                        "idx": seq,  # mantido por compatibilidade (no front vira tempo_consumo depois)
+                        "comprimento_m": int(comprimento_m or 0),
+                        "pcs_total": int(pcs_total or 0),
+                        "metro_consumido": float(metro_consumido or 0.0),
+                        "tempo_consumo_min": int(tempo_consumo_min or 0),
+                        "started_at": ev_start,
+                        "ended_at": ev_end,
+                        "qtd_cost_elas": int(qtd_cost_elas or 0),
+                        "refugo": int(refugo or 0),
+                        "qtd_saco_caixa": int(qtd_saco_caixa or 0),
+                        "qtd_mat_bom": int(qtd_mat_bom or 0),
+                    }
+                )
+
+        elif bobinas_m:
+            # Fallback (antigo): alocacao por capacidade (deterministica)
             for idx, comprimento_m in enumerate(bobinas_m):
                 pcs_total = alloc_pcs[idx] if idx < len(alloc_pcs) else 0
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
@@ -1046,7 +1319,6 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 refugo = int(row_f.get("refugo", 0) or 0)
                 qtd_saco_caixa = int(row_f.get("qtd_saco_caixa", 0) or 0)
 
-                # mat_bom por bobina (calculado, nao editavel)
                 qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
                 if qtd_mat_bom < 0:
                     qtd_mat_bom = 0
@@ -1451,6 +1723,15 @@ def op_status():
     # Producao atual da OP = (esp_atual - baseline_pcs)
     with _get_conn() as conn:
         esp_atual = _get_current_esp_abs(conn, machine_id)
+
+    # Fechar evento da ultima bobina no encerramento (fim = encerramento da OP)
+    try:
+        if op_id > 0:
+            _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual))
+    except Exception:
+        # Nao bloquear encerramento por falha no evento
+        pass
+
     baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
     op_pcs_live = max(0, int(esp_atual) - int(baseline_pcs))
     return jsonify(
@@ -1558,6 +1839,22 @@ def op_iniciar():
     except Exception:
         return jsonify({"error": "Falha ao salvar OP no banco"}), 500
 
+    # Registrar evento da primeira bobina (se houver) com timestamp de inicio e baseline absoluto
+    # Regra: a bobina atual continua ate a proxima bobina ser inserida (novo evento).
+    try:
+        if bobinas_list:
+            _upsert_bobina_event_start(
+                op_id=op_id,
+                seq=0,
+                comprimento_m=int(bobinas_list[0] or 0),
+                started_at=started_at,
+                start_abs_pcs=int(baseline_pcs),
+            )
+    except Exception:
+        # Nao bloquear inicio da OP por falha de evento; historico cai em fallback.
+        pass
+
+
     op_mem = {
         "op_id": op_id,
         "machine_id": machine_id,
@@ -1628,6 +1925,42 @@ def op_editar():
     op_id = int(op.get("op_id") or 0)
     if op_id <= 0:
         return jsonify({"error": "OP ativa invalida"}), 500
+
+    # Se aumentou a lista de bobinas durante a OP ativa, tratamos como "troca de bobina".
+    # Regra: bobina anterior conta ate o momento em que a nova bobina e inserida.
+    try:
+        prev_list = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
+        new_list = bobinas_list or []
+        if len(new_list) > len(prev_list) and len(new_list) >= 1:
+            # Considera apenas adicionados no fim (comportamento do front: "Adicionar bobina")
+            added = new_list[len(prev_list):]
+            if added:
+                with _get_conn() as conn:
+                    esp_atual = _get_current_esp_abs(conn, machine_id)
+                ts_now = _now_iso()
+
+                # Fecha a bobina atual (ultima aberta)
+                try:
+                    _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(esp_atual))
+                except Exception:
+                    pass
+
+                # Cria eventos para cada bobina adicionada (sequencia crescente)
+                base_seq = max(0, len(prev_list))
+                for offset, comp in enumerate(added):
+                    try:
+                        _upsert_bobina_event_start(
+                            op_id=op_id,
+                            seq=int(base_seq + offset),
+                            comprimento_m=int(comp or 0),
+                            started_at=ts_now,
+                            start_abs_pcs=int(esp_atual),
+                        )
+                    except Exception:
+                        continue
+    except Exception:
+        pass
+
 
     payload = {
         "os": os_,

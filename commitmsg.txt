@@ -1,6 +1,4 @@
-﻿feat: modal historico com fechamento por bobina (multi bobinas)
+﻿fix: corrigir SyntaxError no historico.html (renderMsgRow)
 
-- renderiza bobinas_itens no modal (N blocos)
-- mostra comprimento, metro consumido, pcs_total por bobina
-- calcula mat_bom por bobina (readonly) com base nos 3 campos editaveis
-- salvar envia lista bobinas[] para /producao/op/salvar
+- remove token duplicado 'function renderMsgRowfunction' que quebrava o JS
+- pagina historico volta a carregar e executar fetchHistorico()
