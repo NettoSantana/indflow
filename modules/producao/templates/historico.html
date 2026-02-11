@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-11 20:15 America/Bahia
-MOTIVO: substituir campo Idx por Tempo de consumo e exibir hora inicial/final por bobina no modal.
+LAST_RECODE: 2026-02-11 21:05 America/Bahia
+MOTIVO: adicionar botao Gerar PDF no modal e formatar metros com 2 casas decimais (floor), sem reintroduzir idx.
 -->
 
 {#
@@ -520,6 +520,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     <div class="op-modal-footer">
       <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
+      <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
       <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
   </div>
@@ -632,6 +633,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   const modalClose = document.getElementById("op-modal-close");
   const modalCancel = document.getElementById("op-modal-cancel");
   const modalSave = document.getElementById("op-modal-save");
+  const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
 
   const opv_machine = document.getElementById("opv_machine");
@@ -655,11 +657,11 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     return Number.isFinite(n) ? n : 0;
   }
 
-  function fmtFixed3(v){
+  function fmtMeters2Floor(v){
     const n = Number(v);
-    if(!Number.isFinite(n)) return "0";
-    const s = String(n);
-    return s;
+    if(!Number.isFinite(n)) return "0.00";
+    const floored = Math.floor(n * 100) / 100;
+    return floored.toFixed(2);
   }
 
   function calcMatBom(pcsTotal, cost, refugo, saco){
@@ -782,7 +784,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
     grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
-    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtFixed3(derivedMetroConsumido), "col-3"));
+    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3"));
     grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
 
     grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
@@ -889,6 +891,156 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     }
   }
 
+  function escapeHtml(s){
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function buildOpPrintHtml(op){
+    const title = (op && op.lote) ? ("OP - Lote " + escapeHtml(op.lote)) : "OP";
+    const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
+
+    const bobinas = Array.isArray(op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) ? (op.bobinas_itens || op.bobinas_items || op.bobinas) : [];
+
+    function row2(label, value){
+      return `<tr><td class="k">${escapeHtml(label)}</td><td class="v">${escapeHtml(value)}</td></tr>`;
+    }
+
+    let infoRows = "";
+    infoRows += row2("Maquina", anyText(op && (op.machine_id || machineId)));
+    infoRows += row2("Operador", anyText(op && op.operador));
+    infoRows += row2("Lote", anyText(op && op.lote));
+    infoRows += row2("Status", anyText(op && op.status));
+    infoRows += row2("OS", anyText(op && (op.os || op.os_num || op.ordem_servico)));
+    infoRows += row2("GR e/ou fio", anyText(op && (op.gr_fio || op.gr_e_ou_fio)));
+    infoRows += row2("Conversao m/pcs", anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs)));
+    infoRows += row2("HS-inicial", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
+    infoRows += row2("HS-termino", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
+
+    let bobinasHtml = "";
+    if(bobinas.length === 0){
+      bobinasHtml = `<tr><td colspan="8" class="empty">Sem bobinas registradas.</td></tr>`;
+    }else{
+      bobinasHtml = bobinas.map((b, i) => {
+        const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
+        const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
+        const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
+        const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
+        const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
+        const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
+        const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
+        const ref = Math.floor(num0(b && (b.refugo ?? 0)));
+        const saco = Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)));
+        const mat = calcMatBom(pcs, cost, ref, saco);
+
+        return `
+          <tr>
+            <td class="c">${i + 1}</td>
+            <td class="r">${comprimento}</td>
+            <td class="r">${pcs}</td>
+            <td class="r">${metro}</td>
+            <td class="r">${tempo}</td>
+            <td>${escapeHtml(hi)}</td>
+            <td>${escapeHtml(hf)}</td>
+            <td class="r">${mat}</td>
+          </tr>
+          <tr class="sub">
+            <td></td>
+            <td colspan="2">Qtd. cost. elas.: <b>${cost}</b></td>
+            <td colspan="2">Refugo: <b>${ref}</b></td>
+            <td colspan="3">Qtd. saco/caixa: <b>${saco}</b></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
+
+    return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<style>
+  body{ font-family: Arial, sans-serif; color:#0f172a; margin:24px; }
+  h1{ font-size:18px; margin:0 0 12px 0; }
+  table{ width:100%; border-collapse:collapse; font-size:12px; }
+  td, th{ border:1px solid #e5e7eb; padding:8px; vertical-align:top; }
+  th{ background:#f1f5f9; text-align:left; }
+  .meta td{ border:1px solid #e5e7eb; }
+  .k{ width:180px; font-weight:700; background:#f8fafc; }
+  .v{ }
+  .r{ text-align:right; }
+  .c{ text-align:center; }
+  .sub td{ background:#fafafa; border-top:none; }
+  .empty{ text-align:center; color:#64748b; }
+  .section{ margin-top:16px; }
+  .obs{ white-space:pre-wrap; border:1px solid #e5e7eb; padding:10px; border-radius:8px; }
+  @media print{
+    body{ margin:0; }
+  }
+</style>
+</head>
+<body>
+  <h1>${title}</h1>
+
+  <table class="meta">
+    <tbody>
+      ${infoRows}
+    </tbody>
+  </table>
+
+  <div class="section">
+    <table>
+      <thead>
+        <tr>
+          <th class="c">Bobina</th>
+          <th class="r">Comprimento (m)</th>
+          <th class="r">Total pcs</th>
+          <th class="r">Metro consumido (m)</th>
+          <th class="r">Tempo (min)</th>
+          <th>Hora inicial</th>
+          <th>Hora final</th>
+          <th class="r">Mat bom</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${bobinasHtml}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h1>Observacoes</h1>
+    <div class="obs">${obs || "-"}</div>
+  </div>
+</body>
+</html>`;
+  }
+
+  function openPrintWindow(){
+    if(!currentOp){
+      alert("OP invalida.");
+      return;
+    }
+    const html = buildOpPrintHtml(currentOp);
+    const w = window.open("", "_blank");
+    if(!w){
+      alert("Bloqueio de popup. Libere popups para gerar PDF.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try{ w.print(); }catch(e){} }, 250);
+  }
+
+
   if(modalClose) modalClose.addEventListener("click", closeModal);
   if(modalCancel) modalCancel.addEventListener("click", closeModal);
 
@@ -970,6 +1122,13 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       }
     });
   }
+
+  if(modalPdf){
+    modalPdf.addEventListener("click", function(){
+      openPrintWindow();
+    });
+  }
+
 
   function renderMsgRow(msg){
     if(!tbody) return;
