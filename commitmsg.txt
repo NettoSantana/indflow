@@ -1,6 +1,6 @@
-﻿feat: fechamento por bobina (backend)
+﻿feat: modal historico com fechamento por bobina (multi bobinas)
 
-- cria tabela ordens_producao_bobinas (1 OP pode ter N bobinas)
-- historico passa a retornar bobinas_itens (pcs_total, metro_consumido, cost/refugo/saco, mat_bom calculado)
-- /producao/op/salvar aceita payload novo com lista de bobinas e faz upsert por idx
-- mantem compatibilidade com fechamento antigo (campos unicos na OP)
+- renderiza bobinas_itens no modal (N blocos)
+- mostra comprimento, metro consumido, pcs_total por bobina
+- calcula mat_bom por bobina (readonly) com base nos 3 campos editaveis
+- salvar envia lista bobinas[] para /producao/op/salvar
