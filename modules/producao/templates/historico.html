@@ -1,8 +1,9 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-11 22:20 America/Bahia
-MOTIVO: adicionar botao Gerar PDF no modal e exibir metros com 2 casas decimais (arredondado para baixo).
+LAST_RECODE: 2026-02-11 20:15 America/Bahia
+MOTIVO: substituir campo Idx por Tempo de consumo e exibir hora inicial/final por bobina no modal.
 -->
+
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
@@ -519,7 +520,6 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     <div class="op-modal-footer">
       <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
-      <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
       <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
   </div>
@@ -632,7 +632,6 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   const modalClose = document.getElementById("op-modal-close");
   const modalCancel = document.getElementById("op-modal-cancel");
   const modalSave = document.getElementById("op-modal-save");
-  const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
 
   const opv_machine = document.getElementById("opv_machine");
@@ -656,11 +655,11 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     return Number.isFinite(n) ? n : 0;
   }
 
-  function fmtFloor2(v){
+  function fmtFixed3(v){
     const n = Number(v);
-    if(!Number.isFinite(n)) return "0.00";
-    const f = Math.floor(n * 100) / 100;
-    return f.toFixed(2);
+    if(!Number.isFinite(n)) return "0";
+    const s = String(n);
+    return s;
   }
 
   function calcMatBom(pcsTotal, cost, refugo, saco){
@@ -762,10 +761,32 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     }
 
     // Read-only context
+    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
+    const endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    const startedStr = fmtIsoDateTimeLocal(startedRaw);
+    const endedStr = fmtIsoDateTimeLocal(endedRaw);
+
+    let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
+    if(!(tempoMin > 0)){
+      try{
+        const ds = new Date(String(startedRaw || ""));
+        const de = new Date(String(endedRaw || ""));
+        if(!isNaN(ds.getTime()) && !isNaN(de.getTime())){
+          const diff = Math.floor((de.getTime() - ds.getTime()) / 60000);
+          if(diff > 0) tempoMin = diff;
+        }
+      }catch(e){
+        // ignore
+      }
+    }
+
     grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
-    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtFloor2(derivedMetroConsumido), "col-3"));
     grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
-    grid.appendChild(fieldRO("Idx", idx, "col-3"));
+    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtFixed3(derivedMetroConsumido), "col-3"));
+    grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
+
+    grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
+    grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
 
     // Editable (yellow)
     const fCost = fieldEdit("Qtd. cost. elas.", vCost, "col-3", "qtd_cost_elas");
@@ -885,167 +906,6 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     }
   });
 
-
-  function escHtml(s){
-    return String(s || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
-  function buildPdfHtml(op){
-    const lote = safeText(op && op.lote).trim();
-    const titulo = lote ? ("OP - Lote " + lote) : "OP";
-
-    const machine = anyText(op && (op.machine_id || machineId));
-    const operador = anyText(op && op.operador);
-    const os = anyText(op && (op.os || op.os_num || op.ordem_servico));
-    const gr = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
-    const conv = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
-    const hsIni = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
-    const hsFim = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
-    const obs = safeText((ope_obs && ope_obs.value) ? ope_obs.value : (op && op.observacoes));
-
-    const convNum = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
-
-    const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
-    const bobinas = Array.isArray(itens) ? itens : [];
-
-    // Ler valores editados do modal para refletir no PDF
-    const edits = {};
-    if(bobinasWrap){
-      const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
-      cards.forEach((card) => {
-        const idx = Number(card.getAttribute("data-bobina-idx") || "0");
-        const getField = (name) => {
-          const el = card.querySelector('[data-field="' + name + '"]');
-          if(!el) return 0;
-          return Math.floor(num0(el.value));
-        };
-        edits[idx] = {
-          qtd_cost_elas: getField("qtd_cost_elas"),
-          refugo: getField("refugo"),
-          qtd_saco_caixa: getField("qtd_saco_caixa")
-        };
-      });
-    }
-
-    let rowsHtml = "";
-    bobinas.forEach((b, i) => {
-      const comprimentoM = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
-      const pcsTotal = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
-      let metroConsumido = num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? 0));
-      if(!(metroConsumido > 0) && pcsTotal > 0 && convNum > 0){
-        metroConsumido = pcsTotal * convNum;
-      }
-
-      const started = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? ""));
-      const ended = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? ""));
-      const tempoMin = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
-
-      const e = edits[i] || {
-        qtd_cost_elas: Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0))),
-        refugo: Math.floor(num0(b && (b.refugo ?? 0))),
-        qtd_saco_caixa: Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)))
-      };
-
-      const matBom = calcMatBom(pcsTotal, e.qtd_cost_elas, e.refugo, e.qtd_saco_caixa);
-
-      rowsHtml += `
-        <tr>
-          <td>${escHtml(String(i + 1))}</td>
-          <td>${escHtml(String(comprimentoM))}</td>
-          <td>${escHtml(String(pcsTotal))}</td>
-          <td>${escHtml(fmtFloor2(metroConsumido))}</td>
-          <td>${escHtml(String(tempoMin))}</td>
-          <td>${escHtml(String(started))}</td>
-          <td>${escHtml(String(ended))}</td>
-          <td>${escHtml(String(e.qtd_cost_elas))}</td>
-          <td>${escHtml(String(e.refugo))}</td>
-          <td>${escHtml(String(e.qtd_saco_caixa))}</td>
-          <td>${escHtml(String(matBom))}</td>
-        </tr>
-      `;
-    });
-
-    const html = `
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>${escHtml(titulo)}</title>
-  <style>
-    body{ font-family: Arial, sans-serif; color:#0f172a; margin:20px; }
-    h1{ font-size:18px; margin:0 0 10px 0; }
-    .meta{ margin:0 0 14px 0; font-size:12px; }
-    .meta div{ margin:2px 0; }
-    table{ width:100%; border-collapse:collapse; font-size:12px; }
-    th, td{ border:1px solid #cbd5e1; padding:6px 8px; text-align:left; vertical-align:top; }
-    th{ background:#f1f5f9; }
-    .obs{ margin-top:14px; font-size:12px; white-space:pre-wrap; border:1px solid #cbd5e1; padding:10px; border-radius:8px; }
-    @media print { button{ display:none; } }
-  </style>
-</head>
-<body>
-  <h1>${escHtml(titulo)}</h1>
-  <div class="meta">
-    <div><b>Maquina:</b> ${escHtml(machine)}</div>
-    <div><b>Operador:</b> ${escHtml(operador)}</div>
-    <div><b>OS:</b> ${escHtml(os)}</div>
-    <div><b>GR/Fio:</b> ${escHtml(gr)}</div>
-    <div><b>Conversao m/pcs:</b> ${escHtml(conv)}</div>
-    <div><b>HS-inicial:</b> ${escHtml(hsIni)}</div>
-    <div><b>HS-termino:</b> ${escHtml(hsFim)}</div>
-  </div>
-
-  <table>
-    <thead>
-      <tr>
-        <th>Bobina</th>
-        <th>Comprimento (m)</th>
-        <th>Total pcs</th>
-        <th>Metro consumido (m)</th>
-        <th>Tempo (min)</th>
-        <th>Hora inicial</th>
-        <th>Hora final</th>
-        <th>Cost elas</th>
-        <th>Refugo</th>
-        <th>Saco/caixa</th>
-        <th>Mat bom</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${rowsHtml || ""}
-    </tbody>
-  </table>
-
-  <div class="obs"><b>Observacoes</b>\n${escHtml(obs)}</div>
-</body>
-</html>
-    `;
-    return html;
-  }
-
-  function gerarPdf(){
-    if(!currentOp){
-      alert("OP invalida.");
-      return;
-    }
-    const w = window.open("", "_blank");
-    if(!w){
-      alert("Nao foi possivel abrir a janela do PDF. Verifique bloqueio de pop-up.");
-      return;
-    }
-    const html = buildPdfHtml(currentOp);
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    w.print();
-  }
-
   if(modalSave){
     modalSave.addEventListener("click", async function(){
       const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
@@ -1108,14 +968,6 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       }finally{
         modalSave.disabled = false;
       }
-    });
-  }
-
-
-
-  if(modalPdf){
-    modalPdf.addEventListener("click", function(){
-      gerarPdf();
     });
   }
 
