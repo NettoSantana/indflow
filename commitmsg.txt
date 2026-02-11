@@ -1,4 +1,5 @@
-﻿fix: historico nao dobrar (remover linha duplicada cliente::machine em producao_diaria)
+﻿feat: mat_bom calculado e nao editavel
 
-- Ao sincronizar producao_diaria por valor absoluto, remove duplicidade de machine_id escopado
-- Evita Historico somar 2 linhas do mesmo dia (maquina e cliente::maquina)
+- QTD_MAT_BOM agora e calculado: TOTAL_PCS - (COST_ELAS + REFUGO + SACO_CAIXA)
+- Recalcula em tempo real ao editar os 3 campos
+- Envia mat_bom calculado no payload ao salvar

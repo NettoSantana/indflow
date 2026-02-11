@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-07 22:31 America/Bahia
-MOTIVO: Preencher campos editaveis do modal OP com valores vindos do backend (qtd_mat_bom, refugo, etc) e fallback para op_pcs.
+LAST_RECODE: 2026-02-10 20:10 America/Bahia
+MOTIVO: QTD_MAT_BOM calculado (TOTAL - COST_ELAS - REFUGO - SACO_CAIXA), nao editavel; salvar calculado; manter edicao apos encerrada; modal com rolagem.
 -->
 
 {#
@@ -217,6 +217,11 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     box-shadow:0 18px 60px rgba(0,0,0,0.30);
     border:1px solid #e5e7eb;
     overflow:hidden;
+
+    /* rolagem no conteudo do modal */
+    max-height:90vh;
+    display:flex;
+    flex-direction:column;
   }
 
   .op-modal-header{
@@ -247,6 +252,10 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
   .op-modal-body{
     padding:16px;
+
+    /* rolagem interna do modal (mantem header/footer fixos) */
+    flex:1;
+    overflow:auto;
   }
 
   .op-form-grid{
@@ -453,7 +462,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
         </div>
 
         <!-- Linha 4 (editavel / amarelo) -->
-        <div class="op-field op-edit col-3">
+        <div class="op-field op-ro col-3">
           <label>Qtd. mat bom</label>
           <input id="ope_mat_bom" type="number" inputmode="numeric" min="0" step="1" readonly>
         </div>
@@ -611,61 +620,66 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   const ope_obs = document.getElementById("ope_obs");
 
   let currentOp = null;
-  let currentOpTotalPcs = null;
+  let currentOpTotalPcs = 0;
+
+  function num0(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function recalcMatBom(){
+    if(!ope_mat_bom || !ope_cost_elas || !ope_refugo || !ope_saco_caixa) return;
+
+    let total = Math.floor(num0(currentOpTotalPcs));
+    if(!(total > 0)){
+      const derived = Math.floor(num0(ope_mat_bom.value)) + Math.floor(num0(ope_cost_elas.value)) + Math.floor(num0(ope_refugo.value)) + Math.floor(num0(ope_saco_caixa.value));
+      total = derived > 0 ? derived : 0;
+      currentOpTotalPcs = total;
+    }
+
+    const c = Math.floor(num0(ope_cost_elas.value));
+    const r = Math.floor(num0(ope_refugo.value));
+    const s = Math.floor(num0(ope_saco_caixa.value));
+    let res = total - (c + r + s);
+    if(res < 0) res = 0;
+    ope_mat_bom.value = String(res);
+  }
 
   function isOpEncerrada(op){
     const s = safeText(op && op.status).toUpperCase();
     return s.includes("ENCERR");
   }
 
-  function recomputeMatBom(){
-    if(!ope_mat_bom) return;
-
-    // Regra: QTD. MAT BOM = TOTAL_PCS - (COST_ELAS + REFUGO + SACO_CAIXA)
-    // TOTAL_PCS vem do objeto da OP (op_pcs/total_pcs/etc).
-    const total = (currentOpTotalPcs === null || currentOpTotalPcs === undefined) ? null : Number(currentOpTotalPcs);
-    if(total === null || !Number.isFinite(total)){
-      return;
-    }
-
-    const cost = Number(ope_cost_elas && ope_cost_elas.value ? ope_cost_elas.value : 0);
-    const refu = Number(ope_refugo && ope_refugo.value ? ope_refugo.value : 0);
-    const saco = Number(ope_saco_caixa && ope_saco_caixa.value ? ope_saco_caixa.value : 0);
-
-    let bom = total - cost - refu - saco;
-    if(!Number.isFinite(bom)) bom = 0;
-    if(bom < 0) bom = 0;
-
-    ope_mat_bom.value = String(Math.floor(bom));
-  }
-
   function setOpEditEnabled(enabled){
-    const on = !!enabled;
+    // Regra nova: campos de fechamento SEMPRE editaveis (mesmo com OP ENCERRADA)
+    // e botao Salvar sempre visivel.
+    const on = true;
 
     if(ope_mat_bom){
-      ope_mat_bom.readOnly = !on;
-      ope_mat_bom.disabled = !on;
+      // QTD. MAT BOM e calculado e nao pode ser editado
+      ope_mat_bom.readOnly = true;
+      ope_mat_bom.disabled = false;
     }
     if(ope_cost_elas){
-      ope_cost_elas.readOnly = !on;
-      ope_cost_elas.disabled = !on;
+      ope_cost_elas.readOnly = false;
+      ope_cost_elas.disabled = false;
     }
     if(ope_refugo){
-      ope_refugo.readOnly = !on;
-      ope_refugo.disabled = !on;
+      ope_refugo.readOnly = false;
+      ope_refugo.disabled = false;
     }
     if(ope_saco_caixa){
-      ope_saco_caixa.readOnly = !on;
-      ope_saco_caixa.disabled = !on;
+      ope_saco_caixa.readOnly = false;
+      ope_saco_caixa.disabled = false;
     }
     if(ope_obs){
-      ope_obs.readOnly = !on;
-      ope_obs.disabled = !on;
+      ope_obs.readOnly = false;
+      ope_obs.disabled = false;
     }
 
     if(modalSave){
-      modalSave.disabled = !on;
-      modalSave.style.display = on ? "inline-block" : "none";
+      modalSave.disabled = false;
+      modalSave.style.display = "inline-block";
     }
   }
 
@@ -693,36 +707,40 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     if(opv_started) opv_started.value = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
     if(opv_ended) opv_ended.value = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+    // Total de pecas da OP (base para calcular QTD. MAT BOM)
+    // Prioridade: campos vindos do backend; fallback: usa o total derivado (mat_bom + outros)
+    const v_total_pcs = (op && (
+      op.total_pcs ??
+      op.total ??
+      op.op_total ??
+      op.op_pcs ??
+      op.produzido ??
+      op.qtd_pecas ??
+      op.pecas_total ??
+      op.pecas ??
+      ""
+    ));
+    currentOpTotalPcs = Number(v_total_pcs) || 0;
+
     // Campos editaveis: preencher com valores salvos (quando existirem)
-    // Regra: QTD. MAT BOM NAO E EDITAVEL. Ela e calculada por:
-    // MAT_BOM = TOTAL_PCS - (COST_ELAS + REFUGO + SACO_CAIXA)
-    //
-    // TOTAL_PCS vem do objeto OP (prioridade: total_pcs/op_pcs/op_pieces/prod).
+    // Fallback: se qtd_mat_bom nao vier, tenta usar op.op_pcs (pecas produzidas calculadas no encerramento)
+    const v_mat_bom = (op && (op.qtd_mat_bom ?? op.mat_bom ?? op.pecas_boas ?? op.op_pcs ?? op.op_pieces ?? op.produzido ?? op.qtd_pecas ?? ""));
     const v_cost_elas = (op && (op.qtd_cost_elas ?? op.cost_elas ?? ""));
     const v_refugo = (op && (op.refugo ?? op.refugo_total ?? ""));
     const v_saco_caixa = (op && (op.qtd_saco_caixa ?? op.saco_caixa ?? ""));
 
-    const total_candidate = (op && (op.total_pcs ?? op.op_pcs ?? op.op_pieces ?? op.produzido ?? op.qtd_pecas ?? op.pecas_boas ?? null));
-    const total_num = Number(total_candidate);
-    currentOpTotalPcs = Number.isFinite(total_num) ? total_num : null;
-
+    if(ope_mat_bom) ope_mat_bom.value = (v_mat_bom === null || v_mat_bom === undefined) ? "" : String(v_mat_bom);
     if(ope_cost_elas) ope_cost_elas.value = (v_cost_elas === null || v_cost_elas === undefined) ? "" : String(v_cost_elas);
     if(ope_refugo) ope_refugo.value = (v_refugo === null || v_refugo === undefined) ? "" : String(v_refugo);
     if(ope_saco_caixa) ope_saco_caixa.value = (v_saco_caixa === null || v_saco_caixa === undefined) ? "" : String(v_saco_caixa);
 
-    // Inicializa MAT BOM:
-    // - se tiver TOTAL_PCS, calcula.
-    // - se nao tiver, usa o valor salvo/antigo como fallback (sem calcular).
-    if(currentOpTotalPcs !== null){
-      recomputeMatBom();
-    }else{
-      const v_mat_bom = (op && (op.qtd_mat_bom ?? op.mat_bom ?? op.pecas_boas ?? op.op_pcs ?? op.op_pieces ?? op.produzido ?? op.qtd_pecas ?? ""));
-      if(ope_mat_bom) ope_mat_bom.value = (v_mat_bom === null || v_mat_bom === undefined) ? "" : String(v_mat_bom);
-    }
-
     // Observacoes
     if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
-setOpEditEnabled(!isOpEncerrada(op));
+
+    // Recalcula QTD. MAT BOM com base no TOTAL - (COST + REFUGO + SACO/CAIXA)
+    recalcMatBom();
+
+    setOpEditEnabled(true);
 
     if(modalBackdrop){
       modalBackdrop.style.display = "flex";
@@ -754,38 +772,30 @@ setOpEditEnabled(!isOpEncerrada(op));
       closeModal();
     }
   });
-  function wireMatBomRecalc(){
-    if(ope_cost_elas){
-      ope_cost_elas.addEventListener("input", recomputeMatBom);
-      ope_cost_elas.addEventListener("change", recomputeMatBom);
-    }
-    if(ope_refugo){
-      ope_refugo.addEventListener("input", recomputeMatBom);
-      ope_refugo.addEventListener("change", recomputeMatBom);
-    }
-    if(ope_saco_caixa){
-      ope_saco_caixa.addEventListener("input", recomputeMatBom);
-      ope_saco_caixa.addEventListener("change", recomputeMatBom);
-    }
+
+  if(ope_cost_elas){
+    ope_cost_elas.addEventListener("input", recalcMatBom);
+    ope_cost_elas.addEventListener("change", recalcMatBom);
   }
-
-  wireMatBomRecalc();
-
+  if(ope_refugo){
+    ope_refugo.addEventListener("input", recalcMatBom);
+    ope_refugo.addEventListener("change", recalcMatBom);
+  }
+  if(ope_saco_caixa){
+    ope_saco_caixa.addEventListener("input", recalcMatBom);
+    ope_saco_caixa.addEventListener("change", recalcMatBom);
+  }
 
   if(modalSave){
     modalSave.addEventListener("click", async function(){
-      if(!currentOp || !currentOp.id){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
         alert("OP invalida.");
         return;
       }
 
-      if(isOpEncerrada(currentOp)){
-        alert("OP encerrada: somente leitura.");
-        return;
-      }
-
       const payload = {
-        op_id: currentOp.id,
+        op_id: opId,
         qtd_mat_bom: Number(ope_mat_bom.value || 0),
         qtd_cost_elas: Number(ope_cost_elas.value || 0),
         refugo: Number(ope_refugo.value || 0),
