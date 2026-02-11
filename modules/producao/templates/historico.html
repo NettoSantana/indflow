@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-07 22:31 America/Bahia
-MOTIVO: Preencher campos editaveis do modal OP com valores vindos do backend (qtd_mat_bom, refugo, etc) e fallback para op_pcs.
+LAST_RECODE: 2026-02-10 20:00 America/Bahia
+MOTIVO: permitir editar campos de fechamento (qtd_cost_elas/refugo/qtd_saco_caixa) mesmo com OP ENCERRADA; adicionar rolagem no modal; manter botao Salvar sempre visivel.
 -->
 
 {#
@@ -217,6 +217,11 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     box-shadow:0 18px 60px rgba(0,0,0,0.30);
     border:1px solid #e5e7eb;
     overflow:hidden;
+
+    /* rolagem no conteudo do modal */
+    max-height:90vh;
+    display:flex;
+    flex-direction:column;
   }
 
   .op-modal-header{
@@ -247,6 +252,10 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
   .op-modal-body{
     padding:16px;
+
+    /* rolagem interna do modal (mantem header/footer fixos) */
+    flex:1;
+    overflow:auto;
   }
 
   .op-form-grid{
@@ -618,32 +627,34 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   }
 
   function setOpEditEnabled(enabled){
-    const on = !!enabled;
+    // Regra nova: campos de fechamento SEMPRE editaveis (mesmo com OP ENCERRADA)
+    // e botao Salvar sempre visivel.
+    const on = true;
 
     if(ope_mat_bom){
-      ope_mat_bom.readOnly = !on;
-      ope_mat_bom.disabled = !on;
+      ope_mat_bom.readOnly = false;
+      ope_mat_bom.disabled = false;
     }
     if(ope_cost_elas){
-      ope_cost_elas.readOnly = !on;
-      ope_cost_elas.disabled = !on;
+      ope_cost_elas.readOnly = false;
+      ope_cost_elas.disabled = false;
     }
     if(ope_refugo){
-      ope_refugo.readOnly = !on;
-      ope_refugo.disabled = !on;
+      ope_refugo.readOnly = false;
+      ope_refugo.disabled = false;
     }
     if(ope_saco_caixa){
-      ope_saco_caixa.readOnly = !on;
-      ope_saco_caixa.disabled = !on;
+      ope_saco_caixa.readOnly = false;
+      ope_saco_caixa.disabled = false;
     }
     if(ope_obs){
-      ope_obs.readOnly = !on;
-      ope_obs.disabled = !on;
+      ope_obs.readOnly = false;
+      ope_obs.disabled = false;
     }
 
     if(modalSave){
-      modalSave.disabled = !on;
-      modalSave.style.display = on ? "inline-block" : "none";
+      modalSave.disabled = false;
+      modalSave.style.display = "inline-block";
     }
   }
 
@@ -685,7 +696,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     // Observacoes
     if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
-setOpEditEnabled(!isOpEncerrada(op));
+setOpEditEnabled(true);
 
     if(modalBackdrop){
       modalBackdrop.style.display = "flex";
@@ -720,18 +731,14 @@ setOpEditEnabled(!isOpEncerrada(op));
 
   if(modalSave){
     modalSave.addEventListener("click", async function(){
-      if(!currentOp || !currentOp.id){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
         alert("OP invalida.");
         return;
       }
 
-      if(isOpEncerrada(currentOp)){
-        alert("OP encerrada: somente leitura.");
-        return;
-      }
-
       const payload = {
-        op_id: currentOp.id,
+        op_id: opId,
         qtd_mat_bom: Number(ope_mat_bom.value || 0),
         qtd_cost_elas: Number(ope_cost_elas.value || 0),
         refugo: Number(ope_refugo.value || 0),
