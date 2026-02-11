@@ -1,4 +1,8 @@
-﻿fix: corrigir SyntaxError no historico.html (renderMsgRow)
+﻿feat: bobina por evento (timestamp) no backend
 
-- remove token duplicado 'function renderMsgRowfunction' que quebrava o JS
-- pagina historico volta a carregar e executar fetchHistorico()
+- cria tabela ordens_producao_bobina_eventos (seq, started_at/ended_at, start_abs_pcs/end_abs_pcs)
+- op_iniciar cria evento seq=0 com baseline absoluto
+- op_editar ao adicionar bobina fecha evento atual e cria novo (troca por timestamp)
+- op_encerrar fecha ultimo evento aberto
+- historico por bobina passa a preferir eventos e retorna tempo_consumo_min e pcs_total por intervalo
+- fallback mantido: alocacao por capacidade quando nao houver eventos

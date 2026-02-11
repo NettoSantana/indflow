@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-10 22:20 America/Bahia
-MOTIVO: corrigir SyntaxError no JS (renderMsgRow) que impedia carregar a pagina.
+LAST_RECODE: 2026-02-11 20:15 America/Bahia
+MOTIVO: substituir campo Idx por Tempo de consumo e exibir hora inicial/final por bobina no modal.
 -->
 
 {#
@@ -761,10 +761,32 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     }
 
     // Read-only context
+    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
+    const endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    const startedStr = fmtIsoDateTimeLocal(startedRaw);
+    const endedStr = fmtIsoDateTimeLocal(endedRaw);
+
+    let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
+    if(!(tempoMin > 0)){
+      try{
+        const ds = new Date(String(startedRaw || ""));
+        const de = new Date(String(endedRaw || ""));
+        if(!isNaN(ds.getTime()) && !isNaN(de.getTime())){
+          const diff = Math.floor((de.getTime() - ds.getTime()) / 60000);
+          if(diff > 0) tempoMin = diff;
+        }
+      }catch(e){
+        // ignore
+      }
+    }
+
     grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
-    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtFixed3(derivedMetroConsumido), "col-3"));
     grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
-    grid.appendChild(fieldRO("Idx", idx, "col-3"));
+    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtFixed3(derivedMetroConsumido), "col-3"));
+    grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
+
+    grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
+    grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
 
     // Editable (yellow)
     const fCost = fieldEdit("Qtd. cost. elas.", vCost, "col-3", "qtd_cost_elas");
