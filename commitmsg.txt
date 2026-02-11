@@ -1,4 +1,5 @@
-﻿feat: exibir tempo de consumo e horarios por bobina no historico
+﻿feat: gerar PDF no modal e formatar metros com 2 casas (floor)
 
-- remove campo Idx do card de bobina
-- adiciona Tempo de consumo (min), Hora inicial e Hora final por bobina no modal
+- adiciona botao Gerar PDF no rodape do modal OP
+- gera uma pagina de impressao (print) para salvar como PDF
+- metro linear consumido agora exibe 2 casas decimais arredondado para baixo
