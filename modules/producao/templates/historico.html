@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-11 21:05 America/Bahia
-MOTIVO: adicionar botao Gerar PDF no modal e formatar metros com 2 casas decimais (floor), sem reintroduzir idx.
+LAST_RECODE: 2026-02-16 12:00 America/Bahia
+MOTIVO: Forcar campos calculados da bobina a iniciar zerados/vazios ao abrir modal antes do primeiro update, evitando valores fantasma.
 -->
 
 {#
@@ -688,7 +688,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     return String(bobinasItens.length) + " bobina(s) | " + String(Math.floor(totalM)) + " m";
   }
 
-  function createBobinaCard(item, idx, convMporPcs){
+  function createBobinaCard(item, idx, convMporPcs, opts){
     const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
     const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
     const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
@@ -751,6 +751,8 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     }
 
     const conv = num0(convMporPcs);
+    opts = opts || {};
+    const forceZeroLive = !!opts.forceZeroLive;
 
     let derivedPcs = pcsTotal;
     if(!(derivedPcs > 0) && comprimentoM > 0 && conv > 0){
@@ -764,9 +766,18 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     // Read-only context
     const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
-    const endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
-    const endedStr = fmtIsoDateTimeLocal(endedRaw);
+    let endedStr = fmtIsoDateTimeLocal(endedRaw);
+
+    // Alguns backends preenchem ended_at igual started_at na criacao. Tratar como "ainda nao encerrada".
+    const placeholderEnd = (endedStr && endedStr !== "-" && endedStr === startedStr);
+    if(placeholderEnd){
+      endedRaw = "";
+      endedStr = "";
+    }
+
+    const bobinaAberta = (!endedRaw) || placeholderEnd;
 
     let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
     if(!(tempoMin > 0)){
@@ -780,6 +791,14 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       }catch(e){
         // ignore
       }
+    }
+
+    // Forcar inicio zerado/vazio enquanto a bobina estiver aberta (antes do primeiro update)
+    if(forceZeroLive && bobinaAberta){
+      derivedPcs = 0;
+      derivedMetroConsumido = 0;
+      tempoMin = 0;
+      endedStr = "";
     }
 
     grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
@@ -841,8 +860,17 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     if(opv_gr_fio) opv_gr_fio.value = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
     if(opv_conv) opv_conv.value = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
 
-    if(opv_started) opv_started.value = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
-    if(opv_ended) opv_ended.value = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+    const opStatus = safeText(op && op.status).toUpperCase();
+    const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
+    const forceZeroLive = !opEncerrada;
+
+    const opStartedStr = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
+    let opEndedStr = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+    if(opEndedStr && opEndedStr !== "-" && opEndedStr === opStartedStr) opEndedStr = "";
+    if(forceZeroLive) opEndedStr = "";
+
+    if(opv_started) opv_started.value = opStartedStr;
+    if(opv_ended) opv_ended.value = opEndedStr;
 
     if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
 
@@ -854,7 +882,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs);
+        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
@@ -873,7 +901,7 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
         qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
       };
 
-      const card = createBobinaCard(legacy, 0, convMporPcs);
+      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
     }
 
