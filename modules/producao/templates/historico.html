@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-16 12:00 America/Bahia
-MOTIVO: Forcar campos calculados da bobina a iniciar zerados/vazios ao abrir modal antes do primeiro update, evitando valores fantasma.
+LAST_RECODE: 2026-02-16 13:30 America/Bahia
+MOTIVO: Forcar campos da bobina a iniciar zerados no modal para OP do dia atual, independente do status no historico, evitando valores fantasmas antes do primeiro update.
 -->
 
 {#
@@ -543,6 +543,15 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     return s;
   }
 
+  function todayIsoLocal(){
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
+
   function dateValueToISO(value){
     if(!value || typeof value !== "string") return "";
     const s = value.trim();
@@ -862,7 +871,11 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
 
     const opStatus = safeText(op && op.status).toUpperCase();
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
-    const forceZeroLive = !opEncerrada;
+    const diaRef = safeText(op && op.__dia_ref);
+    const isHoje = (diaRef && diaRef === todayIsoLocal());
+    // Regra: para OP do dia atual, iniciar com campos zerados no modal (evita valores "fantasma").
+    // Para dias anteriores, respeitar os valores do historico.
+    const forceZeroLive = (!opEncerrada) || isHoje;
 
     const opStartedStr = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
     let opEndedStr = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
@@ -1196,7 +1209,9 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       tbody.appendChild(trOp);
 
       trOp.addEventListener("click", function(){
-        openModal(op);
+        const op2 = Object.assign({}, op || {});
+        op2.__dia_ref = getRowDateISO(r);
+        openModal(op2);
       });
     });
   }
