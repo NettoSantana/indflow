@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-16 13:30 America/Bahia
-MOTIVO: Forcar campos da bobina a iniciar zerados no modal para OP do dia atual, independente do status no historico, evitando valores fantasmas antes do primeiro update.
+LAST_RECODE: 2026-02-16 13:35 America/Bahia
+MOTIVO: Forcar campos calculados da bobina a iniciar zerados no modal para OP ativa do dia, sem depender de ended_at da bobina (backend pode popular ended_at prematuramente).
 -->
 
 {#
@@ -802,8 +802,9 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       }
     }
 
-    // Forcar inicio zerado/vazio enquanto a bobina estiver aberta (antes do primeiro update)
-    if(forceZeroLive && bobinaAberta){
+    // Forcar inicio zerado/vazio no modal para OP ativa do dia (evita valores fantasmas antes do primeiro update)
+    // Nao depender de ended_at da bobina, porque o backend pode popular ended_at prematuramente.
+    if(forceZeroLive){
       derivedPcs = 0;
       derivedMetroConsumido = 0;
       tempoMin = 0;
