@@ -1,5 +1,6 @@
-﻿feat: gerar PDF no modal e formatar metros com 2 casas (floor)
+﻿feat: gerar pdf no modal e formatar metros com 2 casas (floor)
 
-- adiciona botao Gerar PDF no rodape do modal OP
-- gera uma pagina de impressao (print) para salvar como PDF
-- metro linear consumido agora exibe 2 casas decimais arredondado para baixo
+- adiciona botao Gerar PDF no rodape do modal
+- abre nova janela com layout de impressao e chama window.print()
+- metro linear consumido exibido com 2 casas decimais usando floor + toFixed(2)
+- nao reintroduz idx

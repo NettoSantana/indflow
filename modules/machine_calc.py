@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-10 13:44 America/Bahia
-# MOTIVO: abrir nova hora sempre zerada (baseline=esp_absoluto), evitando herdar contagem da hora anterior.
+# LAST_RECODE: 2026-02-16 10:30 America/Bahia
+# MOTIVO: corrigir indexacao horaria 24h (00-23) e virada de dia em 00:01 para nao perder contagem entre 00:00-04:59.
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -13,7 +13,7 @@ UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 # ============================================================
 TZ_BAHIA = ZoneInfo("America/Bahia")
 
-# Dia operacional vira às 05:00 (inicio do turno)
+# Dia operacional vira às 00:01 (inicio do dia operacional)
 DIA_OPERACIONAL_VIRA = time(00,1)
 
 
@@ -46,11 +46,11 @@ def agora_ref(m, fallback: datetime | None = None) -> datetime:
 
 def _dia_operacional_ref(agora: datetime) -> str:
     """
-    Dia operacional:
-      - de 23:59 até 23:58 do dia seguinte.
+    Dia operacional (virada em 00:01):
+      - de 00:01 até 00:00 do dia seguinte.
     Logo:
-      - antes de 23:59 => ainda é "dia operacional" de ontem
-      - a partir de 23:59 => vira para o dia de hoje
+      - antes de 00:01 => pertence ao dia operacional de ontem
+      - a partir de 00:01 => pertence ao dia operacional de hoje
     """
     if agora.time() >= DIA_OPERACIONAL_VIRA:
         return agora.date().isoformat()
@@ -181,6 +181,11 @@ def calcular_ultima_hora_idx(m, agora: datetime | None = None):
 
     if agora is None:
         agora = now_bahia()
+    # Se a tabela horaria for 24h (00-23), indexa direto pela hora do relogio.
+    # Isso evita perder contagem entre 00:00-04:59 quando turno_inicio fica em 05:00.
+    if isinstance(horas, (list, tuple)) and len(horas) == 24:
+        return int(getattr(agora, 'hour', 0))
+
     inicio_dt = get_turno_inicio_dt(m, agora)
     if not inicio_dt:
         return None
@@ -837,8 +842,8 @@ def aplicar_derivados_ml(m):
 
 # =========================
 # PATCH ADDITIVO (NAO REMOVE NADA)
-# LAST_RECODE: 2026-02-04 America/Bahia
-# MOTIVO: Recalcular producao_diaria em tempo real a partir da producao_horaria
+# LAST_RECODE: 2026-02-16 10:30 America/Bahia
+# MOTIVO: corrigir indexacao horaria 24h (00-23) e virada de dia em 00:01 para nao perder contagem entre 00:00-04:59.
 # =========================
 from datetime import datetime
 try:
@@ -858,7 +863,7 @@ def _dia_operacional_str_safe(dt):
     try:
         if dt.hour > 0 or (dt.hour == 0 and dt.minute >= 1):
             return dt.date().isoformat()
-        return (dt.date()).isoformat()
+        return (dt.date() - timedelta(days=1)).isoformat()
     except Exception:
         return dt.date().isoformat()
 
