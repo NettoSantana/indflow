@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-11 20:55 America/Bahia
-# MOTIVO: Implementar bobinas por evento (timestamp/baseline) para calcular pcs/metro/tempo por bobina; manter compatibilidade com alocacao por capacidade e fechamento manual.
+# LAST_RECODE: 2026-02-17 12:47 America/Bahia
+# MOTIVO: Corrigir encerramento de OP/bobina: usar esp_last mais recente (max baseline_diario x producao_horaria), remover fechamento indevido no /op/status e fechar ultima bobina no /op/encerrar.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -73,38 +73,60 @@ machine_data = {}
 
 def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
     """Retorna o ultimo valor absoluto (esp_last) conhecido para a maquina.
-    Fonte primaria: baseline_diario. Fallback: producao_horaria.
+
+    Problema observado:
+    - baseline_diario pode ficar atrasado (ex.: ESP sem alimentar, queda de internet)
+      e, quando isso acontece, o calculo de pcs/metros por OP/bobina fica errado.
+
+    Regra aplicada:
+    - Busca esp_last em baseline_diario e em producao_horaria e usa o MAIOR valor valido.
+      Assim, se uma das fontes estiver atrasada, ainda usamos o contador mais recente.
     """
     try:
         cur = conn.cursor()
 
-        row = cur.execute(
-            """
-            SELECT esp_last
-            FROM baseline_diario
-            WHERE lower(machine_id)=lower(?)
-            ORDER BY dia_ref DESC, updated_at DESC, id DESC
-            LIMIT 1
-            """,
-            (machine_id,),
-        ).fetchone()
-        if row and row[0] is not None:
-            return int(row[0])
+        esp_bd = None
+        esp_ph = None
 
-        row = cur.execute(
-            """
-            SELECT esp_last
-            FROM producao_horaria
-            WHERE lower(machine_id)=lower(?)
-            ORDER BY data_ref DESC, hora_idx DESC, updated_at DESC, id DESC
-            LIMIT 1
-            """,
-            (machine_id,),
-        ).fetchone()
-        if row and row[0] is not None:
-            return int(row[0])
+        try:
+            row = cur.execute(
+                """
+                SELECT esp_last
+                FROM baseline_diario
+                WHERE lower(machine_id)=lower(?)
+                ORDER BY dia_ref DESC, updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                (machine_id,),
+            ).fetchone()
+            if row and row[0] is not None:
+                esp_bd = int(row[0])
+        except Exception:
+            esp_bd = None
 
-        return 0
+        try:
+            row = cur.execute(
+                """
+                SELECT esp_last
+                FROM producao_horaria
+                WHERE lower(machine_id)=lower(?)
+                ORDER BY data_ref DESC, hora_idx DESC, updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                (machine_id,),
+            ).fetchone()
+            if row and row[0] is not None:
+                esp_ph = int(row[0])
+        except Exception:
+            esp_ph = None
+
+        candidatos = []
+        if isinstance(esp_bd, int) and esp_bd >= 0:
+            candidatos.append(esp_bd)
+        if isinstance(esp_ph, int) and esp_ph >= 0:
+            candidatos.append(esp_ph)
+
+        return max(candidatos) if candidatos else 0
     except Exception:
         return 0
 
@@ -1724,13 +1746,6 @@ def op_status():
     with _get_conn() as conn:
         esp_atual = _get_current_esp_abs(conn, machine_id)
 
-    # Fechar evento da ultima bobina no encerramento (fim = encerramento da OP)
-    try:
-        if op_id > 0:
-            _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual))
-    except Exception:
-        # Nao bloquear encerramento por falha no evento
-        pass
 
     baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
     op_pcs_live = max(0, int(esp_atual) - int(baseline_pcs))
@@ -2027,6 +2042,14 @@ def op_encerrar():
 
     baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
     op_pcs = max(0, int(esp_atual) - int(baseline_pcs))
+    # Fecha o evento da ultima bobina no encerramento (fim = encerramento da OP)
+    # Isso garante que pcs_total/metro_consumido/tempo fiquem consistentes no historico.
+    try:
+        if op_id > 0:
+            _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual))
+    except Exception:
+        # Nao bloquear encerramento por falha no evento
+        pass
 
     try:
         conv = float(op.get("op_conv_m_por_pcs") or 0)
