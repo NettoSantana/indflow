@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-16 13:35 America/Bahia
-MOTIVO: Forcar campos calculados da bobina a iniciar zerados no modal para OP ativa do dia, sem depender de ended_at da bobina (backend pode popular ended_at prematuramente).
+LAST_RECODE: 2026-02-17 15:20 America/Bahia
+MOTIVO: Corrigir regra forceZeroLive para zerar somente enquanto nao houver producao real na OP ativa do dia; permitir atualizacao normal.
 -->
 
 {#
@@ -874,9 +874,30 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
     const diaRef = safeText(op && op.__dia_ref);
     const isHoje = (diaRef && diaRef === todayIsoLocal());
-    // Regra: para OP do dia atual, iniciar com campos zerados no modal (evita valores "fantasma").
-    // Para dias anteriores, respeitar os valores do historico.
-    const forceZeroLive = (!opEncerrada) || isHoje;
+    // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
+    // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
+    let temProducaoReal = false;
+    try {
+      const itensCheck = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+      let accPcs = 0;
+      let accMetro = 0;
+      let accMatBom = 0;
+      let accTempo = 0;
+      if(Array.isArray(itensCheck)){
+        itensCheck.forEach((it) => {
+          accPcs += num0(it && (it.pcs_total ?? it.total_pcs ?? 0));
+          accMetro += num0(it && (it.metro_consumido ?? it.metro_linear_consumido ?? 0));
+          accMatBom += num0(it && (it.qtd_mat_bom ?? it.mat_bom ?? 0));
+          accTempo += num0(it && (it.tempo_consumo_min ?? it.tempo_min ?? 0));
+        });
+      }
+      const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
+      const opMetros = num0(op && (op.op_metros ?? op.total_m ?? 0));
+      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0);
+    } catch(e) { temProducaoReal = false; }
+
+    const isLiveHoje = (!opEncerrada) && isHoje;
+    const forceZeroLive = isLiveHoje && !temProducaoReal;
 
     const opStartedStr = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
     let opEndedStr = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
