@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-17 12:47 America/Bahia
-# MOTIVO: Corrigir encerramento de OP/bobina: usar esp_last mais recente (max baseline_diario x producao_horaria), remover fechamento indevido no /op/status e fechar ultima bobina no /op/encerrar.
+# LAST_RECODE: 2026-02-17 17:40 America/Bahia
+# MOTIVO: Corrigir bobina fantasma ao adicionar novas bobinas: garantir baseline start_abs_pcs valido (monotonico) usando ultimo evento/ baseline da OP quando esp_abs estiver 0/atrasado.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -130,6 +130,61 @@ def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
     except Exception:
         return 0
 
+
+def _get_safe_esp_abs_for_bobina_event(conn: sqlite3.Connection, machine_id: str, op_id: int, op_baseline_pcs: int) -> int:
+    """Retorna um esp_abs seguro para abertura/fechamento de evento de bobina.
+
+    Problema observado:
+    - Ao adicionar uma nova bobina via /op/editar, o esp_abs pode vir 0 ou atrasado,
+      fazendo a bobina nova nascer com start_abs_pcs=0 e aparecer producao "fantasma".
+
+    Regra:
+    - Usa o esp_abs mais recente disponivel.
+    - Se esp_abs estiver 0/None/menor que o ultimo absoluto da OP, usa o ultimo absoluto conhecido
+      (end_abs_pcs/start_abs_pcs do ultimo evento) ou o baseline_pcs da OP.
+    """
+    try:
+        esp_atual = _get_current_esp_abs(conn, machine_id)
+    except Exception:
+        esp_atual = 0
+
+    last_abs = None
+    try:
+        cur = conn.cursor()
+        row = cur.execute(
+            """
+            SELECT end_abs_pcs, start_abs_pcs
+            FROM ordens_producao_bobina_eventos
+            WHERE op_id = ?
+            ORDER BY seq DESC
+            LIMIT 1
+            """,
+            (int(op_id),),
+        ).fetchone()
+        if row:
+            if row[0] is not None:
+                last_abs = int(row[0])
+            elif row[1] is not None:
+                last_abs = int(row[1])
+    except Exception:
+        last_abs = None
+
+    if last_abs is None:
+        try:
+            last_abs = int(op_baseline_pcs or 0)
+        except Exception:
+            last_abs = 0
+
+    try:
+        esp_atual_i = int(esp_atual or 0)
+    except Exception:
+        esp_atual_i = 0
+
+    if esp_atual_i <= 0:
+        return int(last_abs or 0)
+    if esp_atual_i < int(last_abs or 0):
+        return int(last_abs or 0)
+    return esp_atual_i
 def get_machine(machine_id: str):
     if machine_id not in machine_data:
         machine_data[machine_id] = {
@@ -1950,8 +2005,9 @@ def op_editar():
             # Considera apenas adicionados no fim (comportamento do front: "Adicionar bobina")
             added = new_list[len(prev_list):]
             if added:
+                op_baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
                 with _get_conn() as conn:
-                    esp_atual = _get_current_esp_abs(conn, machine_id)
+                    esp_atual = _get_safe_esp_abs_for_bobina_event(conn, machine_id, op_id, op_baseline_pcs)
                 ts_now = _now_iso()
 
                 # Fecha a bobina atual (ultima aberta)

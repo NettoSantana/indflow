@@ -1,6 +1,5 @@
-﻿feat: gerar pdf no modal e formatar metros com 2 casas (floor)
+﻿fix: encerrar OP fecha ultima bobina e usa esp_last mais recente
 
-- adiciona botao Gerar PDF no rodape do modal
-- abre nova janela com layout de impressao e chama window.print()
-- metro linear consumido exibido com 2 casas decimais usando floor + toFixed(2)
-- nao reintroduz idx
+- _get_current_esp_abs agora usa max(baseline_diario, producao_horaria) para evitar contador atrasado quando ESP fica offline
+- remove fechamento indevido no /op/status
+- fecha ultima bobina no /op/encerrar para consolidar pcs/metro/tempo corretamente
