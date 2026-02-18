@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-18 12:24 America/Bahia
-# MOTIVO: Impedir bobina fantasma ao adicionar bobinas sem pulso do ESP: so usar esp_last para fechar evento em aberto quando updated_at for >= started_at.
+# LAST_RECODE: 2026-02-18 16:27 America/Bahia
+# MOTIVO: Corrigir bobina fantasma/inversao: sequencia de eventos passa a usar max(seq)+1 do banco (nunca sobrescreve seq=0) e so fecha/cria quando realmente adiciona novas bobinas.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -1311,6 +1311,37 @@ def _close_last_bobina_event(op_id: int, ended_at: str, end_abs_pcs: int):
     finally:
         if conn:
             conn.close()
+
+
+def _get_bobina_event_next_seq(op_id: int) -> int:
+    """Retorna o proximo seq disponivel (max(seq)+1) para eventos de bobina da OP."""
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT MAX(seq)
+            FROM ordens_producao_bobina_eventos
+            WHERE op_id = ?
+            """,
+            (int(op_id),),
+        )
+        row = cur.fetchone()
+        if not row or row[0] is None:
+            return 0
+        try:
+            return int(row[0]) + 1
+        except Exception:
+            return 0
+    except Exception:
+        return 0
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     """
     Busca OPs que cruzam o intervalo [day_min, day_max].
@@ -2065,44 +2096,77 @@ def op_editar():
             added = new_list[len(prev_list):]
             if added:
                 op_baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+                esp_mark = 0
                 with _get_conn() as conn:
+                    # esp_abs "do momento" pode vir 0/atrasado. Para evitar bobina nascer com start_abs errado,
+                    # garantimos monotonicidade usando o ultimo absoluto conhecido da OP.
                     esp_atual = _get_safe_esp_abs_for_bobina_event(conn, machine_id, op_id, op_baseline_pcs)
+                    last_abs = None
+                    try:
+                        cur = conn.cursor()
+                        row = cur.execute(
+                            """
+                            SELECT end_abs_pcs, start_abs_pcs
+                            FROM ordens_producao_bobina_eventos
+                            WHERE op_id = ?
+                            ORDER BY seq DESC
+                            LIMIT 1
+                            """,
+                            (int(op_id),),
+                        ).fetchone()
+                        if row:
+                            if row[0] is not None:
+                                last_abs = int(row[0])
+                            elif row[1] is not None:
+                                last_abs = int(row[1])
+                    except Exception:
+                        last_abs = None
+                    try:
+                        esp_mark = max(int(esp_atual or 0), int(last_abs or 0), int(op_baseline_pcs or 0))
+                    except Exception:
+                        esp_mark = int(op_baseline_pcs or 0)
                 ts_now = _now_iso()
 
-                # Fecha a bobina atual (ultima aberta)
+                # Regra robusta: nunca depender de len(prev_list)/added para sequencia,
+                # porque isso pode estar desatualizado e sobrescrever seq=0 (inversao).
+                # Usamos o proximo seq real no banco (max(seq)+1).
                 try:
-                    _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(esp_atual))
+                    next_seq = int(_get_bobina_event_next_seq(op_id))
                 except Exception:
-                    pass
+                    next_seq = 0
 
-                # Cria eventos para cada bobina adicionada (sequencia crescente)
-                base_seq = max(0, len(prev_list))
-                for offset, comp in enumerate(added):
+                new_total = 0
+                try:
+                    new_total = int(len(bobinas_list))
+                except Exception:
+                    new_total = 0
+
+                if new_total > next_seq:
+                    # Fecha a bobina atual (ultima aberta) com o esp_abs "seguro" (monotonico)
+                    # Somente quando realmente adicionamos novas bobinas.
                     try:
-                        _upsert_bobina_event_start(
-                            op_id=op_id,
-                            seq=int(base_seq + offset),
-                            comprimento_m=int(comp or 0),
-                            started_at=ts_now,
-                            start_abs_pcs=int(esp_atual),
-                        )
+                        if next_seq > 0:
+                            _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(esp_mark))
                     except Exception:
-                        continue
-    except Exception:
-        pass
+                        pass
 
-
-    payload = {
-        "os": os_,
-        "lote": lote,
-        "operador": operador,
-        "bobina": bobina,
-        "gr_fio": gr_fio,
-        "observacoes": observacoes,
-    }
-
-    try:
-        _update_op_row(op_id, payload)
+                    # Cria eventos para as novas bobinas que ainda nao existem no banco.
+                    for seq in range(int(next_seq), int(new_total)):
+                        try:
+                            comp = bobinas_list[seq] if seq < len(bobinas_list) else 0
+                        except Exception:
+                            comp = 0
+                        try:
+                            _upsert_bobina_event_start(
+                                op_id=op_id,
+                                seq=int(seq),
+                                comprimento_m=int(comp or 0),
+                                started_at=ts_now,
+                                start_abs_pcs=int(esp_mark),
+                            )
+                        except Exception:
+                            continue
+       _update_op_row(op_id, payload)
     except Exception:
         return jsonify({"error": "Falha ao atualizar OP no banco"}), 500
 
