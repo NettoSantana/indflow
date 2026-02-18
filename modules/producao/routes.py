@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-18 15:54 America/Bahia
-# MOTIVO: Corrigir bobina fantasma ao adicionar novas bobinas: so fechar evento em aberto com esp_snapshot quando houver pulso (esp_abs > start_abs efetivo) e garantir baseline monotonic entre bobinas.
+# LAST_RECODE: 2026-02-18 13:25 America/Bahia
+# MOTIVO: Corrigir bobina 'fantasma' priorizando MAIOR esp_last no snapshot/esp_abs e corrigir SyntaxError (linha esp_snapshot_ts).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -99,7 +99,8 @@ def _get_current_esp_snapshot(conn: sqlite3.Connection, machine_id: str):
                 SELECT esp_last, updated_at
                 FROM baseline_diario
                 WHERE lower(machine_id)=lower(?)
-                ORDER BY dia_ref DESC, updated_at DESC, id DESC
+                  AND esp_last IS NOT NULL
+             ORDER BY esp_last DESC, COALESCE(updated_at, created_at) DESC, id DESC
                 LIMIT 1
                 """,
                 (machine_id,),
@@ -118,7 +119,8 @@ def _get_current_esp_snapshot(conn: sqlite3.Connection, machine_id: str):
                 SELECT esp_last, updated_at
                 FROM producao_horaria
                 WHERE lower(machine_id)=lower(?)
-                ORDER BY data_ref DESC, hora_idx DESC, updated_at DESC, id DESC
+                  AND esp_last IS NOT NULL
+             ORDER BY esp_last DESC, COALESCE(updated_at, created_at) DESC, id DESC
                 LIMIT 1
                 """,
                 (machine_id,),
@@ -1389,7 +1391,8 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                         esp_snapshot_abs, esp_snapshot_ts = _get_current_esp_snapshot(conn2, r[1] or "")
                 except Exception:
                     esp_snapshot_abs = None
-                    esp_snapshot_ts = None            prev_end_abs_eff = None
+                    esp_snapshot_ts = None
+                    prev_end_abs_eff = None
 
             for ev in eventos:
                 seq = int(ev.get("seq", 0) or 0)
