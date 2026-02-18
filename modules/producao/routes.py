@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-17 17:40 America/Bahia
-# MOTIVO: Corrigir bobina fantasma ao adicionar novas bobinas: garantir baseline start_abs_pcs valido (monotonico) usando ultimo evento/ baseline da OP quando esp_abs estiver 0/atrasado.
+# LAST_RECODE: 2026-02-18 12:24 America/Bahia
+# MOTIVO: Impedir bobina fantasma ao adicionar bobinas sem pulso do ESP: so usar esp_last para fechar evento em aberto quando updated_at for >= started_at.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -71,27 +71,32 @@ machine_data = {}
 
 
 
-def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
-    """Retorna o ultimo valor absoluto (esp_last) conhecido para a maquina.
+def _get_current_esp_snapshot(conn: sqlite3.Connection, machine_id: str):
+    """Retorna um snapshot seguro do contador absoluto do ESP.
 
-    Problema observado:
-    - baseline_diario pode ficar atrasado (ex.: ESP sem alimentar, queda de internet)
-      e, quando isso acontece, o calculo de pcs/metros por OP/bobina fica errado.
+    Retorna:
+      (esp_abs:int, updated_at_iso:str|None)
 
-    Regra aplicada:
-    - Busca esp_last em baseline_diario e em producao_horaria e usa o MAIOR valor valido.
-      Assim, se uma das fontes estiver atrasada, ainda usamos o contador mais recente.
+    Observacao importante (causa do 'fantasma'):
+    - Ao adicionar nova bobina/abrir OP sem receber novo pulso do ESP, o backend pode ter
+      um esp_last alto, porem com updated_at antigo (antes do inicio da bobina).
+      Se usarmos esse esp_last para 'fechar virtualmente' a bobina atual, a UI mostra
+      producao que na verdade pertence a bobina anterior.
+
+    Regra:
+    - Busca esp_last e updated_at em baseline_diario e em producao_horaria.
+    - Escolhe o MAIOR esp_last valido. Em empate, escolhe o mais recente updated_at.
     """
     try:
         cur = conn.cursor()
 
-        esp_bd = None
-        esp_ph = None
+        cand = []
 
+        # baseline_diario
         try:
             row = cur.execute(
                 """
-                SELECT esp_last
+                SELECT esp_last, updated_at
                 FROM baseline_diario
                 WHERE lower(machine_id)=lower(?)
                 ORDER BY dia_ref DESC, updated_at DESC, id DESC
@@ -100,14 +105,17 @@ def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
                 (machine_id,),
             ).fetchone()
             if row and row[0] is not None:
-                esp_bd = int(row[0])
+                esp = int(row[0])
+                ts = row[1]
+                cand.append((esp, ts))
         except Exception:
-            esp_bd = None
+            pass
 
+        # producao_horaria
         try:
             row = cur.execute(
                 """
-                SELECT esp_last
+                SELECT esp_last, updated_at
                 FROM producao_horaria
                 WHERE lower(machine_id)=lower(?)
                 ORDER BY data_ref DESC, hora_idx DESC, updated_at DESC, id DESC
@@ -116,21 +124,46 @@ def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
                 (machine_id,),
             ).fetchone()
             if row and row[0] is not None:
-                esp_ph = int(row[0])
+                esp = int(row[0])
+                ts = row[1]
+                cand.append((esp, ts))
         except Exception:
-            esp_ph = None
+            pass
 
-        candidatos = []
-        if isinstance(esp_bd, int) and esp_bd >= 0:
-            candidatos.append(esp_bd)
-        if isinstance(esp_ph, int) and esp_ph >= 0:
-            candidatos.append(esp_ph)
+        if not cand:
+            return 0, None
 
-        return max(candidatos) if candidatos else 0
+        # Normaliza e escolhe melhor candidato
+        def _ts_key(ts):
+            try:
+                if not ts:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+                # aceita ISO com timezone ou sem
+                dt = datetime.fromisoformat(str(ts))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+
+        # ordena por esp_abs DESC e updated_at DESC
+        cand_sorted = sorted(cand, key=lambda x: (int(x[0] or 0), _ts_key(x[1])), reverse=True)
+        best_esp = int(cand_sorted[0][0] or 0)
+        best_ts = cand_sorted[0][1]
+        if best_esp < 0:
+            best_esp = 0
+        return best_esp, best_ts
+    except Exception:
+        return 0, None
+
+
+def _get_current_esp_abs(conn: sqlite3.Connection, machine_id: str) -> int:
+    """Compat: retorna apenas esp_abs (mantem chamadas antigas)."""
+    try:
+        esp, _ts = _get_current_esp_snapshot(conn, machine_id)
+        return int(esp or 0)
     except Exception:
         return 0
-
-
 def _get_safe_esp_abs_for_bobina_event(conn: sqlite3.Connection, machine_id: str, op_id: int, op_baseline_pcs: int) -> int:
     """Retorna um esp_abs seguro para abertura/fechamento de evento de bobina.
 
@@ -1133,6 +1166,28 @@ def _minutes_between_iso(start_iso: str, end_iso: str) -> int:
         return 0
 
 
+def _iso_to_dt_safe(s: str):
+    try:
+        if not s:
+            return None
+        dt = datetime.fromisoformat(str(s))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _snapshot_cobre_evento(snapshot_ts_iso: str, evento_start_iso: str) -> bool:
+    """True se o snapshot de esp_last e mais novo (ou igual) ao inicio do evento.
+    Se o snapshot for mais antigo, significa que ainda nao houve pulso do ESP apos o evento iniciar.
+    Nesse caso, nao podemos usar esp_last para fechar virtualmente a bobina, senao nasce 'fantasma'.
+    """
+    dt_snap = _iso_to_dt_safe(snapshot_ts_iso)
+    dt_ev = _iso_to_dt_safe(evento_start_iso)
+    if not dt_snap or not dt_ev:
+        return False
+    return dt_snap >= dt_ev
 def _fetch_bobina_eventos(op_id: int) -> list[dict]:
     out: list[dict] = []
     try:
@@ -1324,13 +1379,17 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
             if status := (r[10] or ""):
                 pass
             # Se OP esta ativa, usamos esp atual como "fim" do ultimo evento em aberto.
-            esp_atual_abs = None
+            # Se OP esta ativa, so usamos esp_last para "fechar virtualmente" a bobina em aberto
+            # quando houver pulso apos o inicio do evento. Isso impede "bobina fantasma" ao adicionar bobinas.
+            esp_snapshot_abs = None
+            esp_snapshot_ts = None
             if (r[10] or "") == "ATIVA":
                 try:
                     with _get_conn() as conn2:
-                        esp_atual_abs = _get_current_esp_abs(conn2, r[1] or "")
+                        esp_snapshot_abs, esp_snapshot_ts = _get_current_esp_snapshot(conn2, r[1] or "")
                 except Exception:
-                    esp_atual_abs = None
+                    esp_snapshot_abs = None
+                    esp_snapshot_ts = None
 
             for ev in eventos:
                 seq = int(ev.get("seq", 0) or 0)
@@ -1343,9 +1402,9 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 end_abs = ev.get("end_abs_pcs", None)
 
                 if end_abs is None:
-                    # Evento em aberto: se OP ativa, fecha virtualmente com esp atual.
-                    if esp_atual_abs is not None:
-                        end_abs = int(esp_atual_abs)
+                    # Evento em aberto: so fecha virtualmente com esp_last se houver pulso apos o inicio do evento.
+                    if esp_snapshot_abs is not None and esp_snapshot_ts and _snapshot_cobre_evento(esp_snapshot_ts, ev_start):
+                        end_abs = int(esp_snapshot_abs)
                         if not ev_end:
                             ev_end = _now_iso()
                     else:
