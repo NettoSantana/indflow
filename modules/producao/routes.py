@@ -1332,6 +1332,13 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 except Exception:
                     esp_atual_abs = None
 
+            # Guardas anti-"fantasma": garante sequencia monotônica e só usa esp_atual no último evento aberto
+            last_end_abs: int | None = None
+            try:
+                last_seq = max(int(e.get("seq", 0) or 0) for e in eventos) if eventos else 0
+            except Exception:
+                last_seq = 0
+
             for ev in eventos:
                 seq = int(ev.get("seq", 0) or 0)
                 comprimento_m = int(ev.get("comprimento_m", 0) or 0)
@@ -1340,39 +1347,43 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 ev_end = _as_str(ev.get("ended_at"))
 
                 start_abs = int(ev.get("start_abs_pcs", 0) or 0)
-                end_abs = ev.get("end_abs_pcs", None)
+                end_abs_raw = ev.get("end_abs_pcs")
+                end_abs = None if end_abs_raw in (None, "") else int(end_abs_raw or 0)
 
+                # Se por algum motivo o start vier "voltando" (ex.: herança/bug), força a seguir o fim anterior
+                if last_end_abs is not None and start_abs < last_end_abs:
+                    start_abs = last_end_abs
+
+                # Se não tem end_abs, só o último evento (aberto) pode usar o esp_atual
                 if end_abs is None:
-                    # Evento em aberto: se OP ativa, fecha virtualmente com esp atual.
-                    if esp_atual_abs is not None:
-                        end_abs = int(esp_atual_abs)
+                    if op_status == "ATIVA" and seq == last_seq and esp_atual_abs is not None:
+                        end_abs = int(esp_atual_abs or 0)
                         if not ev_end:
-                            ev_end = _now_iso()
+                            ev_end = _now_iso(conn, machine_id)
                     else:
                         end_abs = start_abs
                         if not ev_end:
                             ev_end = ev_start
 
-                pcs_total = int(end_abs) - int(start_abs)
-                if pcs_total < 0:
-                    pcs_total = 0
+                if end_abs < start_abs:
+                    end_abs = start_abs
 
+                pcs_total = max(0, int(end_abs - start_abs))
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
-                tempo_consumo_min = _minutes_between_iso(ev_start, ev_end) if (ev_start and ev_end) else 0
+                tempo_consumo_min = _diff_min_iso(ev_start, ev_end) if (ev_start and ev_end) else 0
 
                 row_f = fechamento_map.get(seq, {})
                 qtd_cost_elas = int(row_f.get("qtd_cost_elas", 0) or 0)
                 refugo = int(row_f.get("refugo", 0) or 0)
                 qtd_saco_caixa = int(row_f.get("qtd_saco_caixa", 0) or 0)
 
-                qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
-                if qtd_mat_bom < 0:
-                    qtd_mat_bom = 0
+                # Mat bom: pcs_total - refugo (nunca negativo)
+                qtd_mat_bom = max(0, pcs_total - refugo)
 
                 bobinas_itens.append(
                     {
-                        "idx": seq,  # mantido por compatibilidade (no front vira tempo_consumo depois)
-                        "comprimento_m": int(comprimento_m or 0),
+                        "idx": seq,
+                        "comprimento_m": comprimento_m,
                         "pcs_total": int(pcs_total or 0),
                         "metro_consumido": float(metro_consumido or 0.0),
                         "tempo_consumo_min": int(tempo_consumo_min or 0),
@@ -1384,6 +1395,8 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                         "qtd_mat_bom": int(qtd_mat_bom or 0),
                     }
                 )
+
+                last_end_abs = int(end_abs or 0)
 
         elif bobinas_m:
             # Fallback (antigo): alocacao por capacidade (deterministica)
