@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-18 13:25 America/Bahia
-# MOTIVO: Corrigir bobina 'fantasma' priorizando MAIOR esp_last no snapshot/esp_abs e corrigir SyntaxError (linha esp_snapshot_ts).
+# PATH: indflow/modules/producao/routes.py
+# LAST_RECODE: 2026-02-18 12:24 America/Bahia
+# MOTIVO: Impedir bobina fantasma ao adicionar bobinas sem pulso do ESP: so usar esp_last para fechar evento em aberto quando updated_at for >= started_at.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -99,8 +99,7 @@ def _get_current_esp_snapshot(conn: sqlite3.Connection, machine_id: str):
                 SELECT esp_last, updated_at
                 FROM baseline_diario
                 WHERE lower(machine_id)=lower(?)
-                  AND esp_last IS NOT NULL
-             ORDER BY esp_last DESC, COALESCE(updated_at, created_at) DESC, id DESC
+                ORDER BY dia_ref DESC, updated_at DESC, id DESC
                 LIMIT 1
                 """,
                 (machine_id,),
@@ -119,8 +118,7 @@ def _get_current_esp_snapshot(conn: sqlite3.Connection, machine_id: str):
                 SELECT esp_last, updated_at
                 FROM producao_horaria
                 WHERE lower(machine_id)=lower(?)
-                  AND esp_last IS NOT NULL
-             ORDER BY esp_last DESC, COALESCE(updated_at, created_at) DESC, id DESC
+                ORDER BY data_ref DESC, hora_idx DESC, updated_at DESC, id DESC
                 LIMIT 1
                 """,
                 (machine_id,),
@@ -1392,7 +1390,6 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 except Exception:
                     esp_snapshot_abs = None
                     esp_snapshot_ts = None
-                    prev_end_abs_eff = None
 
             for ev in eventos:
                 seq = int(ev.get("seq", 0) or 0)
@@ -1401,49 +1398,23 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 ev_start = _as_str(ev.get("started_at"))
                 ev_end = _as_str(ev.get("ended_at"))
 
-                start_abs_raw = int(ev.get("start_abs_pcs", 0) or 0)
+                start_abs = int(ev.get("start_abs_pcs", 0) or 0)
                 end_abs = ev.get("end_abs_pcs", None)
-
-                # ---------------------------------------------------------
-                # BUG (bobina fantasma):
-                # - Ao adicionar bobina nova sem pulso do ESP, o snapshot (esp_last) pode estar
-                #   "atualizado" por timestamp, mas SEM aumento real no contador.
-                # - Se fecharmos virtualmente o evento em aberto apenas pelo timestamp,
-                #   a bobina nova aparece com pcs_total > 0 (herdando producao anterior).
-                #
-                # CORRECAO:
-                # 1) Garantir baseline monotonic entre bobinas (start_abs >= fim efetivo anterior).
-                # 2) So fechar virtualmente com esp_snapshot quando houver pulso real:
-                #    esp_snapshot_abs > start_abs_efetivo
-                # ---------------------------------------------------------
-                start_abs = start_abs_raw
-                if prev_end_abs_eff is not None and start_abs < prev_end_abs_eff:
-                    start_abs = prev_end_abs_eff
 
                 if end_abs is None:
                     # Evento em aberto: so fecha virtualmente com esp_last se houver pulso apos o inicio do evento.
-                    if (
-                        esp_snapshot_abs is not None
-                        and esp_snapshot_ts
-                        and _snapshot_cobre_evento(esp_snapshot_ts, ev_start)
-                        and int(esp_snapshot_abs) > int(start_abs)
-                    ):
+                    if esp_snapshot_abs is not None and esp_snapshot_ts and _snapshot_cobre_evento(esp_snapshot_ts, ev_start):
                         end_abs = int(esp_snapshot_abs)
                         if not ev_end:
                             ev_end = _now_iso()
                     else:
-                        end_abs = int(start_abs)
+                        end_abs = start_abs
                         if not ev_end:
                             ev_end = ev_start
-
-                # Garantir coerencia (nunca negativo)
-                if int(end_abs) < int(start_abs):
-                    end_abs = int(start_abs)
 
                 pcs_total = int(end_abs) - int(start_abs)
                 if pcs_total < 0:
                     pcs_total = 0
-                prev_end_abs_eff = int(end_abs)
 
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
                 tempo_consumo_min = _minutes_between_iso(ev_start, ev_end) if (ev_start and ev_end) else 0
@@ -2446,3 +2417,4 @@ def op_salvar():
             conn.close()
 
     return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"})
+
