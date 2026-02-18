@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-18 16:27 America/Bahia
-# MOTIVO: Corrigir bobina fantasma/inversao: sequencia de eventos passa a usar max(seq)+1 do banco (nunca sobrescreve seq=0) e so fecha/cria quando realmente adiciona novas bobinas.
+# LAST_RECODE: 2026-02-18 16:37 America/Bahia
+# MOTIVO: Corrigir IndentationError no op_editar (payload e indentacao do _update_op_row) para app voltar a subir no Railway.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2166,7 +2166,15 @@ def op_editar():
                             )
                         except Exception:
                             continue
-       _update_op_row(op_id, payload)
+        payload = {
+            "os": os_,
+            "lote": lote,
+            "operador": operador,
+            "bobina": bobina,
+            "gr_fio": gr_fio,
+            "observacoes": observacoes,
+        }
+        _update_op_row(op_id, payload)
     except Exception:
         return jsonify({"error": "Falha ao atualizar OP no banco"}), 500
 
