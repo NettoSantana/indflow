@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-17 15:20 America/Bahia
-MOTIVO: Corrigir regra forceZeroLive para zerar somente enquanto nao houver producao real na OP ativa do dia; permitir atualizacao normal.
+LAST_RECODE: 2026-02-18 17:35 America/Bahia
+MOTIVO: Opcao 1: Remover fallback de estimativa (comprimento/conv) no modal de bobinas; bobina nova inicia zerada ate receber pcs_total real do backend.
 -->
 
 {#
@@ -763,15 +763,10 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     opts = opts || {};
     const forceZeroLive = !!opts.forceZeroLive;
 
+    // Opcao 1: nao estimar pcs/metragem por comprimento/conv.
+    // Sem pcs_total real vindo do backend, o valor deve iniciar zerado e aguardar o primeiro update.
     let derivedPcs = pcsTotal;
-    if(!(derivedPcs > 0) && comprimentoM > 0 && conv > 0){
-      derivedPcs = Math.floor(comprimentoM / conv);
-    }
-
     let derivedMetroConsumido = metroConsumido;
-    if(!(derivedMetroConsumido > 0) && derivedPcs > 0 && conv > 0){
-      derivedMetroConsumido = derivedPcs * conv;
-    }
 
     // Read-only context
     const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
