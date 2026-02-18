@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-18 14:00 America/Bahia
-# MOTIVO: Corrigir bobinas fantasmas: ao adicionar bobinas, start_abs_pcs passa a usar apenas o ultimo absoluto confirmado pela propria OP (sem snapshot/esp_last).
+# LAST_RECODE: 2026-02-18 16:05 America/Bahia
+# MOTIVO: Fix bobinas fantasmas/inversao: ao adicionar bobina, fecha evento atual com esp_snapshot apenas se snapshot >= started_at do evento; caso contrario usa start_abs/end_abs do proprio evento (baseline da OP).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2065,44 +2065,72 @@ def op_editar():
             added = new_list[len(prev_list):]
             if added:
                 op_baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+                ts_now = _now_iso()
 
-                # Solucao definitiva (sem snapshot/esp_last):
-                # A nova bobina deve nascer baseada apenas no ultimo absoluto confirmado pela propria OP,
-                # para nunca herdar producao "fantasma" quando ainda nao houve pulso apos a troca.
-                last_confirmed_abs = int(op_baseline_pcs or 0)
+                # Fix estrutural: baseline da nova bobina vem do ultimo evento da OP.
+                # Usamos esp_snapshot apenas se ele for posterior (ou igual) ao started_at do evento atual.
+                end_abs_for_close = int(op_baseline_pcs or 0)
+                started_at_last_ev = None
                 with _get_conn() as conn:
+                    # Ultimo evento da OP (normalmente a bobina atual em aberto)
+                    last_start_abs = None
+                    last_end_abs = None
                     try:
                         cur = conn.cursor()
                         row = cur.execute(
                             """
-                            SELECT end_abs_pcs, start_abs_pcs
+                            SELECT started_at, end_abs_pcs, start_abs_pcs
                             FROM ordens_producao_bobina_eventos
                             WHERE op_id = ?
                             ORDER BY seq DESC
                             LIMIT 1
-                            """,
+                            """
+                            ,
                             (int(op_id),),
                         ).fetchone()
                         if row:
-                            if row[0] is not None:
-                                last_confirmed_abs = int(row[0])
-                            elif row[1] is not None:
-                                last_confirmed_abs = int(row[1])
+                            started_at_last_ev = row[0]
+                            last_end_abs = row[1]
+                            last_start_abs = row[2]
                     except Exception:
-                        last_confirmed_abs = int(op_baseline_pcs or 0)
+                        started_at_last_ev = None
+                        last_end_abs = None
+                        last_start_abs = None
 
-                ts_now = _now_iso()
+                    # Baseline confirmado pelo proprio evento (nunca inventa producao)
+                    if last_end_abs is not None:
+                        try:
+                            end_abs_for_close = int(last_end_abs)
+                        except Exception:
+                            end_abs_for_close = int(op_baseline_pcs or 0)
+                    elif last_start_abs is not None:
+                        try:
+                            end_abs_for_close = int(last_start_abs)
+                        except Exception:
+                            end_abs_for_close = int(op_baseline_pcs or 0)
 
-                # Fecha a bobina atual (ultima aberta) usando o ultimo absoluto confirmado da OP.
-                # Se nao houver pulso, a bobina fecha com delta 0, e a nova bobina nasce com base limpa.
+                    # Se houver snapshot apos o inicio do evento, usamos ele para fechar a bobina atual
+                    try:
+                        esp_snapshot_abs, esp_snapshot_ts = _get_current_esp_snapshot(conn, machine_id)
+                    except Exception:
+                        esp_snapshot_abs, esp_snapshot_ts = 0, None
+
+                    if started_at_last_ev and esp_snapshot_ts and _snapshot_cobre_evento(esp_snapshot_ts, started_at_last_ev):
+                        try:
+                            cand = int(esp_snapshot_abs or 0)
+                        except Exception:
+                            cand = 0
+                        # Monotonicidade dentro da OP
+                        if cand > end_abs_for_close:
+                            end_abs_for_close = cand
+
+                # Fecha a bobina atual (ultima aberta) com end_abs confirmado (evento ou snapshot valido)
                 try:
-                    _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(last_confirmed_abs))
+                    _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(end_abs_for_close))
                 except Exception:
                     pass
 
-                # Cria eventos para cada bobina adicionada (sequencia crescente).
-                # Se o front adicionar mais de uma de uma vez, fechamos imediatamente as intermediarias
-                # para manter apenas um evento aberto (o ultimo).
+                # Cria eventos para cada bobina adicionada (sequencia crescente)
                 base_seq = max(0, len(prev_list))
                 for offset, comp in enumerate(added):
                     try:
@@ -2111,13 +2139,8 @@ def op_editar():
                             seq=int(base_seq + offset),
                             comprimento_m=int(comp or 0),
                             started_at=ts_now,
-                            start_abs_pcs=int(last_confirmed_abs),
+                            start_abs_pcs=int(end_abs_for_close),
                         )
-                        if offset < (len(added) - 1):
-                            try:
-                                _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(last_confirmed_abs))
-                            except Exception:
-                                pass
                     except Exception:
                         continue
     except Exception:
