@@ -1,75 +1,1438 @@
+<!--
+PATH: modules/producao/templates/historico.html
+LAST_RECODE: 2026-02-18 17:35 America/Bahia
+MOTIVO: Opcao 1: Remover fallback de estimativa (comprimento/conv) no modal de bobinas; bobina nova inicia zerada ate receber pcs_total real do backend.
+-->
+
+{#
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
+#}
 {% extends "base.html" %}
-
-{% block title %}Histórico de Produção — IndFlow{% endblock %}
-
+{% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
 
-<h1 style="margin-bottom:16px;">Histórico de Produção</h1>
+<style>
+  /* Referência: producao_home.html */
+  .page{
+    padding:24px;
+  }
 
-<div style="
-  background:#ffffff;
-  border-radius:12px;
-  box-shadow:0 4px 12px rgba(0,0,0,0.08);
-  padding:20px;
-">
+  .header-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
 
-  <table style="
+  .subtitle{
+    margin-top:6px;
+    font-size:14px;
+    font-weight:700;
+    color:#334155;
+  }
+
+  .card{
+    background:#ffffff;
+    border-radius:16px;
+    padding:16px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.10);
+    border:1px solid #e5e7eb;
+  }
+
+  .filter-bar{
+    display:flex;
+    align-items:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+  .filter-row{
+    display:flex;
+    align-items:flex-end;
+    gap:14px;
+    flex-wrap:wrap;
+  }
+
+  .filter-group label{
+    display:block;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    margin-bottom:6px;
+  }
+
+  .filter-group input{
+    height:40px;
+    padding:8px 10px;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    font-size:14px;
+    outline:none;
+    background:#fff;
+    min-width:220px;
+  }
+
+  .filter-group input:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+
+  .hint{
+    font-size:12px;
+    color:#64748b;
+    padding-bottom:6px;
+    white-space:nowrap;
+  }
+
+  /* Tabela */
+  table{
     width:100%;
     border-collapse:collapse;
-    font-size:15px;
-  ">
-    <thead>
-      <tr style="background:#f1f5f9;">
-        <th style="padding:12px;text-align:left;">Data</th>
-        <th style="padding:12px;text-align:left;">Máquina</th>
-        <th style="padding:12px;text-align:right;">Produzido</th>
-        <th style="padding:12px;text-align:right;">Meta</th>
-        <th style="padding:12px;text-align:right;">%</th>
-      </tr>
-    </thead>
+    font-size:14px;
+  }
 
-    <tbody id="historico-body">
-      <tr>
-        <td colspan="5" style="padding:14px;text-align:center;color:#64748b;">
-          Carregando histórico...
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  thead th{
+    background:#f1f5f9;
+    color:#0f172a;
+    font-weight:800;
+    padding:12px 14px;
+    text-align:left;
+    border-bottom:1px solid #e5e7eb;
+  }
+
+  tbody td{
+    padding:10px 14px;
+    border-bottom:1px solid #e5e7eb;
+    color:#0f172a;
+  }
+
+  tbody tr:nth-child(odd){ background:#ffffff; }
+  tbody tr:nth-child(even){ background:#f8fbff; }
+
+  tbody tr:hover{
+    background:#eff6ff;
+  }
+
+  .r{ text-align:right; }
+
+  .loading td{
+    padding:14px;
+    text-align:center;
+    color:#64748b;
+  }
+
+  /* ===============================
+     OPs no historico
+     =============================== */
+  .op-row td{
+    background:#f8fafc;
+    color:#334155;
+    font-size:13px;
+    font-weight:700;
+    border-bottom:1px solid #e5e7eb;
+  }
+
+  .op-row{
+    cursor:pointer;
+  }
+
+  .op-row:hover td{
+    background:#eef2ff;
+  }
+
+  .op-pill{
+    display:inline-block;
+    padding:3px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:900;
+    margin-right:8px;
+    vertical-align:middle;
+  }
+
+  .op-pill-ativa{
+    background:#dcfce7;
+    color:#166534;
+    border:1px solid #bbf7d0;
+  }
+
+  .op-pill-encerrada{
+    background:#e5e7eb;
+    color:#374151;
+    border:1px solid #d1d5db;
+  }
+
+  .op-pill-unk{
+    background:#f1f5f9;
+    color:#334155;
+    border:1px solid #e2e8f0;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .btn-danger {
+    background: #dc3545;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-danger:hover {
+    filter: brightness(0.95);
+  }
+  .btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* ===============================
+     Modal OP (respeita layout)
+     =============================== */
+  .op-modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    z-index:9999;
+  }
+
+  .op-modal{
+    width:100%;
+    max-width:1100px;
+    background:#ffffff;
+    border-radius:16px;
+    box-shadow:0 18px 60px rgba(0,0,0,0.30);
+    border:1px solid #e5e7eb;
+    overflow:hidden;
+
+    /* rolagem no conteudo do modal */
+    max-height:90vh;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .op-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#ffffff;
+  }
+
+  .op-modal-title{
+    font-size:16px;
+    font-weight:900;
+    color:#0f172a;
+  }
+
+  .op-modal-close{
+    border:1px solid #cbd5e1;
+    background:#ffffff;
+    width:36px;
+    height:36px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:18px;
+    line-height:1;
+  }
+
+  .op-modal-body{
+    padding:16px;
+
+    /* rolagem interna do modal (mantem header/footer fixos) */
+    flex:1;
+    overflow:auto;
+  }
+
+  .op-form-grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap:12px;
+  }
+
+  .op-field{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+
+  .op-field label{
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+  }
+
+  .op-field input,
+  .op-field textarea{
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    padding:10px 10px;
+    font-size:14px;
+    outline:none;
+    background:#ffffff;
+    color:#0f172a;
+  }
+
+  .op-field textarea{
+    min-height:92px;
+    resize:vertical;
+  }
+
+  .op-field input:focus,
+  .op-field textarea:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+
+  .op-ro input,
+  .op-ro textarea{
+    background:#eaf2ff;
+    border-color:#b6d2ff;
+  }
+
+  .op-ro input[readonly],
+  .op-ro textarea[readonly]{
+    color:#0f172a;
+  }
+
+  .op-edit input,
+  .op-edit textarea{
+    background:#fff7d6;
+    border-color:#f2d37a;
+  }
+
+  .op-modal-footer{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    padding:12px 16px;
+    border-top:1px solid #e5e7eb;
+    background:#ffffff;
+  }
+
+  .btn-secondary{
+    background:#ffffff;
+    color:#0f172a;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    padding:10px 14px;
+    font-weight:700;
+    cursor:pointer;
+  }
+
+  .btn-primary{
+    background:#2563eb;
+    color:#ffffff;
+    border:none;
+    border-radius:10px;
+    padding:10px 14px;
+    font-weight:800;
+    cursor:pointer;
+  }
+
+  .btn-primary:disabled{
+    opacity:0.6;
+    cursor:not-allowed;
+  }
+
+  .col-12{ grid-column: span 12; }
+  .col-6{ grid-column: span 6; }
+  .col-4{ grid-column: span 4; }
+  .col-3{ grid-column: span 3; }
+  .col-2{ grid-column: span 2; }
+
+  /* ===============================
+     Bobinas (fechamento por bobina)
+     =============================== */
+  .bobinas-wrap{
+    grid-column: span 12;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-top:6px;
+  }
+
+  .bobina-card{
+    border:1px solid #e5e7eb;
+    border-radius:14px;
+    padding:12px;
+    background:#ffffff;
+  }
+
+  .bobina-title{
+    font-size:13px;
+    font-weight:900;
+    color:#0f172a;
+    margin-bottom:10px;
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .bobina-sub{
+    font-size:12px;
+    font-weight:700;
+    color:#475569;
+  }
+
+  .bobina-grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap:12px;
+  }
+
+</style>
+
+<div class="page">
+
+  <div class="header-row">
+    <div>
+      <h1 class="section-title">Histórico</h1>
+      <div class="subtitle" id="machine-name">Máquina: —</div>
+    </div>
+  </div>
+
+  <div class="card">
+
+    <!-- EM CIMA: BUSCA POR DATA -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label for="filter-date">Buscar por data</label>
+        <input id="filter-date" type="date">
+      </div>
+
+      <div class="hint">Selecione uma data para filtrar (opcional)</div>
+      <div class="actions">
+        <button id="btn-reset-date" type="button" class="btn-danger">Zerar producao por data</button>
+      </div>
+    </div>
+
+    <!-- EMBAIXO: TABELA POR DIA -->
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th class="r">Produção Total</th>
+          <th class="r">Peças Boas</th>
+          <th class="r">Refugo</th>
+        </tr>
+      </thead>
+
+      <tbody id="historico-body">
+        <tr class="loading"><td colspan="4">Carregando histórico...</td></tr>
+      </tbody>
+    </table>
+
+  </div>
 
 </div>
 
+<!-- ===============================
+     MODAL OP (abre ao clicar na linha OP)
+     Azul = read-only | Amarelo = editavel
+     =============================== -->
+<div id="op-modal-backdrop" class="op-modal-backdrop" aria-hidden="true">
+  <div class="op-modal" role="dialog" aria-modal="true" aria-labelledby="op-modal-title">
+    <div class="op-modal-header">
+      <div class="op-modal-title" id="op-modal-title">OP</div>
+      <button type="button" id="op-modal-close" class="op-modal-close">x</button>
+    </div>
+
+    <div class="op-modal-body">
+      <div class="op-form-grid">
+
+        <!-- Linha 1 (read-only / azul) -->
+        <div class="op-field op-ro col-3">
+          <label>Máquina</label>
+          <input id="opv_machine" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Operador</label>
+          <input id="opv_operador" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Lote</label>
+          <input id="opv_lote" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Status</label>
+          <input id="opv_status" type="text" readonly>
+        </div>
+
+        <!-- Linha 2 (read-only / azul) -->
+        <div class="op-field op-ro col-3">
+          <label>OS</label>
+          <input id="opv_os" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>GR e/ou fio</label>
+          <input id="opv_gr_fio" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Conversão m/pcs</label>
+          <input id="opv_conv" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Bobinas</label>
+          <input id="opv_bobinas_resumo" type="text" readonly>
+        </div>
+
+        <!-- Linha 3 (read-only / azul) -->
+        <div class="op-field op-ro col-6">
+          <label>HS-inicial</label>
+          <input id="opv_started" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-6">
+          <label>HS-término</label>
+          <input id="opv_ended" type="text" readonly>
+        </div>
+
+        <!-- Bobinas (fechamento por bobina) -->
+        <div class="bobinas-wrap" id="bobinas-wrap">
+          <!-- preenchido via JS -->
+        </div>
+
+        <!-- Observações (editavel / amarelo) -->
+        <div class="op-field op-edit col-12">
+          <label>Observações</label>
+          <textarea id="ope_obs"></textarea>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="op-modal-footer">
+      <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
+      <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
+      <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
+    </div>
+  </div>
+</div>
+
 <script>
-fetch("/producao/historico")
-  .then(r => r.json())
-  .then(dados => {
-    const tbody = document.getElementById("historico-body");
+(function(){
+  "use strict";
+
+  function isoToBr(value){
+    if(!value || typeof value !== "string") return "-";
+    const s = value.trim();
+    if(!s) return "-";
+
+    if(/^(\d{2})\/(\d{2})\/(\d{4})$/.test(s)) return s;
+
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if(m) return `${m[3]}/${m[2]}/${m[1]}`;
+
+    return s;
+  }
+
+  function todayIsoLocal(){
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
+
+  function dateValueToISO(value){
+    if(!value || typeof value !== "string") return "";
+    const s = value.trim();
+    if(!s) return "";
+
+    if(/^(\d{4})-(\d{2})-(\d{2})$/.test(s)) return s;
+
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    return "";
+  }
+
+  function getRowDateValue(r){
+    if(!r || typeof r !== "object") return "";
+    return String(r.data_ref || r.data || r.dia_ref || r.date || "").trim();
+  }
+
+  function getRowDateISO(r){
+    return dateValueToISO(getRowDateValue(r));
+  }
+
+  function normalizeDateInput(v){
+    const s = String(v || "").trim();
+    if(!s) return "";
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return "";
+  }
+
+  function fmtNum(n){
+    const x = Number(n);
+    if(!Number.isFinite(x)) return "0";
+    return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
+  }
+
+  function safeText(v){
+    if(v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  function buildOpLabel(op){
+    const lote = safeText(op && op.lote).trim();
+    const operador = safeText(op && op.operador).trim();
+    const status = safeText(op && op.status).trim();
+
+    let parts = [];
+    if(lote) parts.push("Lote " + lote);
+    if(operador) parts.push("Operador " + operador);
+    if(status) parts.push(status);
+
+    return parts.join(" | ");
+  }
+
+  function statusClass(status){
+    const s = safeText(status).toUpperCase();
+    if(s.includes("ATIV") || s.includes("ABERT") || s.includes("EM_ANDAMENTO")) return "op-pill-ativa";
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return "op-pill-encerrada";
+    return "op-pill-unk";
+  }
+
+  function anyText(v){
+    const s = safeText(v).trim();
+    return s ? s : "-";
+  }
+
+  function fmtIsoDateTimeLocal(v){
+    const s = safeText(v).trim();
+    if(!s) return "-";
+    if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+      return s.replace("T", " ").slice(0, 19);
+    }
+    return s;
+  }
+
+  const qs = new URLSearchParams(window.location.search);
+  const machineId = qs.get("machine_id") || qs.get("machine") || "";
+
+  const elMachine = document.getElementById("machine-name");
+  const elDate = document.getElementById("filter-date");
+  const elBtnReset = document.getElementById("btn-reset-date");
+  const tbody = document.getElementById("historico-body");
+
+  
+  /* Modal */
+  const modalBackdrop = document.getElementById("op-modal-backdrop");
+  const modalClose = document.getElementById("op-modal-close");
+  const modalCancel = document.getElementById("op-modal-cancel");
+  const modalSave = document.getElementById("op-modal-save");
+  const modalPdf = document.getElementById("op-modal-pdf");
+  const modalTitle = document.getElementById("op-modal-title");
+
+  const opv_machine = document.getElementById("opv_machine");
+  const opv_operador = document.getElementById("opv_operador");
+  const opv_lote = document.getElementById("opv_lote");
+  const opv_status = document.getElementById("opv_status");
+  const opv_os = document.getElementById("opv_os");
+  const opv_gr_fio = document.getElementById("opv_gr_fio");
+  const opv_conv = document.getElementById("opv_conv");
+  const opv_bobinas_resumo = document.getElementById("opv_bobinas_resumo");
+  const opv_started = document.getElementById("opv_started");
+  const opv_ended = document.getElementById("opv_ended");
+
+  const bobinasWrap = document.getElementById("bobinas-wrap");
+  const ope_obs = document.getElementById("ope_obs");
+
+  let currentOp = null;
+
+  function num0(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function fmtMeters2Floor(v){
+    const n = Number(v);
+    if(!Number.isFinite(n)) return "0.00";
+    const floored = Math.floor(n * 100) / 100;
+    return floored.toFixed(2);
+  }
+
+  function calcMatBom(pcsTotal, cost, refugo, saco){
+    const t = Math.floor(num0(pcsTotal));
+    const c = Math.floor(num0(cost));
+    const r = Math.floor(num0(refugo));
+    const s = Math.floor(num0(saco));
+    let res = t - (c + r + s);
+    if(res < 0) res = 0;
+    return res;
+  }
+
+  function clearBobinasUI(){
+    if(!bobinasWrap) return;
+    bobinasWrap.innerHTML = "";
+  }
+
+  function bobinasResumo(bobinasItens){
+    if(!Array.isArray(bobinasItens) || bobinasItens.length === 0) return "-";
+    let totalM = 0;
+    bobinasItens.forEach((b) => {
+      totalM += num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0));
+    });
+    return String(bobinasItens.length) + " bobina(s) | " + String(Math.floor(totalM)) + " m";
+  }
+
+  function createBobinaCard(item, idx, convMporPcs, opts){
+    const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
+    const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
+    const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
+
+    const vCost = Math.floor(num0(item && (item.qtd_cost_elas ?? item.cost_elas ?? 0)));
+    const vRef = Math.floor(num0(item && (item.refugo ?? 0)));
+    const vSaco = Math.floor(num0(item && (item.qtd_saco_caixa ?? item.saco_caixa ?? 0)));
+
+    const card = document.createElement("div");
+    card.className = "bobina-card";
+    card.setAttribute("data-bobina-idx", String(idx));
+
+    const title = document.createElement("div");
+    title.className = "bobina-title";
+    title.textContent = "Bobina " + String(idx + 1);
+
+    const sub = document.createElement("div");
+    sub.className = "bobina-sub";
+    sub.textContent = "Comprimento: " + String(Math.floor(comprimentoM)) + " m";
+    title.appendChild(sub);
+
+    const grid = document.createElement("div");
+    grid.className = "bobina-grid";
+
+    function fieldRO(label, value, col){
+      const w = document.createElement("div");
+      w.className = "op-field op-ro " + col;
+
+      const l = document.createElement("label");
+      l.textContent = label;
+
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.readOnly = true;
+      inp.value = String(value);
+
+      w.appendChild(l);
+      w.appendChild(inp);
+      return w;
+    }
+
+    function fieldEdit(label, value, col, name){
+      const w = document.createElement("div");
+      w.className = "op-field op-edit " + col;
+
+      const l = document.createElement("label");
+      l.textContent = label;
+
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.inputMode = "numeric";
+      inp.min = "0";
+      inp.step = "1";
+      inp.value = String(Math.floor(num0(value)));
+      inp.setAttribute("data-field", name);
+
+      w.appendChild(l);
+      w.appendChild(inp);
+      return {wrap: w, input: inp};
+    }
+
+    const conv = num0(convMporPcs);
+    opts = opts || {};
+    const forceZeroLive = !!opts.forceZeroLive;
+
+    // Opcao 1: nao estimar pcs/metragem por comprimento/conv.
+    // Sem pcs_total real vindo do backend, o valor deve iniciar zerado e aguardar o primeiro update.
+    let derivedPcs = pcsTotal;
+    let derivedMetroConsumido = metroConsumido;
+
+    // Read-only context
+    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
+    let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    const startedStr = fmtIsoDateTimeLocal(startedRaw);
+    let endedStr = fmtIsoDateTimeLocal(endedRaw);
+
+    // Alguns backends preenchem ended_at igual started_at na criacao. Tratar como "ainda nao encerrada".
+    const placeholderEnd = (endedStr && endedStr !== "-" && endedStr === startedStr);
+    if(placeholderEnd){
+      endedRaw = "";
+      endedStr = "";
+    }
+
+    const bobinaAberta = (!endedRaw) || placeholderEnd;
+
+    let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
+    if(!(tempoMin > 0)){
+      try{
+        const ds = new Date(String(startedRaw || ""));
+        const de = new Date(String(endedRaw || ""));
+        if(!isNaN(ds.getTime()) && !isNaN(de.getTime())){
+          const diff = Math.floor((de.getTime() - ds.getTime()) / 60000);
+          if(diff > 0) tempoMin = diff;
+        }
+      }catch(e){
+        // ignore
+      }
+    }
+
+    // Forcar inicio zerado/vazio no modal para OP ativa do dia (evita valores fantasmas antes do primeiro update)
+    // Nao depender de ended_at da bobina, porque o backend pode popular ended_at prematuramente.
+    if(forceZeroLive){
+      derivedPcs = 0;
+      derivedMetroConsumido = 0;
+      tempoMin = 0;
+      endedStr = "";
+    }
+
+    grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
+    grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
+    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3"));
+    grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
+
+    grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
+    grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
+
+    // Editable (yellow)
+    const fCost = fieldEdit("Qtd. cost. elas.", vCost, "col-3", "qtd_cost_elas");
+    const fRef = fieldEdit("Refugo", vRef, "col-3", "refugo");
+    const fSaco = fieldEdit("Qtd. saco ou caixa", vSaco, "col-3", "qtd_saco_caixa");
+
+    // Computed (read-only)
+    const fMat = fieldRO("Qtd. mat bom", calcMatBom(derivedPcs, vCost, vRef, vSaco), "col-3");
+    const matInput = fMat.querySelector("input");
+    if(matInput){
+      matInput.setAttribute("data-field", "qtd_mat_bom");
+    }
+
+    grid.appendChild(fMat);
+    grid.appendChild(fCost.wrap);
+    grid.appendChild(fRef.wrap);
+    grid.appendChild(fSaco.wrap);
+
+    function recalc(){
+      const cost = num0(fCost.input.value);
+      const ref = num0(fRef.input.value);
+      const saco = num0(fSaco.input.value);
+      const mat = calcMatBom(derivedPcs, cost, ref, saco);
+      if(matInput) matInput.value = String(mat);
+    }
+
+    fCost.input.addEventListener("input", recalc);
+    fRef.input.addEventListener("input", recalc);
+    fSaco.input.addEventListener("input", recalc);
+
+    card.appendChild(title);
+    card.appendChild(grid);
+    return card;
+  }
+
+  function openModal(op){
+    currentOp = op || null;
+
+    if(modalTitle){
+      const lote = safeText(op && op.lote).trim();
+      modalTitle.textContent = lote ? ("OP - Lote " + lote) : "OP";
+    }
+
+    if(opv_machine) opv_machine.value = anyText(op && op.machine_id ? op.machine_id : machineId);
+    if(opv_operador) opv_operador.value = anyText(op && op.operador);
+    if(opv_lote) opv_lote.value = anyText(op && op.lote);
+    if(opv_status) opv_status.value = anyText(op && op.status);
+
+    if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
+    if(opv_gr_fio) opv_gr_fio.value = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
+    if(opv_conv) opv_conv.value = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
+
+    const opStatus = safeText(op && op.status).toUpperCase();
+    const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
+    const diaRef = safeText(op && op.__dia_ref);
+    const isHoje = (diaRef && diaRef === todayIsoLocal());
+    // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
+    // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
+    let temProducaoReal = false;
+    try {
+      const itensCheck = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+      let accPcs = 0;
+      let accMetro = 0;
+      let accMatBom = 0;
+      let accTempo = 0;
+      if(Array.isArray(itensCheck)){
+        itensCheck.forEach((it) => {
+          accPcs += num0(it && (it.pcs_total ?? it.total_pcs ?? 0));
+          accMetro += num0(it && (it.metro_consumido ?? it.metro_linear_consumido ?? 0));
+          accMatBom += num0(it && (it.qtd_mat_bom ?? it.mat_bom ?? 0));
+          accTempo += num0(it && (it.tempo_consumo_min ?? it.tempo_min ?? 0));
+        });
+      }
+      const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
+      const opMetros = num0(op && (op.op_metros ?? op.total_m ?? 0));
+      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0);
+    } catch(e) { temProducaoReal = false; }
+
+    const isLiveHoje = (!opEncerrada) && isHoje;
+    const forceZeroLive = isLiveHoje && !temProducaoReal;
+
+    const opStartedStr = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
+    let opEndedStr = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+    if(opEndedStr && opEndedStr !== "-" && opEndedStr === opStartedStr) opEndedStr = "";
+    if(forceZeroLive) opEndedStr = "";
+
+    if(opv_started) opv_started.value = opStartedStr;
+    if(opv_ended) opv_ended.value = opEndedStr;
+
+    if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
+
+    const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
+
+    clearBobinasUI();
+
+    const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+    if(Array.isArray(itens) && itens.length > 0){
+      if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
+      itens.forEach((b, i) => {
+        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive});
+        if(bobinasWrap) bobinasWrap.appendChild(card);
+      });
+    }else{
+      if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
+      // Fallback legacy: cria uma bobina virtual com base no total da OP
+      const totalPcs = Math.floor(num0(op && (op.total_pcs ?? op.op_pcs ?? op.produzido ?? 0)));
+      const comprimentoM = num0(op && (op.bobina ?? 0));
+      const metroConsumido = (totalPcs > 0 && convMporPcs > 0) ? (totalPcs * convMporPcs) : 0;
+
+      const legacy = {
+        comprimento_m: comprimentoM,
+        pcs_total: totalPcs,
+        metro_consumido: metroConsumido,
+        qtd_cost_elas: num0(op && (op.qtd_cost_elas ?? 0)),
+        refugo: num0(op && (op.refugo ?? op.refugo_total ?? 0)),
+        qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
+      };
+
+      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive});
+      if(bobinasWrap) bobinasWrap.appendChild(card);
+    }
+
+    if(modalBackdrop){
+      modalBackdrop.style.display = "flex";
+      modalBackdrop.setAttribute("aria-hidden", "false");
+    }
+  }
+
+  function closeModal(){
+    currentOp = null;
+    if(modalBackdrop){
+      modalBackdrop.style.display = "none";
+      modalBackdrop.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  function escapeHtml(s){
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function buildOpPrintHtml(op){
+    const title = (op && op.lote) ? ("OP - Lote " + escapeHtml(op.lote)) : "OP";
+    const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
+
+    const bobinas = Array.isArray(op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) ? (op.bobinas_itens || op.bobinas_items || op.bobinas) : [];
+
+    function row2(label, value){
+      return `<tr><td class="k">${escapeHtml(label)}</td><td class="v">${escapeHtml(value)}</td></tr>`;
+    }
+
+    let infoRows = "";
+    infoRows += row2("Maquina", anyText(op && (op.machine_id || machineId)));
+    infoRows += row2("Operador", anyText(op && op.operador));
+    infoRows += row2("Lote", anyText(op && op.lote));
+    infoRows += row2("Status", anyText(op && op.status));
+    infoRows += row2("OS", anyText(op && (op.os || op.os_num || op.ordem_servico)));
+    infoRows += row2("GR e/ou fio", anyText(op && (op.gr_fio || op.gr_e_ou_fio)));
+    infoRows += row2("Conversao m/pcs", anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs)));
+    infoRows += row2("HS-inicial", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
+    infoRows += row2("HS-termino", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
+
+    let bobinasHtml = "";
+    if(bobinas.length === 0){
+      bobinasHtml = `<tr><td colspan="8" class="empty">Sem bobinas registradas.</td></tr>`;
+    }else{
+      bobinasHtml = bobinas.map((b, i) => {
+        const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
+        const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
+        const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
+        const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
+        const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
+        const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
+        const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
+        const ref = Math.floor(num0(b && (b.refugo ?? 0)));
+        const saco = Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)));
+        const mat = calcMatBom(pcs, cost, ref, saco);
+
+        return `
+          <tr>
+            <td class="c">${i + 1}</td>
+            <td class="r">${comprimento}</td>
+            <td class="r">${pcs}</td>
+            <td class="r">${metro}</td>
+            <td class="r">${tempo}</td>
+            <td>${escapeHtml(hi)}</td>
+            <td>${escapeHtml(hf)}</td>
+            <td class="r">${mat}</td>
+          </tr>
+          <tr class="sub">
+            <td></td>
+            <td colspan="2">Qtd. cost. elas.: <b>${cost}</b></td>
+            <td colspan="2">Refugo: <b>${ref}</b></td>
+            <td colspan="3">Qtd. saco/caixa: <b>${saco}</b></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
+
+    return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<style>
+  body{ font-family: Arial, sans-serif; color:#0f172a; margin:24px; }
+  h1{ font-size:18px; margin:0 0 12px 0; }
+  table{ width:100%; border-collapse:collapse; font-size:12px; }
+  td, th{ border:1px solid #e5e7eb; padding:8px; vertical-align:top; }
+  th{ background:#f1f5f9; text-align:left; }
+  .meta td{ border:1px solid #e5e7eb; }
+  .k{ width:180px; font-weight:700; background:#f8fafc; }
+  .v{ }
+  .r{ text-align:right; }
+  .c{ text-align:center; }
+  .sub td{ background:#fafafa; border-top:none; }
+  .empty{ text-align:center; color:#64748b; }
+  .section{ margin-top:16px; }
+  .obs{ white-space:pre-wrap; border:1px solid #e5e7eb; padding:10px; border-radius:8px; }
+  @media print{
+    body{ margin:0; }
+  }
+</style>
+</head>
+<body>
+  <h1>${title}</h1>
+
+  <table class="meta">
+    <tbody>
+      ${infoRows}
+    </tbody>
+  </table>
+
+  <div class="section">
+    <table>
+      <thead>
+        <tr>
+          <th class="c">Bobina</th>
+          <th class="r">Comprimento (m)</th>
+          <th class="r">Total pcs</th>
+          <th class="r">Metro consumido (m)</th>
+          <th class="r">Tempo (min)</th>
+          <th>Hora inicial</th>
+          <th>Hora final</th>
+          <th class="r">Mat bom</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${bobinasHtml}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h1>Observacoes</h1>
+    <div class="obs">${obs || "-"}</div>
+  </div>
+</body>
+</html>`;
+  }
+
+  function openPrintWindow(){
+    if(!currentOp){
+      alert("OP invalida.");
+      return;
+    }
+    const html = buildOpPrintHtml(currentOp);
+    const w = window.open("", "_blank");
+    if(!w){
+      alert("Bloqueio de popup. Libere popups para gerar PDF.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try{ w.print(); }catch(e){} }, 250);
+  }
+
+
+  if(modalClose) modalClose.addEventListener("click", closeModal);
+  if(modalCancel) modalCancel.addEventListener("click", closeModal);
+
+  if(modalBackdrop){
+    modalBackdrop.addEventListener("click", function(e){
+      if(e && e.target === modalBackdrop){
+        closeModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", function(e){
+    if(e && e.key === "Escape" && modalBackdrop && modalBackdrop.style.display === "flex"){
+      closeModal();
+    }
+  });
+
+  if(modalSave){
+    modalSave.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+      const bobinasPayload = [];
+      if(bobinasWrap){
+        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
+        cards.forEach((card) => {
+          const idx = Number(card.getAttribute("data-bobina-idx") || "0");
+
+          const getField = (name) => {
+            const el = card.querySelector('[data-field="' + name + '"]');
+            if(!el) return 0;
+            return num0(el.value);
+          };
+
+          bobinasPayload.push({
+            idx: idx,
+            qtd_cost_elas: Math.floor(getField("qtd_cost_elas")),
+            refugo: Math.floor(getField("refugo")),
+            qtd_saco_caixa: Math.floor(getField("qtd_saco_caixa"))
+          });
+        });
+      }
+
+      const payload = {
+        op_id: opId,
+        observacoes: (ope_obs && ope_obs.value) ? ope_obs.value : "",
+        bobinas: bobinasPayload
+      };
+
+      modalSave.disabled = true;
+
+      try{
+        const resp = await fetch("/producao/op/salvar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json().catch(() => null);
+
+        if(!resp.ok){
+          const msg = data && (data.error || data.message)
+            ? (data.error || data.message)
+            : ("Erro HTTP " + resp.status);
+          throw new Error(msg);
+        }
+
+        alert("OP salva com sucesso.");
+        closeModal();
+        await fetchHistorico();
+
+      }catch(err){
+        alert("Falha ao salvar OP: " + (err.message || err));
+      }finally{
+        modalSave.disabled = false;
+      }
+    });
+  }
+
+  if(modalPdf){
+    modalPdf.addEventListener("click", function(){
+      openPrintWindow();
+    });
+  }
+
+
+  function renderMsgRow(msg){
+    if(!tbody) return;
+    tbody.innerHTML = "";
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "text-center";
+    td.textContent = msg;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  function appendOpsRows(r){
+    if(!tbody) return;
+    const ops = r && r.ops;
+    if(!Array.isArray(ops) || ops.length === 0) return;
+
+    ops.forEach((op) => {
+      const trOp = document.createElement("tr");
+      trOp.className = "op-row";
+
+      const tdOp = document.createElement("td");
+      tdOp.colSpan = 4;
+
+      const pill = document.createElement("span");
+      pill.className = "op-pill " + statusClass(op && op.status);
+      pill.textContent = "OP";
+
+      const label = document.createElement("span");
+      label.textContent = " " + buildOpLabel(op);
+
+      tdOp.appendChild(pill);
+      tdOp.appendChild(label);
+
+      trOp.appendChild(tdOp);
+      tbody.appendChild(trOp);
+
+      trOp.addEventListener("click", function(){
+        const op2 = Object.assign({}, op || {});
+        op2.__dia_ref = getRowDateISO(r);
+        openModal(op2);
+      });
+    });
+  }
+
+  function renderRows(rows){
+    if(!tbody) return;
     tbody.innerHTML = "";
 
-    if(dados.length === 0){
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="5" style="padding:14px;text-align:center;color:#64748b;">
-            Nenhum registro encontrado
-          </td>
-        </tr>
-      `;
+    if(!Array.isArray(rows) || rows.length === 0){
+      renderMsgRow("Nenhum dado encontrado.");
       return;
     }
 
-    dados.forEach(linha => {
-      tbody.innerHTML += `
-        <tr style="border-bottom:1px solid #e5e7eb;">
-          <td style="padding:10px;">${linha.data}</td>
-          <td style="padding:10px;">${linha.machine_id}</td>
-          <td style="padding:10px;text-align:right;">${linha.produzido}</td>
-          <td style="padding:10px;text-align:right;">${linha.meta}</td>
-          <td style="padding:10px;text-align:right;">${linha.percentual}%</td>
-        </tr>
-      `;
+    rows.forEach((r) => {
+      const tr = document.createElement("tr");
+
+      const tdData = document.createElement("td");
+      tdData.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
+
+      const tdProd = document.createElement("td");
+      tdProd.className = "text-right";
+      tdProd.textContent = fmtNum(r.produzido);
+
+      const tdBoas = document.createElement("td");
+      tdBoas.className = "text-right";
+      tdBoas.textContent = fmtNum(r.pecas_boas);
+
+      const tdRef = document.createElement("td");
+      tdRef.className = "text-right";
+      tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
+
+      tr.appendChild(tdData);
+      tr.appendChild(tdProd);
+      tr.appendChild(tdBoas);
+      tr.appendChild(tdRef);
+
+      tbody.appendChild(tr);
+
+      appendOpsRows(r);
     });
-  });
+  }
+
+  let cache = null;
+  let liveTimer = null;
+
+  async function fetchStatus(){
+    if(!machineId) return null;
+
+    const url = `/machine/status?machine_id=${encodeURIComponent(machineId)}`;
+    const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+    if(!resp.ok){
+      throw new Error("Falha ao buscar status (HTTP " + resp.status + ")");
+    }
+    return await resp.json();
+  }
+
+  function applyLiveOverride(status){
+    if(!status || !cache || !Array.isArray(cache)) return;
+
+    const dayIso = normalizeDateInput(status.ultimo_dia || status._bd_dia_ref || status._ph_data_ref || "");
+    const v = Number(status.producao_turno);
+
+    if(!dayIso) return;
+    if(!Number.isFinite(v)) return;
+
+    let row = cache.find((r) => getRowDateISO(r) === dayIso);
+    if(!row){
+      row = {
+        data: dayIso,
+        data_ref: dayIso,
+        machine_id: machineId,
+        meta: Number(status.meta_turno) || 0,
+        ops: [],
+        produzido: 0,
+        pecas_boas: 0,
+        refugo_total: 0,
+        percentual: 0
+      };
+      cache.unshift(row);
+    }
+
+    row.produzido = v;
+    row.pecas_boas = v;
+
+    if(row.refugo_total === undefined && row.refugo !== undefined){
+      row.refugo_total = row.refugo;
+    }
+
+    const p = Number(status.percentual_turno);
+    if(Number.isFinite(p)){
+      row.percentual = p;
+    }
+  }
+
+  async function refreshLive(){
+    if(!machineId) return;
+    try{
+      const status = await fetchStatus();
+      applyLiveOverride(status);
+      applyFilterAndRender();
+    }catch(e){
+      // silencioso: historico continua com cache
+    }
+  }
+
+  async function fetchHistorico(){
+    if(!machineId){
+      renderMsgRow("Selecione uma maquina.");
+      return;
+    }
+
+    renderMsgRow("Carregando historico...");
+
+    try{
+      const url = `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`;
+      const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+      if(!resp.ok){
+        throw new Error("Falha ao buscar historico (HTTP " + resp.status + ")");
+      }
+      const data = await resp.json();
+      cache = Array.isArray(data) ? data : [];
+
+      await refreshLive();
+    }catch(err){
+      cache = [];
+      renderMsgRow("Falha ao carregar historico.");
+      return;
+    }
+
+    applyFilterAndRender();
+  }
+
+  function applyFilterAndRender(){
+    const iso = normalizeDateInput(elDate ? elDate.value : "");
+    if(!cache){
+      renderMsgRow("Carregando historico...");
+      return;
+    }
+    if(!iso){
+      renderRows(cache);
+      return;
+    }
+    const filtered = cache.filter((r) => getRowDateISO(r) === iso);
+    renderRows(filtered);
+  }
+
+  async function resetByDate(){
+    if(!machineId){ alert("Maquina nao selecionada."); return; }
+
+    const iso = normalizeDateInput(elDate ? elDate.value : "");
+    if(!iso){ alert("Selecione uma data."); return; }
+
+    if(!confirm("CONFIRMAR RESET DA PRODUCAO NA DATA " + isoToBr(iso) + "?\nEssa acao zera a producao do dia e reancora o baseline.")){
+      return;
+    }
+
+    try{
+      const resp = await fetch("/admin/reset-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machine_id: machineId, date: iso })
+      });
+
+      let payload = null;
+      try{ payload = await resp.json(); }catch(e){ payload = null; }
+
+      if(!resp.ok){
+        const msg = (payload && (payload.error || payload.message)) ? (payload.error || payload.message) : ("Falha no reset (HTTP " + resp.status + ")");
+        throw new Error(msg);
+      }
+
+      alert("Reset por data executado.");
+      await fetchHistorico();
+    }catch(err){
+      alert(String(err && err.message ? err.message : err));
+    }
+  }
+
+  if(elDate){
+    elDate.addEventListener("change", applyFilterAndRender);
+    elDate.addEventListener("input", applyFilterAndRender);
+  }
+
+  if(elBtnReset){
+    elBtnReset.addEventListener("click", resetByDate);
+  }
+
+  function init(){
+    fetchHistorico();
+
+    if(liveTimer){
+      clearInterval(liveTimer);
+      liveTimer = null;
+    }
+
+    liveTimer = setInterval(refreshLive, 5000);
+  }
+
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", init);
+  }else{
+    init();
+  }
+})();
 </script>
 
 {% endblock %}
-##
