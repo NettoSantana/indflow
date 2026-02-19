@@ -1,11 +1,12 @@
 # PATH: indflow/server.py
-# LAST_RECODE: 2026-02-19 20:15 America/Bahia
-# MOTIVO: Corrigir login em produção no Railway: habilitar ProxyFix e configurar cookies/scheme HTTPS para manter sessão.
+# LAST_RECODE: 2026-02-19 20:20 America/Bahia
+# MOTIVO: Corrigir NameError ProxyFix no Railway (import ausente) mantendo ajuste de cookies/HTTPS.
 
 import os
 import logging
 import sqlite3
 from flask import Flask, render_template, request, jsonify
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # ============================================================
 # BLUEPRINTS (já existentes)
