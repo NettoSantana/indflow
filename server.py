@@ -1,6 +1,6 @@
 # PATH: indflow/server.py
-# LAST_RECODE: 2026-02-04 13:59 America/Bahia
-# MOTIVO: Corrigir NameError no /admin/purge-production adicionando get_db_path e _check_admin_auth (token admin).
+# LAST_RECODE: 2026-02-19 20:15 America/Bahia
+# MOTIVO: Corrigir login em produção no Railway: habilitar ProxyFix e configurar cookies/scheme HTTPS para manter sessão.
 
 import os
 import logging
@@ -48,6 +48,44 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("FLASK_SECRET_KEY", "dev-inseguro-trocar")
 
 # ============================================================
+# RAILWAY / HTTPS (PROXY) + COOKIES
+# ============================================================
+# No Railway o app fica atrás de proxy HTTPS. Sem ProxyFix, Flask pode
+# acreditar que o esquema é http e gerar redirects incorretos (perdendo
+# cookie de sessão), fazendo o usuário voltar para /admin/login.
+#
+# ProxyFix lê X-Forwarded-* e ajusta request.scheme/host/remote_addr.
+# Ajustamos também configs de cookie e scheme preferencial.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+
+_is_railway = bool(
+    os.getenv("RAILWAY_ENVIRONMENT")
+    or os.getenv("RAILWAY_PROJECT_ID")
+    or os.getenv("RAILWAY_SERVICE_ID")
+    or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+)
+
+_preferred_scheme = os.getenv("PREFERRED_URL_SCHEME")
+if not _preferred_scheme:
+    _preferred_scheme = "https" if _is_railway else "http"
+
+# Cookies: em produção HTTPS, cookie seguro evita bloqueios modernos.
+# SameSite=Lax é bom para navegação normal e redirects internos.
+_cookie_samesite = os.getenv("SESSION_COOKIE_SAMESITE", "Lax")
+_cookie_secure_env = os.getenv("SESSION_COOKIE_SECURE")
+if _cookie_secure_env is None:
+    _cookie_secure = (_preferred_scheme == "https")
+else:
+    _cookie_secure = _cookie_secure_env.strip().lower() in ("1", "true", "yes", "on")
+
+app.config.update(
+    PREFERRED_URL_SCHEME=_preferred_scheme,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE=_cookie_samesite,
+    SESSION_COOKIE_SECURE=_cookie_secure,
+)
+
+# ============================================================
 # BANCO SQLITE
 # ============================================================
 def _log_db_context():
@@ -55,6 +93,9 @@ def _log_db_context():
     cwd = os.getcwd()
     log.info("startup: CWD=%s", cwd)
     log.info("startup: INDFLOW_DB_PATH=%s", db_env)
+    log.info("startup: PREFERRED_URL_SCHEME=%s", app.config.get("PREFERRED_URL_SCHEME"))
+    log.info("startup: SESSION_COOKIE_SECURE=%s", app.config.get("SESSION_COOKIE_SECURE"))
+    log.info("startup: SESSION_COOKIE_SAMESITE=%s", app.config.get("SESSION_COOKIE_SAMESITE"))
 
 _log_db_context()
 
