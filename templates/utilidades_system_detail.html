@@ -1,0 +1,330 @@
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\utilidades\templates\utilidades_system_detail.html
+Último recode: 2026-01-18 16:25 (America/Bahia)
+Motivo: Melhorar visual da tela de detalhe do sistema com cor fraca por tipo, ícone, menos informação e destaque de tempo parado (quando PARADA).
+-->
+
+{% extends "base.html" %}
+{% block title %}Utilidades | {{ system.system_type }} - {{ system.system_id }}{% endblock %}
+
+{% block content %}
+
+<style>
+  .page { padding: 24px; }
+
+  /* ===== TINTS (cores fracas por tipo) ===== */
+  .tint-air{
+    background: linear-gradient(180deg, rgba(59,130,246,0.10), rgba(255,255,255,0.85));
+    border-color: rgba(59,130,246,0.18);
+  }
+  .tint-water{
+    background: linear-gradient(180deg, rgba(2,132,199,0.14), rgba(255,255,255,0.85));
+    border-color: rgba(2,132,199,0.22);
+  }
+  .tint-steam{
+    background: linear-gradient(180deg, rgba(249,115,22,0.12), rgba(255,255,255,0.85));
+    border-color: rgba(249,115,22,0.22);
+  }
+  .tint-energy{
+    background: linear-gradient(180deg, rgba(239,68,68,0.10), rgba(255,255,255,0.85));
+    border-color: rgba(239,68,68,0.18);
+  }
+  .tint-cooling{
+    background: linear-gradient(180deg, rgba(14,165,233,0.10), rgba(255,255,255,0.85));
+    border-color: rgba(14,165,233,0.18);
+  }
+  .tint-tank{
+    background: linear-gradient(180deg, rgba(148,163,184,0.14), rgba(255,255,255,0.85));
+    border-color: rgba(148,163,184,0.28);
+  }
+
+  .panel {
+    border-radius: 22px;
+    padding: 22px 24px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+
+  .header {
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .left-head{
+    display:flex;
+    align-items:flex-start;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .icon-wrap{
+    width:64px;
+    height:64px;
+    border-radius:18px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background: rgba(255,255,255,0.70);
+    border:1px solid rgba(15,23,42,0.06);
+    flex: 0 0 64px;
+  }
+  .icon-wrap svg{ width:38px; height:38px; }
+
+  .title-block{
+    min-width: 0;
+  }
+
+  .title{
+    font-size: 22px;
+    font-weight: 900;
+    color:#0f172a;
+    letter-spacing: 0.2px;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .subtitle{
+    margin-top: 6px;
+    font-size: 13px;
+    font-weight: 800;
+    color:#64748b;
+  }
+
+  .actions{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap: 10px;
+  }
+
+  .badge{
+    display:inline-block;
+    padding:6px 12px;
+    border-radius:10px;
+    font-size:12px;
+    font-weight:900;
+    color:#fff;
+    min-width: 120px;
+    text-align:center;
+  }
+  .badge-ok{ background:#16a34a; }
+  .badge-warn{ background:#f59e0b; }
+  .badge-stop{ background:#dc2626; }
+  .badge-unk{ background:#6b7280; }
+
+  .btn-back{
+    display:inline-block;
+    text-decoration:none;
+    background: rgba(15,23,42,0.08);
+    border: 1px solid rgba(15,23,42,0.10);
+    color:#0f172a;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .btn-back:hover{ background: rgba(15,23,42,0.12); }
+
+  .stopline{
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: 900;
+    color:#dc2626;
+  }
+
+  /* ===== MÉTRICAS (POUCAS) ===== */
+  .mini{
+    margin-top: 16px;
+    display:grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 14px;
+    font-size:15px;
+  }
+  .k{ color:#334155; font-weight:800; }
+  .v{ font-weight:900; color:#0f172a; }
+
+  .section-title{
+    margin-top: 22px;
+    font-size: 16px;
+    font-weight: 900;
+    color:#0f172a;
+  }
+
+  /* ===== CARDS FILHOS ===== */
+  .equip-grid{
+    margin-top: 12px;
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 18px;
+  }
+
+  .equip-card{
+    background:#ffffff;
+    border-radius: 16px;
+    padding: 16px 16px;
+    border: 1px solid rgba(15,23,42,0.06);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.06);
+  }
+
+  .equip-name{
+    font-size: 14px;
+    font-weight: 900;
+    color:#0f172a;
+    margin: 0 0 10px 0;
+  }
+
+  .equip-status{
+    display:inline-block;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 900;
+    color:#fff;
+  }
+  .RUNNING{ background:#16a34a; }
+  .STOPPED{ background:#dc2626; }
+
+  .footer{
+    margin-top: 22px;
+    font-size: 12px;
+    font-weight: 800;
+    color:#64748b;
+    text-align:right;
+  }
+
+  @media (max-width: 720px){
+    .page{ padding: 16px; }
+    .panel{ padding: 18px; }
+    .actions{ align-items:flex-start; }
+    .header{ flex-direction:column; align-items:stretch; }
+  }
+</style>
+
+<div class="page">
+
+  {# ===== Escolha de tint e ícone conforme o tipo ===== #}
+  {% set st = (system.system_type or "")|upper %}
+  {% set tint = "tint-tank" %}
+  {% if st == "AIR" %}{% set tint = "tint-air" %}{% endif %}
+  {% if st == "WATER" %}{% set tint = "tint-water" %}{% endif %}
+  {% if st == "STEAM" %}{% set tint = "tint-steam" %}{% endif %}
+  {% if st == "ENERGY" %}{% set tint = "tint-energy" %}{% endif %}
+  {% if st == "COOLING" %}{% set tint = "tint-cooling" %}{% endif %}
+  {% if st == "TANK" %}{% set tint = "tint-tank" %}{% endif %}
+
+  {% set status_txt = (system.status or "DESCONHECIDO")|upper %}
+  {% set badge_cls = "badge-unk" %}
+  {% if status_txt == "PRODUZINDO" %}{% set badge_cls = "badge-ok" %}{% endif %}
+  {% if status_txt == "ATENCAO" or status_txt == "ATENÇÃO" %}{% set badge_cls = "badge-warn" %}{% endif %}
+  {% if status_txt == "PARADA" %}{% set badge_cls = "badge-stop" %}{% endif %}
+
+  <div class="panel {{ tint }}">
+
+    <div class="header">
+      <div class="left-head">
+        <div class="icon-wrap">
+          {% if st == "AIR" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12c3-4 6 4 9 0s6 4 9 0"/>
+              <path d="M3 7c3-4 6 4 9 0s6 4 9 0"/>
+              <path d="M3 17c3-4 6 4 9 0s6 4 9 0"/>
+            </svg>
+          {% elif st == "WATER" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="#0369a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12z"/>
+            </svg>
+          {% elif st == "STEAM" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="#ea580c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 3c2 2-2 4 0 6s-2 4 0 6"/>
+              <path d="M12 3c2 2-2 4 0 6s-2 4 0 6"/>
+              <path d="M16 3c2 2-2 4 0 6s-2 4 0 6"/>
+            </svg>
+          {% elif st == "ENERGY" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13 2L3 14h7l-1 8 12-14h-7l-1-6z"/>
+            </svg>
+          {% elif st == "COOLING" %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="#0284c7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2v20"/>
+              <path d="M4.5 7.5l15 9"/>
+              <path d="M19.5 7.5l-15 9"/>
+              <circle cx="12" cy="12" r="2"/>
+            </svg>
+          {% else %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 7c0-2 14-2 14 0v10c0 2-14 2-14 0V7z"/>
+              <path d="M5 7c0 2 14 2 14 0"/>
+            </svg>
+          {% endif %}
+        </div>
+
+        <div class="title-block">
+          <h1 class="title">
+            {{ st }} — {{ system.system_id }}
+          </h1>
+          <div class="subtitle">
+            {% if system.last_seen %}Última atualização: {{ system.last_seen }}{% else %}Última atualização: —{% endif %}
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <a class="btn-back" href="/utilidades/">← Voltar</a>
+        <div class="badge {{ badge_cls }}">{{ status_txt }}</div>
+      </div>
+    </div>
+
+    {% if status_txt == "PARADA" and system.parado_min is not none %}
+      <div class="stopline">{{ system.parado_min }} min parados</div>
+    {% endif %}
+
+    {# ===== POUCA INFORMAÇÃO (essencial) ===== #}
+    <div class="mini">
+      <div class="k">Equipamentos ativos</div>
+      <div class="v">{{ system.equipments_running }}/{{ system.equipments_total }}</div>
+
+      <div class="k">Pressão</div>
+      <div class="v">
+        {% if system.pressure_ok == True %}OK{% elif system.pressure_ok == False %}BAIXA{% else %}—{% endif %}
+      </div>
+
+      <div class="k">Consumo hoje</div>
+      <div class="v">
+        {% if system.energy_kwh_day is not none %}{{ system.energy_kwh_day }} kWh{% else %}—{% endif %}
+      </div>
+    </div>
+
+    <div class="section-title">Equipamentos</div>
+
+    <div class="equip-grid">
+      {% for eq in system.equipments %}
+        <div class="equip-card">
+          <div class="equip-name">{{ eq.id }}</div>
+          {% if eq.running %}
+            <span class="equip-status RUNNING">RODANDO</span>
+          {% else %}
+            <span class="equip-status STOPPED">PARADO</span>
+          {% endif %}
+        </div>
+      {% endfor %}
+
+      {% if system.equipments|length == 0 %}
+        <div class="equip-card">
+          <div class="equip-name">Sem equipamentos cadastrados</div>
+          <span class="equip-status STOPPED">PARADO</span>
+        </div>
+      {% endif %}
+    </div>
+
+    <div class="footer">IndFlow • Utilidades</div>
+
+  </div>
+</div>
+
+{% endblock %}

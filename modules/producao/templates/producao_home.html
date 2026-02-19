@@ -1,147 +1,324 @@
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao_home.html
+Último recode: 2026-02-04 09:00 (America/Bahia)
+Motivo: Tornar o nome da máquina clicável para abrir o histórico já com machine_id (/producao/historico?machine_id=<id>), evitando tela de histórico vazia quando acessada sem querystring.
+-->
+
 {% extends 'base.html' %}
 {% block title %}Produção - IndFlow{% endblock %}
 
 {% block content %}
 
 <style>
-    .page {
-        padding: 24px;
-    }
+  .page { padding: 24px; }
 
-    .machine-grid {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 24px;
-        margin-top: 20px;
-    }
+  .machine-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 20px;
+  }
 
-    .machine-card-link {
-        text-decoration: none;
-        color: inherit;
-    }
+  .machine-card {
+    background: #ffffff;
+    width: 520px;
+    border-radius: 16px;
+    padding: 22px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    border: 1px solid #e5e7eb;
+  }
 
-    .machine-card {
-        background: #ffffff;
-        width: 320px;
-        border-radius: 16px;
-        padding: 22px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.10);
-        border: 1px solid #e5e7eb;
-        transition: 0.2s;
-    }
+  .machine-header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
 
-    .machine-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 6px 18px rgba(0,0,0,0.18);
-        cursor: pointer;
-    }
+  .machine-name {
+    font-size: 22px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: 0.2px;
+  }
 
-    .machine-name {
-        font-size: 20px;
-        font-weight: 700;
-        color: #0f172a;
-        margin-bottom: 8px;
-    }
+  .machine-name-link {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+  }
 
-    .machine-status {
-        display: inline-block;
-        padding: 6px 12px;
-        border-radius: 6px;
-        font-size: 14px;
-        font-weight: 600;
-        color: white;
-        margin-bottom: 12px;
-    }
+  .machine-header-right {
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
 
-    .status-auto {
-        background: #16a34a;
-    }
+  .machine-status {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 800;
+    color: white;
+    min-width: 108px;
+    text-align:center;
+  }
 
-    .status-manual {
-        background: #dc2626;
-    }
+  .status-auto { background: #16a34a; }
+  .status-stop { background: #dc2626; }
 
-    .machine-value {
-        font-size: 48px;
-        font-weight: 700;
-        color: #0f172a;
-        margin-top: 10px;
-        text-align: right;
-    }
+  .btn-x {
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+    border-radius: 10px;
+    width: 34px;
+    height: 34px;
+    font-size: 18px;
+    line-height: 34px;
+    text-align:center;
+    cursor: pointer;
+  }
 
-    .machine-subtext {
-        font-size: 15px;
-        color: #475569;
-        text-align: right;
-        font-weight: 500;
-        margin-top: 4px;
-    }
+  .machine-stopline {
+    font-size: 13px;
+    font-weight: 800;
+    color: #dc2626;
+    margin: 6px 0 10px 0;
+  }
+
+  .split {
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border-top: 1px solid #eef2f7;
+    margin-top: 10px;
+    padding-top: 14px;
+  }
+
+  .col {
+    padding: 0 12px;
+  }
+
+  .col + .col {
+    border-left: 1px solid #eef2f7;
+  }
+
+  .percent-row {
+    display:flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
+  .indicator {
+    font-size: 24px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .ind-good { color: #16a34a; }
+  .ind-bad { color: #dc2626; }
+  .ind-normal { color: #2563eb; }
+
+  .percent {
+    font-size: 56px;
+    font-weight: 900;
+    color: #0f172a;
+    line-height: 1;
+  }
+
+  .subtitle {
+    font-size: 14px;
+    color: #475569;
+    text-align:center;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+
+  .kv {
+    display:grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px 10px;
+    margin-top: 10px;
+    font-size: 14px;
+    color: #0f172a;
+  }
+
+  .kv .k { color: #334155; font-weight: 600; }
+  .kv .v { font-weight: 800; text-align:right; }
+
+  .footer {
+    margin-top: 14px;
+    text-align:center;
+    color: #334155;
+    font-size: 14px;
+    font-weight: 700;
+  }
 </style>
 
 <div class="page">
-
-    <h1 class="section-title">Produção</h1>
-
-    <div class="machine-grid" id="machines-area">
-        <!-- Os cards serão carregados dinamicamente -->
-    </div>
-
+  <h1 class="section-title">Produção</h1>
+  <div class="machine-grid" id="machines-area"></div>
 </div>
 
 <script>
-/*
-   ==========================================
-   CARREGAR MÁQUINAS DINAMICAMENTE
-   (Hoje só temos maquina01, mas agora já
-    deixamos preparado para várias)
-   ==========================================
-*/
+  // Ajuste simples: aqui você controla quais máquinas aparecem.
+  // No seu caso atual, é a MAQUINA02.
+  const maquinas = ["maquina02"];
 
-const maquinas = ["maquina01"];  
-// No futuro basta adicionar: ["maquina01", "maquina02", "maquina03"]...
+  function toNum(v, def=0){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : def;
+  }
 
-function carregarMaquinas() {
-    let area = document.getElementById("machines-area");
+  function fmt2(v){
+    const n = toNum(v, 0);
+    // mantém padrão simples (igual seu painel)
+    const s = (Math.round(n * 100) / 100).toString();
+    return s.replace(".", ",");
+  }
+
+  function fmtInt(v){
+    return String(Math.floor(toNum(v, 0)));
+  }
+
+  function calcularIndicador(percentual){
+    const p = toNum(percentual, 0);
+    if (p >= 102) return { icon: "▲", cls: "ind-good" };
+    if (p <= 98)  return { icon: "▼", cls: "ind-bad" };
+    return { icon: "—", cls: "ind-normal" };
+  }
+
+  function resolveStatusUI(data){
+    const ui = (data.status_ui || "").toString().trim().toUpperCase();
+    if (ui === "PRODUZINDO" || ui === "PARADA") return ui;
+
+    const raw = (data.status || "").toString().trim().toUpperCase();
+    if (raw === "AUTO") return "PRODUZINDO";
+    if (raw) return "PARADA";
+    return "PARADA";
+  }
+
+  function resolveParadoMin(data){
+    const v = Number(data.parado_min);
+    if (Number.isFinite(v) && v >= 0) return Math.floor(v);
+    return null;
+  }
+
+  function carregarMaquinas() {
+    const area = document.getElementById("machines-area");
     area.innerHTML = "";
 
     maquinas.forEach(id => {
-
-        fetch(`/machine/status?machine_id=${id}`)
+      fetch(`/machine/status?machine_id=${id}`)
         .then(r => r.json())
         .then(data => {
 
-            let statusClass = data.status === "AUTO"
-                ? "status-auto"
-                : "status-manual";
+          const nome = (data.nome || id || "").toString().toUpperCase();
+          const statusUI = resolveStatusUI(data);
+          const produzindo = (statusUI === "PRODUZINDO");
+          const statusClass = produzindo ? "status-auto" : "status-stop";
 
-            // Percentual turno = destaque principal do card
-            let percent = data.percentual_turno ?? 0;
+          const minsParado = resolveParadoMin(data);
+          const stopLineHtml = (!produzindo && minsParado !== null)
+            ? `<div class="machine-stopline">${minsParado} min parados</div>`
+            : ``;
 
-            let card = `
-                <a href="/producao/config/${id}" class="machine-card-link">
-                    <div class="machine-card">
+          // Dia (Turno)
+          const percDia = toNum(data.percentual_turno, 0);
+          const indDia = calcularIndicador(percDia);
 
-                        <div class="machine-name">${id.toUpperCase()}</div>
+          const metaDiaM   = toNum(data.meta_turno_ml, 0);     // exemplo: 306000
+          const prodDiaM   = toNum(data.producao_turno_ml, 0); // exemplo: 99283.74
+          const metaDiaPCS = toNum(data.meta_turno, 0);        // exemplo: 300000
+          const prodDiaPCS = toNum(data.producao_turno, 0);    // exemplo: 97337
 
-                        <div class="machine-status ${statusClass}">
-                            ${data.status}
-                        </div>
+          // Hora
+          const percHora = toNum(data.percentual_hora, 0);
+          const indHora = calcularIndicador(percHora);
 
-                        <div class="machine-value">${percent}%</div>
-                        <div class="machine-subtext">Meta do Turno</div>
+          const metaHoraM   = toNum(data.meta_hora_ml, 0);     // exemplo: 17500.14
+          const prodHoraM   = toNum(data.producao_hora_ml, 0); // exemplo: 2885.58
+          const metaHoraPCS = toNum(data.meta_hora_pcs, 0);    // exemplo: 17157
 
-                    </div>
-                </a>
-            `;
+          // Preferência: hora líquida (se existir), senão producao_hora
+          const prodHoraPCS = (data.producao_hora_liquida !== undefined && data.producao_hora_liquida !== null)
+            ? toNum(data.producao_hora_liquida, 0)
+            : toNum(data.producao_hora, 0);
 
-            area.innerHTML += card;
+          const tempoMedio = toNum(data.tempo_medio_min_por_peca, 0);
+          const tempoMedioTxt = tempoMedio > 0 ? String(tempoMedio).replace(".", ",") : "—";
+
+          const historicoHref = `/producao/historico?machine_id=${encodeURIComponent(id)}`;
+
+          const card = `
+            <div class="machine-card">
+              <div class="machine-header">
+                <div class="machine-name">
+                  <a class="machine-name-link" href="${historicoHref}" title="Abrir histórico">${nome}</a>
+                </div>
+                <div class="machine-header-right">
+                  <div class="machine-status ${statusClass}">${statusUI}</div>
+                  <button class="btn-x" title="Excluir equipamento" onclick="alert('Excluir ainda não implementado'); return false;">×</button>
+                </div>
+              </div>
+
+              ${stopLineHtml}
+
+              <div class="split">
+                <div class="col">
+                  <div class="percent-row">
+                    <div class="indicator ${indDia.cls}">${indDia.icon}</div>
+                    <div class="percent">${fmtInt(percDia)}%</div>
+                  </div>
+                  <div class="subtitle">Meta do Dia</div>
+
+                  <div class="kv">
+                    <div class="k">Meta (M)</div><div class="v">${fmt2(metaDiaM)}</div>
+                    <div class="k">Produzido (M)</div><div class="v">${fmt2(prodDiaM)}</div>
+                    <div class="k">Meta (PCS)</div><div class="v">${fmtInt(metaDiaPCS)}</div>
+                    <div class="k">Produzido (PCS)</div><div class="v">${fmtInt(prodDiaPCS)}</div>
+                  </div>
+                </div>
+
+                <div class="col">
+                  <div class="percent-row">
+                    <div class="indicator ${indHora.cls}">${indHora.icon}</div>
+                    <div class="percent">${fmtInt(percHora)}%</div>
+                  </div>
+                  <div class="subtitle">Meta da Hora</div>
+
+                  <div class="kv">
+                    <div class="k">Meta (M)</div><div class="v">${fmt2(metaHoraM)}</div>
+                    <div class="k">Produzido (M)</div><div class="v">${fmt2(prodHoraM)}</div>
+                    <div class="k">Meta (PCS)</div><div class="v">${fmtInt(metaHoraPCS)}</div>
+                    <div class="k">Produzido (PCS)</div><div class="v">${fmtInt(prodHoraPCS)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="footer">Ritmo médio: ${tempoMedioTxt} min/peça</div>
+            </div>
+          `;
+
+          area.innerHTML += card;
+        })
+        .catch(() => {
+          area.innerHTML += `
+            <div class="machine-card">
+              <div class="machine-name">${id.toUpperCase()}</div>
+              <div class="machine-stopline">Falha ao carregar status</div>
+            </div>
+          `;
         });
     });
-}
+  }
 
-carregarMaquinas();
-// Atualiza a cada 2s
-setInterval(carregarMaquinas, 2000);
+  carregarMaquinas();
+  setInterval(carregarMaquinas, 2000);
 </script>
 
 {% endblock %}

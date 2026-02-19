@@ -1,0 +1,377 @@
+/* static/dashboard.css */
+.dashboard-wrapper{
+  width:100%;
+  display:flex;
+  justify-content:center;
+  padding:32px 0;
+  position:relative;
+}
+
+/* BOTÃO + (canto superior direito) */
+.btn-add-machine{
+  position:fixed;
+  top:96px;            /* abaixo da navbar */
+  right:28px;
+  width:54px;
+  height:54px;
+  border-radius:999px;
+  border:0;
+  background:#0f172a;
+  color:#fff;
+  font-size:32px;
+  line-height:54px;
+  text-align:center;
+  cursor:pointer;
+  box-shadow:0 8px 18px rgba(0,0,0,0.18);
+  z-index:999;
+  transition:0.15s;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  user-select:none;
+}
+.btn-add-machine:hover{
+  transform:translateY(-2px);
+  box-shadow:0 12px 24px rgba(0,0,0,0.22);
+}
+.btn-add-machine:active{
+  transform:translateY(0px);
+  box-shadow:0 8px 18px rgba(0,0,0,0.18);
+}
+.btn-add-machine span{
+  display:block;
+  margin-top:-2px; /* centraliza o + */
+}
+
+/* MODAL */
+.modal-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(15,23,42,0.55);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:2000;
+  padding:16px;
+}
+.modal{
+  width:100%;
+  max-width:420px;
+  background:#fff;
+  border-radius:16px;
+  border:1px solid #e5e7eb;
+  box-shadow:0 18px 40px rgba(0,0,0,0.25);
+  padding:18px;
+}
+.modal-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  margin-bottom:12px;
+}
+.modal-title{
+  font-size:18px;
+  font-weight:800;
+  color:#0f172a;
+}
+.modal-close{
+  border:0;
+  background:transparent;
+  font-size:22px;
+  cursor:pointer;
+  color:#334155;
+  line-height:1;
+}
+.modal-body label{
+  display:block;
+  font-size:14px;
+  font-weight:700;
+  color:#0f172a;
+  margin-bottom:6px;
+}
+.modal-body input{
+  width:100%;
+  padding:10px 12px;
+  border:1px solid #cbd5e1;
+  border-radius:10px;
+  outline:none;
+  font-size:14px;
+}
+.modal-hint{
+  margin-top:8px;
+  font-size:12px;
+  color:#64748b;
+  line-height:1.35;
+}
+.modal-actions{
+  margin-top:14px;
+  display:flex;
+  gap:10px;
+  justify-content:flex-end;
+}
+.btn{
+  border:0;
+  border-radius:10px;
+  padding:10px 14px;
+  font-weight:800;
+  cursor:pointer;
+  font-size:14px;
+}
+.btn-secondary{
+  background:#e2e8f0;
+  color:#0f172a;
+}
+.btn-primary{
+  background:#0f172a;
+  color:#fff;
+}
+
+/* GRID DE CARDS (RESPONSIVO + MÁX 6 POR LINHA) */
+.machine-grid{
+  width:100%;
+  display:grid;
+  gap:22px;
+
+  /* 1 e 2 cards ficam "grandes" (até 460px).
+     3+ cards encolhem automaticamente pra caber. */
+  grid-template-columns:repeat(auto-fit, minmax(320px, 460px));
+
+  /* limita para NO MÁXIMO 6 colunas na tela */
+  max-width:calc(6 * 460px + 5 * 22px);
+
+  justify-content:center;
+  padding:0 16px;
+  margin:0 auto;
+}
+
+/* CARD */
+.machine-card{
+  background:#ffffff;
+  width:100%;
+  max-width:460px; /* mantém o “tamanho atual” quando tem 1 ou 2 */
+  border-radius:20px;
+  padding:28px;
+  box-shadow:0 4px 14px rgba(0,0,0,0.12);
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  border:1px solid #e5e7eb;
+  cursor:pointer;
+  transition:0.15s;
+  justify-self:center; /* centraliza dentro da célula do grid */
+}
+.machine-card:hover{
+  box-shadow:0 6px 18px rgba(0,0,0,0.2);
+  transform:translateY(-2px);
+}
+.machine-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+}
+.machine-name{
+  font-size:24px;
+  font-weight:700;
+  color:#0f172a;
+}
+
+/* STATUS */
+.machine-status{
+  font-size:14px;
+  font-weight:600;
+  padding:8px 14px;
+  border-radius:6px;
+  color:white;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
+.status-auto{ background:#16a34a; }
+.status-manual{ background:#dc2626; }
+
+/* BOTÃO EXCLUIR (✕) */
+.btn-delete-machine{
+  width:34px;
+  height:34px;
+  border-radius:10px;
+  border:1px solid #e5e7eb;
+  background:#ffffff;
+  color:#0f172a;
+  font-size:18px;
+  line-height:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  transition:0.12s;
+}
+.btn-delete-machine:hover{
+  transform:translateY(-1px);
+  box-shadow:0 6px 14px rgba(0,0,0,0.14);
+  border-color:#cbd5e1;
+}
+.btn-delete-machine:active{
+  transform:translateY(0px);
+  box-shadow:none;
+}
+
+/* CONTEÚDO DO CARD */
+.percent-container{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  margin-top:10px;
+}
+.percent-block{
+  width:45%;
+  text-align:center;
+}
+.percent-value{
+  font-size:62px;
+  font-weight:700;
+  color:#0f172a;
+  line-height:1;
+}
+.percent-label{
+  margin-top:6px;
+  font-size:18px;
+  font-weight:600;
+  color:#475569;
+}
+.divider{
+  width:2px;
+  height:200px;
+  background:#cbd5e1;
+  border-radius:2px;
+}
+.stats-sub{
+  margin-top:10px;
+  font-size:15px;
+  font-weight:600;
+  color:#334155;
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+}
+.stats-sub b{
+  font-weight:700;
+  color:#0f172a;
+}
+.ritmo-medio{
+  margin-top:12px;
+  text-align:right;
+  font-size:15px;
+  font-weight:600;
+  color:#334155;
+}
+
+/* =========================================================
+   ADIÇÕES — AJUSTE PARA 6 CARDS + PAGER (COMPORTAMENTO CERTO)
+   ========================================================= */
+
+/* Base do pager (setinhas) */
+.pager{
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:6px;              /* menor espaço */
+  margin:12px 0 0;      /* sobe o pager e reduz margem */
+}
+.pager button{
+  font-size:16px;       /* menor */
+  padding:4px 8px;      /* mais estreito */
+  min-width:34px;       /* garante clique mas sem ficar largo */
+  height:30px;
+  border-radius:8px;
+  border:1px solid #e5e7eb;
+  background:#fff;
+  cursor:pointer;
+  line-height:1;
+}
+.pager button:hover{
+  box-shadow:0 4px 10px rgba(0,0,0,0.10);
+}
+.pager button:disabled{
+  opacity:0.35;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+
+/* DESKTOP:
+   - se tiver 1 ou 2 cards: continua grande (não mexe)
+   - se tiver 3+ cards: ativa modo compacto (3 colunas, 6 = 2 linhas)
+*/
+@media (min-width: 1100px){
+
+  /* 3+ cards */
+  .machine-grid:has(.machine-card:nth-child(3)){
+    gap:18px;
+    grid-template-columns:repeat(3, minmax(260px, 1fr));
+    max-width:1100px;
+  }
+
+  .machine-grid:has(.machine-card:nth-child(3)) .machine-card{
+    max-width:100%;
+    padding:22px;
+    border-radius:18px;
+    gap:16px;
+  }
+
+  .machine-grid:has(.machine-card:nth-child(3)) .machine-name{
+    font-size:20px;
+  }
+  .machine-grid:has(.machine-card:nth-child(3)) .machine-status{
+    font-size:13px;
+    padding:6px 12px;
+  }
+  .machine-grid:has(.machine-card:nth-child(3)) .percent-value{
+    font-size:46px;
+  }
+  .machine-grid:has(.machine-card:nth-child(3)) .percent-label{
+    font-size:14px;
+    margin-top:4px;
+  }
+  .machine-grid:has(.machine-card:nth-child(3)) .divider{
+    height:160px;
+  }
+  .machine-grid:has(.machine-card:nth-child(3)) .ritmo-medio{
+    font-size:14px;
+  }
+
+  /* 4+ cards => MAIS compacto ainda (pra caber sem scroll) */
+  .machine-grid:has(.machine-card:nth-child(4)){
+    gap:14px;
+    max-width:1040px;
+  }
+
+  .machine-grid:has(.machine-card:nth-child(4)) .machine-card{
+    padding:16px;
+    gap:12px;
+  }
+
+  .machine-grid:has(.machine-card:nth-child(4)) .machine-name{
+    font-size:18px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .machine-status{
+    font-size:12px;
+    padding:5px 10px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .percent-value{
+    font-size:40px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .percent-label{
+    font-size:13px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .divider{
+    height:130px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .stats-sub{
+    font-size:13px;
+    margin-top:8px;
+  }
+  .machine-grid:has(.machine-card:nth-child(4)) .ritmo-medio{
+    font-size:13px;
+    margin-top:8px;
+  }
+}

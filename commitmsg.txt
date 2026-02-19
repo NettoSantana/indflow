@@ -1,5 +1,5 @@
-﻿feat: cálculo correto de rampa por hora (primeira hora + redistribuição)
+feat: adiciona histórico diário de produção com SQLite
 
-- rampa aplicada apenas na primeira hora
-- diferença redistribuída nas demais horas
-- soma final sempre igual à meta do turno
+- grava produção no reset do dia
+- cria banco indflow.db
+- adiciona endpoint /producao/historico
