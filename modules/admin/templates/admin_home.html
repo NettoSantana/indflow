@@ -1,9 +1,94 @@
+{# 
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\templates\admin_home.html
+LAST_RECODE: 2026-02-20 17:45 America/Bahia
+MOTIVO: Criar home do admin mais profissional com cards clicaveis e esconder Clientes para nao-superadmin.
+#}
 {% extends "base.html" %}
 {% block title %}Admin — IndFlow{% endblock %}
 
 {% block content %}
-<div class="page">
-  <h1>Painel Administrativo</h1>
-  <p>Gerenciamento de usuários, permissões e unidades.</p>
+<style>
+  .admin-wrap{max-width:1100px;margin:0 auto;padding:24px;}
+  .admin-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;}
+  .admin-title h1{margin:0 0 6px 0;}
+  .admin-title p{margin:0;color:#64748b;}
+  .admin-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
+  .admin-actions a{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;text-decoration:none;font-weight:600;}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;}
+  .card-link{grid-column:span 12;display:block;text-decoration:none;color:inherit;}
+  @media (min-width: 720px){ .card-link{grid-column:span 6;} }
+  @media (min-width: 980px){ .card-link{grid-column:span 4;} }
+  .card{background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;min-height:120px;transition:transform .05s ease, box-shadow .05s ease;}
+  .card:hover{transform:translateY(-1px);box-shadow:0 10px 25px rgba(0,0,0,.06);}
+  .card h2{margin:0 0 8px 0;font-size:18px;}
+  .card p{margin:0;color:#64748b;font-size:14px;line-height:1.35;}
+  .pill{display:inline-block;margin-top:10px;padding:6px 10px;border-radius:999px;background:#f1f5f9;color:#0f172a;border:1px solid #e5e7eb;font-size:12px;font-weight:700;}
+  .pill.primary{background:#2563eb;color:#ffffff;border-color:#2563eb;}
+  .pill.danger{background:#dc2626;color:#ffffff;border-color:#dc2626;}
+  .note{margin-top:14px;color:#64748b;font-size:13px;}
+</style>
+
+<div class="admin-wrap">
+  <div class="admin-head">
+    <div class="admin-title">
+      <h1>Painel Administrativo</h1>
+      <p>Escolha um modulo para gerenciar o sistema.</p>
+    </div>
+    <div class="admin-actions">
+      <a href="/admin/usuarios">Usuarios</a>
+      {% if (session.get("role") or "")|lower == "superadmin" %}
+        <a href="/clientes/">Clientes</a>
+      {% endif %}
+      <a href="/admin/logout">Sair</a>
+    </div>
+  </div>
+
+  <div class="grid">
+    <a class="card-link" href="/admin/usuarios">
+      <div class="card">
+        <h2>Usuarios</h2>
+        <p>Criar, ativar/desativar, trocar role e redefinir senha. Limite de 5 usuarios ativos por cliente.</p>
+        <span class="pill primary">Abrir</span>
+      </div>
+    </a>
+
+    {% if (session.get("role") or "")|lower == "superadmin" %}
+    <a class="card-link" href="/clientes/">
+      <div class="card">
+        <h2>Clientes</h2>
+        <p>Criar clientes (tenants), gerar API Key e ativar/desativar clientes.</p>
+        <span class="pill primary">Abrir</span>
+      </div>
+    </a>
+    {% endif %}
+
+    <a class="card-link" href="/devices/">
+      <div class="card">
+        <h2>Devices</h2>
+        <p>Visualizar devices, associacoes e informacoes de comunicacao.</p>
+        <span class="pill primary">Abrir</span>
+      </div>
+    </a>
+
+    <a class="card-link" href="/producao/">
+      <div class="card">
+        <h2>Producao</h2>
+        <p>Acompanhar status das maquinas, metas, producao e paradas.</p>
+        <span class="pill primary">Abrir</span>
+      </div>
+    </a>
+
+    <a class="card-link" href="/admin/logout">
+      <div class="card">
+        <h2>Sair</h2>
+        <p>Encerrar sessao atual.</p>
+        <span class="pill danger">Sair</span>
+      </div>
+    </a>
+  </div>
+
+  <div class="note">
+    Role atual: {{ (session.get("role") or "viewer")|lower }}.
+  </div>
 </div>
 {% endblock %}
