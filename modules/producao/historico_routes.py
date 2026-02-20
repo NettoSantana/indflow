@@ -1,6 +1,8 @@
-# PATH: indflow/modules/producao/historico_routes.py
-# LAST_RECODE: 2026-02-19 07:29 America/Bahia
-# MOTIVO: BUG 5: OP no historico pertence ao dia operacional da abertura (inicio_iso), evitando duplicacao ao atravessar virada do dia.
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
+# LAST_RECODE: 2026-02-20 07:37 America/Bahia
+# MOTIVO: BUG 5: Remover fallback por data_ref; OP no historico pertence somente ao dia operacional da abertura (inicio_iso) usando comparacao datetime() para evitar duplicacao na virada.
+
+
 from __future__ import annotations
 
 import os
@@ -240,64 +242,43 @@ def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> li
     - Atravessar a virada do dia (ou encerrar em outro dia) NAO cria segunda ocorrencia no historico.
 
     Implementacao:
-    - Filtra por janela [data_ref 00:01, proximo_dia 00:01) usando inicio_iso.
-    - Se nao houver match (formatos legados), faz fallback para o filtro por coluna data_ref.
+    - Filtra por janela [data_ref 00:01, proximo_dia 00:01) usando APENAS inicio_iso.
+    - Comparacao feita via datetime() do SQLite para evitar erro de comparacao textual e formatos ISO diferentes.
+    - Sem fallback por data_ref. Se nao bater por inicio_iso, nao exibe.
     - Deduplica registros repetidos do banco para nao exibir a mesma OP duas vezes no mesmo dia.
     """
-    col = _resolve_data_col(conn, "ordens_producao")
     eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref)
 
     # Janela do dia operacional: vira as 00:01 (inclusive). 00:00 ainda pertence ao dia anterior.
     try:
         d0 = date.fromisoformat(str(data_ref))
     except Exception:
-        d0 = None
+        return []
 
-    start_iso_t = None
-    end_iso_t = None
-    start_iso_sp = None
-    end_iso_sp = None
+    d1 = d0 + timedelta(days=1)
+    start_dt = f"{d0.isoformat()} 00:01:00"
+    end_dt = f"{d1.isoformat()} 00:01:00"
 
-    if d0:
-        d1 = d0 + timedelta(days=1)
-        start_iso_t = f"{d0.isoformat()}T00:01:00"
-        end_iso_t = f"{d1.isoformat()}T00:01:00"
-        start_iso_sp = f"{d0.isoformat()} 00:01:00"
-        end_iso_sp = f"{d1.isoformat()} 00:01:00"
-
-    base_sql = """
+    # datetime(replace(inicio_iso,'T',' ')) cobre:
+    # - "YYYY-MM-DDTHH:MM:SS"
+    # - "YYYY-MM-DD HH:MM:SS"
+    # - com ou sem offset, conforme parser do SQLite.
+    sql = """
         SELECT op, lote, operador, inicio_iso, fim_iso, status
           FROM ordens_producao
          WHERE machine_id = ?
+           AND datetime(replace(inicio_iso, 'T', ' ')) >= datetime(?)
+           AND datetime(replace(inicio_iso, 'T', ' ')) < datetime(?)
+         ORDER BY datetime(replace(inicio_iso, 'T', ' ')) ASC
     """
 
-    rows = []
-
-    # 1) Preferencia: filtrar por inicio_iso (dia de abertura)
-    if start_iso_t and end_iso_t:
-        sql = base_sql + " AND inicio_iso >= ? AND inicio_iso < ? ORDER BY inicio_iso ASC"
+    try:
+        rows = conn.execute(sql, (eff_mid, start_dt, end_dt)).fetchall()
+    except Exception:
         try:
-            rows = conn.execute(sql, (eff_mid, start_iso_t, end_iso_t)).fetchall()
+            rows = conn.execute(sql, (machine_id, start_dt, end_dt)).fetchall()
         except Exception:
-            rows = []
-
-        # Tentativa para formato com espaco (YYYY-MM-DD HH:MM:SS)
-        if not rows:
-            try:
-                rows = conn.execute(sql, (eff_mid, start_iso_sp, end_iso_sp)).fetchall()
-            except Exception:
-                rows = []
-
-    # 2) Fallback: filtro por coluna data_ref (comportamento legado)
-    if not rows:
-        sql2 = base_sql + f" AND {col} = ? ORDER BY inicio_iso ASC"
-        try:
-            rows = conn.execute(sql2, (eff_mid, data_ref)).fetchall()
-        except Exception:
-            try:
-                rows = conn.execute(sql2, (machine_id, data_ref)).fetchall()
-            except Exception:
-                return []
+            return []
 
     itens = []
     seen = set()
