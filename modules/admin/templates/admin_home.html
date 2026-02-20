@@ -1,7 +1,7 @@
 {# 
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\templates\admin_home.html
-LAST_RECODE: 2026-02-20 17:45 America/Bahia
-MOTIVO: Criar home do admin mais profissional com cards clicaveis e esconder Clientes para nao-superadmin.
+LAST_RECODE: 2026-02-20 20:42 America/Bahia
+MOTIVO: Remover botoes superiores (Usuarios/Clientes/Sair) do header do painel admin.
 #}
 {% extends "base.html" %}
 {% block title %}Admin — IndFlow{% endblock %}
@@ -12,8 +12,6 @@ MOTIVO: Criar home do admin mais profissional com cards clicaveis e esconder Cli
   .admin-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;}
   .admin-title h1{margin:0 0 6px 0;}
   .admin-title p{margin:0;color:#64748b;}
-  .admin-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;}
-  .admin-actions a{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;text-decoration:none;font-weight:600;}
   .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;}
   .card-link{grid-column:span 12;display:block;text-decoration:none;color:inherit;}
   @media (min-width: 720px){ .card-link{grid-column:span 6;} }
@@ -33,13 +31,6 @@ MOTIVO: Criar home do admin mais profissional com cards clicaveis e esconder Cli
     <div class="admin-title">
       <h1>Painel Administrativo</h1>
       <p>Escolha um modulo para gerenciar o sistema.</p>
-    </div>
-    <div class="admin-actions">
-      <a href="/admin/usuarios">Usuarios</a>
-      {% if (session.get("role") or "")|lower == "superadmin" %}
-        <a href="/clientes/">Clientes</a>
-      {% endif %}
-      <a href="/admin/logout">Sair</a>
     </div>
   </div>
 
