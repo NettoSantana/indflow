@@ -1,7 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\routes.py
-# LAST_RECODE: 2026-01-28 21:30 America/Bahia
-# MOTIVO: Implementar role superadmin para login Admin@admin, mantendo admin/viewer para clientes.
-
+# LAST_RECODE: 2026-02-19 11:00 America/Bahia
+# MOTIVO: Portal no /admin com gestao de usuarios por cliente (roles admin/viewer) e limite de 5 usuarios ativos por cliente.
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, render_template_string
 from datetime import datetime
 import uuid
@@ -15,7 +14,7 @@ from modules.db_indflow import get_db
 admin_bp = Blueprint("admin", __name__, template_folder="templates")
 
 # ============================================================
-# AUTH (V1 simples) — sessão + sha256
+# AUTH (sessao + sha256)
 # ============================================================
 LOGIN_FORM_HTML = """
 <!doctype html>
@@ -61,9 +60,174 @@ LOGIN_FORM_HTML = """
 </html>
 """
 
+USERS_HOME_HTML = """
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Usuarios - IndFlow</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
+  <style>
+    body { margin:0; background:#f8fafc; font-family: Arial, sans-serif; }
+    .wrap { max-width:1100px; margin:0 auto; padding:24px; }
+    .card { background:#ffffff; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin-bottom:16px; }
+    h1 { margin:0 0 8px 0; }
+    .muted { color:#64748b; font-size:13px; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+    label { display:block; font-size:13px; margin:10px 0 6px; color:#334155; }
+    input, select { padding:10px 12px; border-radius:10px; border:1px solid #cbd5e1; background:#ffffff; color:#0f172a; min-width:260px; }
+    button { padding:10px 14px; border-radius:10px; border:0; background:#2563eb; color:white; font-weight:700; cursor:pointer; }
+    button.secondary { background:#475569; }
+    button.danger { background:#dc2626; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:10px; border-bottom:1px solid #e5e7eb; text-align:left; font-size:14px; vertical-align:top; }
+    th { background:#f1f5f9; }
+    .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:700; }
+    .on { background:#dcfce7; color:#166534; }
+    .off { background:#fee2e2; color:#991b1b; }
+    .top-actions { display:flex; gap:10px; justify-content:flex-end; margin-bottom:10px; }
+    a { color:#2563eb; text-decoration:none; }
+    .msg { margin-top:8px; font-size:13px; }
+    .msg.ok { color:#166534; }
+    .msg.err { color:#991b1b; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="top-actions">
+      <a href="/admin/" class="muted">Voltar</a>
+      <a href="/admin/logout" class="muted">Sair</a>
+    </div>
+
+    <div class="card">
+      <h1>Usuarios</h1>
+      <div class="muted">
+        Limite: {{ max_active }} usuarios ativos por cliente.
+      </div>
+      {% if message %}
+        <div class="msg ok">{{ message }}</div>
+      {% endif %}
+      {% if error %}
+        <div class="msg err">{{ error }}</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 10px 0;">Criar usuario</h2>
+      <form method="post" action="/admin/usuarios/create">
+        <div class="row">
+          {% if is_superadmin %}
+          <div>
+            <label>Cliente (cliente_id)</label>
+            <select name="cliente_id" required>
+              {% for c in clientes %}
+                <option value="{{ c.id }}">{{ c.nome }} ({{ c.id }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+
+          <div>
+            <label>Email</label>
+            <input name="email" type="email" placeholder="ex: pessoa@cliente.com" required>
+          </div>
+
+          <div>
+            <label>Senha</label>
+            <input name="senha" type="text" placeholder="defina uma senha" required>
+          </div>
+
+          <div>
+            <label>Role</label>
+            <select name="role" required>
+              <option value="admin">admin</option>
+              <option value="viewer">viewer</option>
+            </select>
+          </div>
+
+          <div>
+            <button type="submit">Criar</button>
+          </div>
+        </div>
+      </form>
+      <div class="muted" style="margin-top:10px;">
+        Dica: admin pode gerenciar usuarios. viewer apenas usa o sistema.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin:0 0 10px 0;">Lista</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Criado em (UTC)</th>
+            {% if is_superadmin %}<th>Cliente</th>{% endif %}
+            <th style="width:340px;">Acoes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in usuarios %}
+          <tr>
+            <td><b>{{ u.email }}</b></td>
+            <td class="muted">{{ u.role }}</td>
+            <td>
+              {% if u.status == "active" %}
+                <span class="pill on">ATIVO</span>
+              {% else %}
+                <span class="pill off">INATIVO</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ u.created_at }}</td>
+            {% if is_superadmin %}
+              <td class="muted">{{ u.cliente_id }}</td>
+            {% endif %}
+            <td>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <form method="post" action="/admin/usuarios/toggle" style="margin:0;">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <button type="submit" class="secondary">
+                    {% if u.status == "active" %}Desativar{% else %}Ativar{% endif %}
+                  </button>
+                </form>
+
+                <form method="post" action="/admin/usuarios/role" style="margin:0;">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <select name="role" required>
+                    <option value="admin" {% if u.role=="admin" %}selected{% endif %}>admin</option>
+                    <option value="viewer" {% if u.role=="viewer" %}selected{% endif %}>viewer</option>
+                  </select>
+                  <button type="submit" class="secondary">Salvar role</button>
+                </form>
+
+                <form method="post" action="/admin/usuarios/reset-senha" style="margin:0;">
+                  <input type="hidden" name="user_id" value="{{ u.id }}">
+                  <input name="senha" type="text" placeholder="nova senha" required style="min-width:180px;">
+                  <button type="submit" class="danger">Trocar senha</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          {% if not usuarios %}
+            <tr><td colspan="6" class="muted">Nenhum usuario encontrado.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</body>
+</html>
+"""
+
 
 def _sha256(s: str) -> str:
-    return hashlib.sha256((s or "").encode()).hexdigest()
+    return hashlib.sha256((s or "").encode("utf-8")).hexdigest()
 
 
 def _exists_any_user() -> bool:
@@ -80,7 +244,7 @@ def _get_user_by_email(email: str):
     cur = conn.cursor()
     cur.execute(
         "SELECT id, email, senha_hash, cliente_id, role, status FROM usuarios WHERE email = ? LIMIT 1",
-        (email,),
+        ((email or "").strip().lower(),),
     )
     row = cur.fetchone()
     conn.close()
@@ -100,12 +264,16 @@ def _is_logged_in() -> bool:
     return bool(session.get("user_id"))
 
 
+def _role() -> str:
+    return (session.get("role") or "").strip().lower()
+
+
 def _is_superadmin() -> bool:
-    return session.get("role") == "superadmin"
+    return _role() == "superadmin"
 
 
 def _is_admin() -> bool:
-    return session.get("role") in ("admin", "superadmin")
+    return _role() in ("admin", "superadmin")
 
 
 def login_required(fn):
@@ -126,6 +294,151 @@ def admin_required(fn):
             return "Acesso negado", 403
         return fn(*args, **kwargs)
     return wrapper
+
+
+def _require_same_cliente_or_superadmin(target_cliente_id: str) -> bool:
+    if _is_superadmin():
+        return True
+    return (session.get("cliente_id") or "") == (target_cliente_id or "")
+
+
+def _password_ok(pw: str) -> bool:
+    pw = (pw or "").strip()
+    return len(pw) >= 6
+
+
+def _normalize_role(role: str) -> str:
+    r = (role or "").strip().lower()
+    if r not in ("admin", "viewer"):
+        return "viewer"
+    return r
+
+
+def _count_active_users(cliente_id: str) -> int:
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(1) FROM usuarios WHERE cliente_id = ? AND status = 'active'", (cliente_id,))
+    row = cur.fetchone()
+    conn.close()
+    return int(row[0] or 0) if row else 0
+
+
+def _list_users_for_cliente(cliente_id: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, email, role, status, created_at, cliente_id FROM usuarios WHERE cliente_id = ? ORDER BY created_at DESC",
+        (cliente_id,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows or []:
+        out.append(
+            {
+                "id": r[0],
+                "email": r[1],
+                "role": r[2],
+                "status": r[3],
+                "created_at": r[4],
+                "cliente_id": r[5],
+            }
+        )
+    return out
+
+
+def _list_all_users():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, email, role, status, created_at, cliente_id FROM usuarios ORDER BY created_at DESC"
+    )
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows or []:
+        out.append(
+            {
+                "id": r[0],
+                "email": r[1],
+                "role": r[2],
+                "status": r[3],
+                "created_at": r[4],
+                "cliente_id": r[5],
+            }
+        )
+    return out
+
+
+def _list_clientes():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id, nome FROM clientes ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    conn.close()
+    out = []
+    for r in rows or []:
+        out.append({"id": r[0], "nome": r[1]})
+    return out
+
+
+def _get_user_by_id(user_id: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, email, role, status, created_at, cliente_id FROM usuarios WHERE id = ? LIMIT 1",
+        (user_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "email": row[1],
+        "role": row[2],
+        "status": row[3],
+        "created_at": row[4],
+        "cliente_id": row[5],
+    }
+
+
+def _update_user_status(user_id: str, status: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET status = ? WHERE id = ?", (status, user_id))
+    conn.commit()
+    conn.close()
+
+
+def _update_user_role(user_id: str, role: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET role = ? WHERE id = ?", (role, user_id))
+    conn.commit()
+    conn.close()
+
+
+def _update_user_password(user_id: str, senha_plain: str):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE usuarios SET senha_hash = ? WHERE id = ?", (_sha256(senha_plain), user_id))
+    conn.commit()
+    conn.close()
+
+
+def _create_user(email: str, senha: str, cliente_id: str, role: str) -> str:
+    user_id = str(uuid.uuid4())
+    now = datetime.utcnow().isoformat()
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO usuarios (id, email, senha_hash, cliente_id, role, status, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?)",
+        (user_id, (email or "").strip().lower(), _sha256(senha), cliente_id, role, now),
+    )
+    conn.commit()
+    conn.close()
+    return user_id
 
 
 def _upsert_admin_user(email: str, senha: str) -> dict:
@@ -152,7 +465,6 @@ def _upsert_admin_user(email: str, senha: str) -> dict:
             (cliente_id, "DEFAULT", "INIT", now),
         )
 
-        # NOTE: aqui criamos como admin; se for admin@admin, o login promove para superadmin e atualiza o banco.
         cur.execute(
             "INSERT INTO usuarios (id, email, senha_hash, cliente_id, role, status, created_at) VALUES (?, ?, ?, ?, 'admin', 'active', ?)",
             (user_id, email, senha_hash, cliente_id, now),
@@ -187,13 +499,12 @@ def login():
     if _sha256(senha) != (user.get("senha_hash") or ""):
         return render_template_string(LOGIN_FORM_HTML, error="Email ou senha invalidos.")
 
-    # OK: cria sessao
     session["user_id"] = user["id"]
     session["email"] = user["email"]
     session["cliente_id"] = user["cliente_id"]
 
-    # SUPERADMIN: email fixo Admin@admin (case-insensitive)
-    sess_role = user.get("role")
+    sess_role = (user.get("role") or "viewer").strip().lower()
+
     if (user.get("email") or "").strip().lower() == "admin@admin":
         sess_role = "superadmin"
         try:
@@ -223,11 +534,147 @@ def home():
     return render_template("admin_home.html")
 
 
+@admin_bp.route("/usuarios", methods=["GET"])
+@admin_required
+def usuarios_home():
+    max_active = 5
+    msg = (request.args.get("msg") or "").strip()
+    err = (request.args.get("err") or "").strip()
+
+    if _is_superadmin():
+        usuarios = _list_all_users()
+        clientes = _list_clientes()
+        return render_template_string(
+            USERS_HOME_HTML,
+            usuarios=usuarios,
+            clientes=clientes,
+            is_superadmin=True,
+            max_active=max_active,
+            message=msg if msg else None,
+            error=err if err else None,
+        )
+
+    cliente_id = session.get("cliente_id") or ""
+    usuarios = _list_users_for_cliente(cliente_id)
+    return render_template_string(
+        USERS_HOME_HTML,
+        usuarios=usuarios,
+        clientes=[],
+        is_superadmin=False,
+        max_active=max_active,
+        message=msg if msg else None,
+        error=err if err else None,
+    )
+
+
+@admin_bp.route("/usuarios/create", methods=["POST"])
+@admin_required
+def usuarios_create():
+    max_active = 5
+
+    role = _normalize_role(request.form.get("role"))
+    email = (request.form.get("email") or "").strip().lower()
+    senha = (request.form.get("senha") or "").strip()
+
+    if not email or not senha:
+        return redirect(url_for("admin.usuarios_home", err="Informe email e senha."))
+
+    if not _password_ok(senha):
+        return redirect(url_for("admin.usuarios_home", err="Senha muito curta (minimo 6)."))
+
+    if _is_superadmin():
+        cliente_id = (request.form.get("cliente_id") or "").strip()
+        if not cliente_id:
+            return redirect(url_for("admin.usuarios_home", err="cliente_id obrigatorio."))
+    else:
+        cliente_id = (session.get("cliente_id") or "").strip()
+
+    active_count = _count_active_users(cliente_id)
+    if active_count >= max_active:
+        return redirect(url_for("admin.usuarios_home", err="Limite de 5 usuarios ativos atingido para este cliente."))
+
+    existing = _get_user_by_email(email)
+    if existing:
+        return redirect(url_for("admin.usuarios_home", err="Email ja existe."))
+
+    _create_user(email=email, senha=senha, cliente_id=cliente_id, role=role)
+    return redirect(url_for("admin.usuarios_home", msg="Usuario criado."))
+
+
+@admin_bp.route("/usuarios/toggle", methods=["POST"])
+@admin_required
+def usuarios_toggle():
+    user_id = (request.form.get("user_id") or "").strip()
+    if not user_id:
+        return redirect(url_for("admin.usuarios_home", err="user_id invalido."))
+
+    target = _get_user_by_id(user_id)
+    if not target:
+        return redirect(url_for("admin.usuarios_home", err="Usuario nao encontrado."))
+
+    if not _require_same_cliente_or_superadmin(target.get("cliente_id")):
+        return ("Acesso negado", 403)
+
+    if (session.get("user_id") or "") == target.get("id"):
+        return redirect(url_for("admin.usuarios_home", err="Voce nao pode desativar seu proprio usuario."))
+
+    new_status = "inactive" if (target.get("status") == "active") else "active"
+
+    if new_status == "active":
+        max_active = 5
+        active_count = _count_active_users(target.get("cliente_id"))
+        if active_count >= max_active:
+            return redirect(url_for("admin.usuarios_home", err="Limite de 5 usuarios ativos atingido para este cliente."))
+
+    _update_user_status(user_id, new_status)
+    return redirect(url_for("admin.usuarios_home", msg="Status atualizado."))
+
+
+@admin_bp.route("/usuarios/role", methods=["POST"])
+@admin_required
+def usuarios_set_role():
+    user_id = (request.form.get("user_id") or "").strip()
+    role = _normalize_role(request.form.get("role"))
+
+    if not user_id:
+        return redirect(url_for("admin.usuarios_home", err="user_id invalido."))
+
+    target = _get_user_by_id(user_id)
+    if not target:
+        return redirect(url_for("admin.usuarios_home", err="Usuario nao encontrado."))
+
+    if not _require_same_cliente_or_superadmin(target.get("cliente_id")):
+        return ("Acesso negado", 403)
+
+    _update_user_role(user_id, role)
+    return redirect(url_for("admin.usuarios_home", msg="Role atualizado."))
+
+
+@admin_bp.route("/usuarios/reset-senha", methods=["POST"])
+@admin_required
+def usuarios_reset_senha():
+    user_id = (request.form.get("user_id") or "").strip()
+    senha = (request.form.get("senha") or "").strip()
+
+    if not user_id:
+        return redirect(url_for("admin.usuarios_home", err="user_id invalido."))
+
+    if not _password_ok(senha):
+        return redirect(url_for("admin.usuarios_home", err="Senha muito curta (minimo 6)."))
+
+    target = _get_user_by_id(user_id)
+    if not target:
+        return redirect(url_for("admin.usuarios_home", err="Usuario nao encontrado."))
+
+    if not _require_same_cliente_or_superadmin(target.get("cliente_id")):
+        return ("Acesso negado", 403)
+
+    _update_user_password(user_id, senha)
+    return redirect(url_for("admin.usuarios_home", msg="Senha atualizada."))
+
+
 @admin_bp.route("/bootstrap", methods=["POST"])
 def bootstrap():
-    # Regra:
-    # - Se nao existe nenhum usuario ainda, bootstrap e liberado.
-    # - Se ja existe, precisa estar logado e ser admin/superadmin.
     if _exists_any_user():
         if not _is_logged_in():
             return jsonify({"error": "Login obrigatorio"}), 401
@@ -242,13 +689,16 @@ def bootstrap():
     if not nome_cliente or not email or not senha:
         return jsonify({"error": "Campos obrigatorios: nome_cliente, email, senha"}), 400
 
+    if not _password_ok(senha):
+        return jsonify({"error": "Senha muito curta (minimo 6)."}), 400
+
     cliente_id = str(uuid.uuid4())
     usuario_id = str(uuid.uuid4())
 
     api_key_plain = secrets.token_urlsafe(32)
-    api_key_hash = hashlib.sha256(api_key_plain.encode()).hexdigest()
+    api_key_hash = hashlib.sha256(api_key_plain.encode("utf-8")).hexdigest()
 
-    senha_hash = hashlib.sha256(senha.encode()).hexdigest()
+    senha_hash = _sha256(senha)
 
     now = datetime.utcnow().isoformat()
 
@@ -266,7 +716,10 @@ def bootstrap():
         conn.commit()
     except Exception as e:
         conn.rollback()
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
         return jsonify({"error": "Falha ao criar cliente", "details": str(e)}), 500
     finally:
         try:
