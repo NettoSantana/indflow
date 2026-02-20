@@ -1,7 +1,7 @@
 {# 
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\templates\admin_home.html
-LAST_RECODE: 2026-02-20 20:42 America/Bahia
-MOTIVO: Remover botoes superiores (Usuarios/Clientes/Sair) do header do painel admin.
+PATH: modules/admin/templates/admin_home.html
+LAST_RECODE: 2026-02-20 20:50 America/Bahia
+MOTIVO: Remover cards Clientes, Producao e Sair do painel admin.
 #}
 {% extends "base.html" %}
 {% block title %}Admin — IndFlow{% endblock %}
@@ -20,9 +20,7 @@ MOTIVO: Remover botoes superiores (Usuarios/Clientes/Sair) do header do painel a
   .card:hover{transform:translateY(-1px);box-shadow:0 10px 25px rgba(0,0,0,.06);}
   .card h2{margin:0 0 8px 0;font-size:18px;}
   .card p{margin:0;color:#64748b;font-size:14px;line-height:1.35;}
-  .pill{display:inline-block;margin-top:10px;padding:6px 10px;border-radius:999px;background:#f1f5f9;color:#0f172a;border:1px solid #e5e7eb;font-size:12px;font-weight:700;}
-  .pill.primary{background:#2563eb;color:#ffffff;border-color:#2563eb;}
-  .pill.danger{background:#dc2626;color:#ffffff;border-color:#dc2626;}
+  .pill{display:inline-block;margin-top:10px;padding:6px 10px;border-radius:999px;background:#2563eb;color:#ffffff;border:1px solid #2563eb;font-size:12px;font-weight:700;}
   .note{margin-top:14px;color:#64748b;font-size:13px;}
 </style>
 
@@ -39,41 +37,15 @@ MOTIVO: Remover botoes superiores (Usuarios/Clientes/Sair) do header do painel a
       <div class="card">
         <h2>Usuarios</h2>
         <p>Criar, ativar/desativar, trocar role e redefinir senha. Limite de 5 usuarios ativos por cliente.</p>
-        <span class="pill primary">Abrir</span>
+        <span class="pill">Abrir</span>
       </div>
     </a>
-
-    {% if (session.get("role") or "")|lower == "superadmin" %}
-    <a class="card-link" href="/clientes/">
-      <div class="card">
-        <h2>Clientes</h2>
-        <p>Criar clientes (tenants), gerar API Key e ativar/desativar clientes.</p>
-        <span class="pill primary">Abrir</span>
-      </div>
-    </a>
-    {% endif %}
 
     <a class="card-link" href="/devices/">
       <div class="card">
         <h2>Devices</h2>
         <p>Visualizar devices, associacoes e informacoes de comunicacao.</p>
-        <span class="pill primary">Abrir</span>
-      </div>
-    </a>
-
-    <a class="card-link" href="/producao/">
-      <div class="card">
-        <h2>Producao</h2>
-        <p>Acompanhar status das maquinas, metas, producao e paradas.</p>
-        <span class="pill primary">Abrir</span>
-      </div>
-    </a>
-
-    <a class="card-link" href="/admin/logout">
-      <div class="card">
-        <h2>Sair</h2>
-        <p>Encerrar sessao atual.</p>
-        <span class="pill danger">Sair</span>
+        <span class="pill">Abrir</span>
       </div>
     </a>
   </div>
