@@ -1,10 +1,8 @@
 <!--
-Arquivo: templates/base.html
-Alterado em: 2026-02-01 18:55 (America/Bahia)
-Por: ChatGPT
-Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas iguais ao PC.
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\base.html
+LAST_RECODE: 2026-02-20 18:05 (America/Bahia)
+MOTIVO: Simplificar menu superior (Dashboard, Indicadores futuro, Configuracoes, Admin superadmin, Sair), tornar logo clicavel para Dashboard e aplicar visibilidade por role (session['role']).
 -->
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -59,6 +57,8 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       gap:18px;
     }
 
+    .nav-disabled{display:inline-block;padding:10px 14px;border-radius:10px;color:#94a3b8;cursor:not-allowed;user-select:none;}
+
     .nav-links a{
       text-decoration:none;
       font-size:15px;
@@ -94,15 +94,19 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       <span class="system-name">IndFlow</span>
     </div>
 
-    <div class="nav-links">
+        <div class="nav-links">
       {% if session.get("user_id") %}
-        <a href="/producao">Produção</a>
-        <a href="/manutencao">Manutenção</a>
-        <a href="/ativos">Ativos</a>
-        <a href="/devices/">Dispositivos</a>
-        <a href="/clientes">Clientes</a>
-        <a href="/utilidades">Utilidades</a>
-        <a href="/admin">Admin</a>
+        <a href="/">Dashboard</a>
+        <span class="nav-disabled" title="Em breve">Indicadores</span>
+
+        {% set role = (session.get("role") or "")|lower %}
+        {% if role in ["admin", "superadmin"] %}
+          <a href="/admin/">Configuracoes</a>
+        {% endif %}
+        {% if role == "superadmin" %}
+          <a href="/clientes">Admin</a>
+        {% endif %}
+
         <a href="/admin/logout">Sair</a>
       {% else %}
         <a href="/admin/login">Login</a>
