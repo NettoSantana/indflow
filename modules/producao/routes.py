@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-21 07:02 America/Bahia
-# MOTIVO: Historico deve anexar OP apenas no dia de abertura (evita duplicacao ao encerrar apos virada).
+# LAST_RECODE: 2026-02-21 11:40 America/Bahia
+# MOTIVO: Adicionar rota dedicada para abrir o formulario de configuracao (config_maquina_for.html) sem alterar /config/<machine_id>.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -1804,6 +1804,15 @@ def api_salvar_diaria():
 def config_machine(machine_id):
     return render_template("config_maquina.html", machine_id=machine_id)
 
+
+
+# =====================================================
+# PAGINA DE CONFIGURACAO (FORMULARIO - NOVO)
+# =====================================================
+@producao_bp.route("/config-for/<machine_id>")
+@login_required
+def config_machine_form(machine_id):
+    return render_template("config_maquina_for.html", machine_id=machine_id)
 
 # =====================================================
 # SALVAR CONFIGURACAO DA MAQUINA
