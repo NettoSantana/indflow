@@ -1,12 +1,13 @@
 # PATH: modules/machine_routes.py
-# LAST_RECODE: 2026-02-10 14:14 America/Bahia
-# MOTIVO: Remover pre-set de ultima_hora e baseline_hora antes do calculo horario para evitar heranca na virada da hora.
+# LAST_RECODE: 2026-02-21 00:00 America/Bahia
+# MOTIVO: Adicionar rota /maquina/<machine_id>/historico para redirecionar ao /producao/historico e eliminar 404 no HUB.
 
 import os
 import hashlib
 import uuid
 import re
-from flask import Blueprint, request, jsonify, render_template, session
+from urllib.parse import urlencode
+from flask import Blueprint, request, jsonify, render_template, session, redirect, url_for
 from datetime import datetime, timedelta
 from modules.db_indflow import get_db
 from modules.machine_state import get_machine
@@ -2289,6 +2290,30 @@ def machine_status():
         m["producao_hora_liquida"] = ph
 
     return jsonify(m)
+
+
+@machine_bp.route("/maquina/<machine_id>/historico", methods=["GET"])
+@login_required
+def maquina_historico(machine_id):
+    """
+    Compat MAIN: o HUB chama /maquina/<machine_id>/historico.
+    No DEV a tela usa /producao/historico?machine_id=...
+    Aqui redirecionamos para manter a UI funcionando sem alterar o front.
+    Preserva querystring (inicio/fim/format) quando existir.
+    """
+    mid = _norm_machine_id(machine_id)
+
+    args = {}
+    try:
+        args = dict(request.args.items())
+    except Exception:
+        args = {}
+    args["machine_id"] = mid
+
+    qs = urlencode(args) if args else ""
+    base = url_for("machine_bp.historico_page")
+    target = f"{base}?{qs}" if qs else base
+    return redirect(target)
 
 @machine_bp.route("/producao/historico", methods=["GET"])
 @login_required

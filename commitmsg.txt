@@ -1,1 +1,2 @@
-﻿recode: padronizar navbar no base (Dashboard/Indicadores/Configuracoes/Admin/Sair) e logo clicavel
+﻿fix: corrigido link do card Configuração para usar /producao/config/<machine_id>
+Alterada apenas 1 linha no config_maquina.html
