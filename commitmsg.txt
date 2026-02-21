@@ -1,2 +1,5 @@
-﻿fix: corrigido link do card Configuração para usar /producao/config/<machine_id>
-Alterada apenas 1 linha no config_maquina.html
+﻿fix: adicionar rota /maquina/<machine_id>/historico no MAIN
+
+- Corrige 404 do HUB ao abrir Historico
+- Rota nova redireciona para /producao/historico?machine_id=...
+- Preserva querystring (inicio/fim/format)
