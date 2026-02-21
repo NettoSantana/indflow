@@ -1,0 +1,55 @@
+{# 
+PATH: modules/clientes/templates/clientes_form.html
+LAST_RECODE: 2026-02-20 21:30 America/Bahia
+MOTIVO: Criar tela de cadastro de cliente separada da lista (fluxo Adicionar).
+#}
+{% extends "base.html" %}
+{% block title %}Adicionar Cliente — IndFlow{% endblock %}
+
+{% block content %}
+<style>
+  .wrap{max-width:900px;margin:0 auto;padding:24px;}
+  .card{background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin-bottom:16px;}
+  .muted{color:#64748b;font-size:14px;line-height:1.35;}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
+  label{display:block;font-size:13px;color:#334155;margin-bottom:6px;}
+  input{padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;min-width:320px;max-width:100%;}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px;}
+  button{padding:10px 14px;border:0;border-radius:10px;background:#2563eb;color:#ffffff;font-weight:600;cursor:pointer;}
+  a.btn{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;text-decoration:none;font-weight:600;}
+  .hint{margin-top:10px;padding:12px;border-radius:12px;background:#f8fafc;border:1px solid #e5e7eb;}
+</style>
+
+<div class="wrap">
+
+  <div class="card">
+    <h1 style="margin:0 0 6px 0;">Adicionar cliente</h1>
+    <div class="muted">
+      Crie um cliente (tenant) e gere a API Key. A chave sera exibida apenas uma vez apos salvar.
+    </div>
+  </div>
+
+  <div class="card">
+    <form method="post" action="{{ url_for('clientes.create_cliente') }}">
+      <div class="row">
+        <div style="flex:1 1 360px;">
+          <label>Nome do cliente</label>
+          <input name="nome" placeholder="Ex: Cliente A / Fabrica X" required>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit">Salvar e gerar API Key</button>
+        <a class="btn" href="{{ url_for('clientes.home') }}">Cancelar</a>
+      </div>
+
+      <div class="hint">
+        <div class="muted">
+          Importante: a API Key nao fica salva em texto no banco. Anote quando o sistema exibir.
+        </div>
+      </div>
+    </form>
+  </div>
+
+</div>
+{% endblock %}
