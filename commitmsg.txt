@@ -1,5 +1,4 @@
-﻿fix(producao): criar rota dedicada para formulario de configuracao
+﻿fix(producao): GET /config abre formulario config_maquina_for.html
 
-- Adiciona GET /producao/config-for/<machine_id>
-- Renderiza config_maquina_for.html
-- Nao altera /producao/config/<machine_id> para evitar pular o HUB
+- Ajusta render_template da pagina de configuracao
+- Mantem HUB separado do formulario
