@@ -1,5 +1,5 @@
-﻿fix(ui): destravar edicao de horarios em turnos/pausas na config_maquina_for
+﻿fix(ui): corrigir salvamento de unidade (metro linear) e conversao mantendo compatibilidade no payload
 
-- Evita recarregar config do servidor durante edicao (configDirty)
-- Atualiza tabela 24h via cache local (atualizarTabelaLocal)
-- Limpa dirty apos salvar e recarrega do servidor
+- Envia unidade_1, unidade_2 e conv_m_por_pcs tambem no top-level (alem de units)
+- Conversao so vira obrigatoria quando existir pcs + (m ou m2); caso contrario usa conv=1
+- Evita perda de configuracao ao recarregar a tela
