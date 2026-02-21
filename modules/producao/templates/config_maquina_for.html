@@ -1,221 +1,108 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
-LAST_RECODE: 2026-02-21 12:25 (America/Bahia)
-MOTIVO: Remover botoes Historico, Novo OP e Zerar Producao do topo da pagina de configuracao.
+LAST_RECODE: 2026-02-21 17:00 (America/Bahia)
+MOTIVO: Implementar configuracao industrial (multiplos turnos + pausas planejadas) no frontend, enviando payload v2 para /machine/config e mantendo compatibilidade.
 -->
 
 {% extends "base.html" %}
 
-{% block title %}Configuração da Máquina{% endblock %}
+{% block title %}Configuracao da Maquina{% endblock %}
 
 {% block content %}
 <style>
-  /* TABELA ZEBRADA */
-  #tabela-horas tbody tr:nth-child(even) { background-color: #f3f4f6; }
-  #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
-  #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
-
-  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim)
-     Azul claro + branco, com "duas faixas" (topo mais claro / base mais azul). */
-  #tabela-horas tbody tr.turno-ativo{
-    background-color:#e0f2fe; /* fallback */
-    background-image:linear-gradient(180deg, #ffffff 0%, #e0f2fe 100%);
-    border-top:1px solid #ffffff;
-    border-bottom:1px solid #bfdbfe;
-  }
-  #tabela-horas tbody tr.turno-ativo:hover{
-    background-color:#bae6fd; /* fallback */
-    background-image:linear-gradient(180deg, #f0f9ff 0%, #bae6fd 100%);
-  }
-
-  /* REFUGO EDITAVEL */
-  .refugo-input{
-    width: 90px;
-    padding: 6px 8px;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    font-size: 14px;
-    text-align: center;
-    background: #ffffff;
-  }
-  .refugo-input:focus{
-    outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37,99,235,0.20);
-  }
-  .refugo-input:disabled{
-    background: #e5e7eb;
-    color: #64748b;
-    cursor: not-allowed;
-  }
-
-  /* HELP TEXT */
-  .help-text{
-    font-size: 13px;
-    color: #64748b;
-    margin-top: 6px;
-    line-height: 1.3;
-  }
-
-  .op-ativo-box{
-    cursor:pointer;
-    user-select:none;
-
-    border:1px solid #e5e7eb;
-    border-radius:14px;
-    padding:8px 10px;
-    background:#f8fafc;
-    min-width:220px;
-  }
-  .op-ativo-title{
-    font-size:12px;
-    font-weight:900;
-    color:#334155;
-    text-transform:uppercase;
-    letter-spacing:0.03em;
-    margin-bottom:2px;
-  }
-  .op-ativo-info{
-    font-size:13px;
-    font-weight:900;
-    color:#0f172a;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-  }
-
-  .modal-backdrop{
-    position:fixed;
-    inset:0;
-    background:rgba(15,23,42,0.35);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:18px;
-    z-index:50;
-  }
-  .modal{
-    width:100%;
-    max-width:640px;
-    background:#fff;
-    border-radius:18px;
-    border:1px solid #e5e7eb;
-    box-shadow:0 18px 40px rgba(0,0,0,0.18);
-    overflow:hidden;
-  }
-  .modal-header{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:14px 16px;
-    border-bottom:1px solid #e5e7eb;
-    background:#f8fafc;
-  }
-  .modal-title{
-    font-size:14px;
-    font-weight:900;
-    color:#0f172a;
-  }
-  .modal-close{
-    border:1px solid #e5e7eb;
-    background:#fff;
-    border-radius:10px;
-    width:34px;
-    height:34px;
-    font-size:16px;
-    line-height:32px;
-    text-align:center;
-    cursor:pointer;
-  }
-  .modal-body{ padding:16px; 
-    max-height: 80vh;
-    overflow-y: auto;
-}
+#tabela-horas tbody tr:nth-child(even){background-color:#f3f4f6;} #tabela-horas tbody tr:nth-child(odd){background-color:#ffffff;} #tabela-horas tbody tr:hover{background-color:#e5e7eb;}
+#tabela-horas tbody tr.turno-ativo{background-color:#e0f2fe;background-image:linear-gradient(180deg,#ffffff 0%,#e0f2fe 100%);border-top:1px solid #ffffff;border-bottom:1px solid #bfdbfe;}
+#tabela-horas tbody tr.turno-ativo:hover{background-color:#bae6fd;background-image:linear-gradient(180deg,#f0f9ff 0%,#bae6fd 100%);}
+#tabela-horas tbody tr.pausa-planejada{background-color:#f1f5f9;background-image:linear-gradient(180deg,#ffffff 0%,#f1f5f9 100%);border-top:1px solid #ffffff;border-bottom:1px solid #e2e8f0;}
+#tabela-horas tbody tr.pausa-planejada:hover{background-color:#e2e8f0;background-image:linear-gradient(180deg,#ffffff 0%,#e2e8f0 100%);}
+.refugo-input{width:90px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;text-align:center;background:#ffffff;}
+.refugo-input:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,0.20);}
+.refugo-input:disabled{background:#e5e7eb;color:#64748b;cursor:not-allowed;}
+.help-text{font-size:13px;color:#64748b;margin-top:6px;line-height:1.3;}
+.modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,0.35);display:flex;align-items:center;justify-content:center;padding:18px;z-index:50;}
+.modal{width:100%;max-width:640px;background:#fff;border-radius:18px;border:1px solid #e5e7eb;box-shadow:0 18px 40px rgba(0,0,0,0.18);overflow:hidden;}
+.modal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #e5e7eb;background:#f8fafc;}
+.modal-title{font-size:14px;font-weight:900;color:#0f172a;}
+.modal-close{border:1px solid #e5e7eb;background:#fff;border-radius:10px;width:34px;height:34px;font-size:16px;line-height:32px;text-align:center;cursor:pointer;}
+.modal-body{padding:16px;max-height:80vh;overflow-y:auto;}
+.shift-card{border:1px solid #e5e7eb;border-radius:14px;padding:12px 12px;background:#ffffff;}
+.shift-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.shift-title{font-size:13px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:0.03em;}
+.shift-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.break-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+.break-row .input{min-width:140px;}
+.summary-table td,.summary-table th{padding:8px 10px;border-bottom:1px solid #e5e7eb;font-size:13px;}
+.summary-table th{text-align:left;color:#334155;font-weight:900;}
+.days-box{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;}
+.day-pill{display:flex;align-items:center;gap:6px;border:1px solid #e5e7eb;border-radius:999px;padding:6px 10px;background:#f8fafc;font-size:13px;color:#0f172a;}
 </style>
 
 <div>
-
-  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-    <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
-
-    </div>
-
-      <button id="btn-reset" type="button" class="btn" style="background:#dc2626;color:#fff;">Zerar Producao</button>
-    </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+    <h1 class="section-title" id="titulo-maquina">Configuracao da Maquina</h1>
+    <button id="btn-reset" type="button" class="btn" style="background:#dc2626;color:#fff;">Zerar Producao</button>
   </div>
 
   <div class="card">
     <form id="config-form">
+      <label class="mt-20">Dias ativos da maquina:</label>
+      <div class="days-box" id="dias-ativos"></div>
+      <div class="help-text">Usado para planejamento. Por enquanto, nao bloqueia a contagem automaticamente.</div>
 
-      <label>Meta do Turno (pcs):</label>
-      <input type="number" id="meta" required>
+      <label class="mt-20">Turnos (ate 3) com pausas planejadas (almoco, cafe, setup):</label>
+      <div id="shifts-container" style="display:flex;flex-direction:column;gap:12px;margin-top:10px;"></div>
+      <div style="display:flex;justify-content:flex-start;gap:10px;margin-top:10px;flex-wrap:wrap;">
+        <button id="btnAddShift" type="button" class="btn btn-secondary">Adicionar turno</button>
+      </div>
 
-      <label class="mt-20">Unidade de Produção (até 2):</label>
-
-      <div class="row">
-        <div class="col">
-          <select id="unidade_1" class="input">
-            <option value="">-</option>
-            <option value="pcs">Unidade (pcs)</option>
-            <option value="m">Metro linear (m)</option>
-            <option value="m2">Metro quadrado (m2)</option>
-          </select>
-        </div>
-
-        <div class="col">
-          <select id="unidade_2" class="input">
-            <option value="">-</option>
-            <option value="pcs">Unidade (pcs)</option>
-            <option value="m">Metro linear (m)</option>
-            <option value="m2">Metro quadrado (m2)</option>
-          </select>
+      <div class="mt-20" id="shifts-summary-wrap" style="display:none;">
+        <label>Resumo (tempo planejado e metas):</label>
+        <div class="card" style="margin-top:10px;padding:0;">
+          <table class="summary-table" style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr>
+                <th>Turno</th><th>Duracao</th><th>Pausas</th><th>Planejado</th><th>Meta</th><th>Meta/h</th>
+              </tr>
+            </thead>
+            <tbody id="shifts-summary-body"></tbody>
+            <tfoot>
+              <tr>
+                <th>Total</th><th id="sum-dur">-</th><th id="sum-break">-</th><th id="sum-plan">-</th><th id="sum-meta">-</th><th id="sum-metah">-</th>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       </div>
 
-      <label class="mt-20">Conversão (1 pcs = X metros):</label>
-      <input
-        type="number"
-        id="conv_m_por_pcs"
-        class="input"
-        step="0.001"
-        min="0.001"
-        placeholder="Ex: 0.85"
-        required
-      >
-
-      <div class="row mt-20">
-        <div class="col">
-          <label>Início do Turno:</label>
-          <input type="time" id="inicio" required>
-        </div>
-
-        <div class="col">
-          <label>Fim do Turno:</label>
-          <input type="time" id="fim" required>
-        </div>
-      </div>
+      <label class="mt-20">Tempo ideal por peca (segundos):</label>
+      <input type="number" id="ideal_sec_per_piece" class="input" step="0.01" min="0.01" placeholder="Ex: 3.20" required>
+      <div class="help-text">Necessario para Performance e OEE real.</div>
 
       <label class="mt-20">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
 
-      <label class="mt-20">Alerta de Parada por Inatividade (segundos sem produção):</label>
-      <input
-        type="number"
-        id="no_count_stop_sec"
-        class="input"
-        min="5"
-        step="1"
-        placeholder="Ex: 60"
-        required
-      >
-      <div class="help-text">
-        Mesmo que a maquina esteja em AUTO/PRODUZINDO, se nao houver aumento de contagem por este tempo,
-        o sistema considera PARADA. Use valores maiores para ciclos longos (ex: 180s).
+      <label class="mt-20">Alerta de Parada por Inatividade (segundos sem producao):</label>
+      <input type="number" id="no_count_stop_sec" class="input" min="5" step="1" placeholder="Ex: 60" required>
+      <div class="help-text">Mesmo que a maquina esteja em AUTO/PRODUZINDO, se nao houver aumento de contagem por este tempo, o sistema considera PARADA.</div>
+
+      <label class="mt-20">Unidade de Producao (ate 2):</label>
+      <div class="row">
+        <div class="col">
+          <select id="unidade_1" class="input">
+            <option value="">-</option><option value="pcs">Unidade (pcs)</option><option value="m">Metro linear (m)</option><option value="m2">Metro quadrado (m2)</option>
+          </select>
+        </div>
+        <div class="col">
+          <select id="unidade_2" class="input">
+            <option value="">-</option><option value="pcs">Unidade (pcs)</option><option value="m">Metro linear (m)</option><option value="m2">Metro quadrado (m2)</option>
+          </select>
+        </div>
       </div>
 
-      <button class="btn btn-primary mt-20" type="submit">
-        Salvar Configuração
-      </button>
+      <label class="mt-20">Conversao (1 pcs = X metros):</label>
+      <input type="number" id="conv_m_por_pcs" class="input" step="0.001" min="0.001" placeholder="Ex: 0.85" required>
+
+      <button class="btn btn-primary mt-20" type="submit">Salvar Configuracao</button>
     </form>
   </div>
 
@@ -232,12 +119,12 @@ MOTIVO: Remover botoes Historico, Novo OP e Zerar Producao do topo da pagina de 
           <label class="mt-20">Operador:</label><input type="text" id="op_operador" class="input" required>
           <label class="mt-20">Bobinas (opcional):</label>
           <div class="help-text">Adicione uma ou mais bobinas em metros (somente numeros). Se ficar vazio, nenhuma bobina sera registrada.</div>
-          <div id="op_bobinas_list" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;"></div>
+          <div id="op_bobinas_list" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;"></div>
           <button id="btnAddBobina" type="button" class="btn btn-secondary" style="margin-top:10px;">Adicionar bobina</button>
           <input type="hidden" id="op_bobina" value="">
           <label class="mt-20">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
           <label class="mt-20">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
-          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
             <button type="button" class="btn btn-secondary" id="btnCancelOp">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnStartOp">Iniciar OP</button>
           </div>
@@ -247,619 +134,641 @@ MOTIVO: Remover botoes Historico, Novo OP e Zerar Producao do topo da pagina de 
     </div>
   </div>
 
-  <h2 class="section-title mt-30">Distribuicao da Meta por Hora</h2>
-
+  <h2 class="section-title mt-30">Distribuicao da Meta por Hora (24h)</h2>
   <div class="card">
     <table class="table" id="tabela-horas">
-      <thead>
-        <tr>
-          <th>Faixa Horária</th>
-          <th>Meta da Hora</th>
-          <th>Produzido Hora</th>
-          <th>Refugo Hora</th>
-        </tr>
-      </thead>
+      <thead><tr><th>Faixa Horaria</th><th>Meta da Hora</th><th>Produzido Hora</th><th>Refugo Hora</th></tr></thead>
       <tbody></tbody>
     </table>
   </div>
-
 </div>
 
 <script>
 const machine_id = window.location.pathname.split("/").pop();
+document.getElementById("titulo-maquina").textContent = "Configuracao da Maquina - " + String(machine_id||"").toUpperCase();
 
-document.getElementById("titulo-maquina").textContent =
-  "Configuração da Máquina - " + machine_id.toUpperCase();
-
-document.getElementById("btn-historico").href =
-  `/producao/historico?machine_id=${machine_id}`;
-
-let opAtiva=null;
-let opModalMode="new"; // "new" | "edit"
-
-function _setOpModalMode(mode){
-  opModalMode = (mode === "edit") ? "edit" : "new";
-  const t=document.getElementById("opModalTitle");
-  const b=document.getElementById("btnStartOp");
-  if(t) t.textContent = (opModalMode === "edit") ? "Editar Ordem de Producao (OP)" : "Nova Ordem de Producao (OP)";
-  if(b) b.textContent = (opModalMode === "edit") ? "Salvar Alteracoes" : "Iniciar OP";
-}
-
-function _createBobinaRow(value){
-  const row=document.createElement("div");
-  row.style.display="flex";
-  row.style.gap="10px";
-  row.style.alignItems="center";
-
-  const inp=document.createElement("input");
-  inp.type="number";
-  inp.min="0";
-  inp.step="1";
-  inp.className="input";
-  inp.placeholder="Metros";
-  inp.value=String(value||"");
-  inp.style.flex="1";
-
-  const btn=document.createElement("button");
-  btn.type="button";
-  btn.className="btn btn-secondary";
-  btn.textContent="Remover";
-  btn.addEventListener("click",()=>{ row.remove(); _syncHiddenBobinaFirst(); });
-
-  row.appendChild(inp);
-  row.appendChild(btn);
-  return row;
-}
-
-function _getBobinasFromUI(){
-  const list=document.getElementById("op_bobinas_list");
-  if(!list) return [];
-  const out=[];
-  const rows=list.querySelectorAll("div");
-  rows.forEach((r)=>{
-    const inp=r.querySelector("input");
-    const v=String((inp && inp.value) ? inp.value : "").trim();
-    if(v) out.push(v);
-  });
-  return out;
-}
-
-function _setBobinasToUI(arr){
-  const list=document.getElementById("op_bobinas_list");
-  if(!list) return;
-  list.innerHTML="";
-  const a = Array.isArray(arr) ? arr : [];
-  if(a.length === 0){
-    list.appendChild(_createBobinaRow(""));
-    return;
-  }
-  a.forEach((v)=>{ list.appendChild(_createBobinaRow(v)); });
-}
-
-function _syncHiddenBobinaFirst(){
-  const h=document.getElementById("op_bobina");
-  if(!h) return;
-  const bobinas=_getBobinasFromUI();
-  h.value = bobinas.length ? bobinas[0] : "";
-}
-
-function _fillOpFormFromData(d){
-  document.getElementById("op_os").value = String(d.os||"");
-  document.getElementById("op_lote").value = String(d.lote||"");
-  document.getElementById("op_operador").value = String(d.operador||"");
-  document.getElementById("op_gr_fio").value = String(d.gr_fio||"");
-  document.getElementById("op_obs").value = String(d.observacoes||"");
-
-  const bobinas =
-    Array.isArray(d.bobinas) ? d.bobinas :
-    (d.bobina ? [String(d.bobina)] : []);
-  _setBobinasToUI(bobinas);
-  _syncHiddenBobinaFirst();
-}
-function _showOp(info){
-  const box=document.getElementById("op-ativo-box"),
-        i=document.getElementById("op-ativo-info"),
-        bn=document.getElementById("btn-op-new"),
-        be=document.getElementById("btn-op-end");
-  if(box)box.style.display="block";
-  if(i)i.textContent=info||"-";
-  if(bn)bn.style.display="none";
-  if(be)be.style.display="inline-block";
-}
-function _showNoOp(){
-  const box=document.getElementById("op-ativo-box"),
-        i=document.getElementById("op-ativo-info"),
-        bn=document.getElementById("btn-op-new"),
-        be=document.getElementById("btn-op-end");
-  if(box)box.style.display="none";
-  if(i)i.textContent="-";
-  if(bn)bn.style.display="inline-block";
-  if(be)be.style.display="none";
-}
-async function _getJson(url){
-  try{
-    const r=await fetch(url);
-    if(!r.ok)return null;
-    return await r.json();
-  }catch(e){
-    return null;
-  }
-}
-
-function _normalizeMachineStatusPayload(payload){
-  // Alguns endpoints retornam { machine_status: {...}, op_status: {...} }
-  // Outros retornam o status direto. Aqui normalizamos para evitar tela vazia.
-  if(payload && typeof payload === "object" && payload.machine_status){
-    return { machine: payload.machine_status, op: (payload.op_status || null) };
-  }
-  return { machine: payload, op: null };
-}
-
-async function carregarOpUI(){
-  // Preferir o endpoint que ja retorna tudo (status da maquina + op_status), quando disponivel.
-  const payload = await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(payload){
-    const norm = _normalizeMachineStatusPayload(payload);
-    if(norm.op && norm.op.active){
-      opAtiva = norm.op;
-      const info = `OS ${String(opAtiva.os||"")} | Lote ${String(opAtiva.lote||"")} | Operador ${String(opAtiva.operador||"")}`;
-      _showOp(info);
-      return;
-    }
-  }
-
-  // Fallback: endpoint antigo (caso exista no backend)
-  const d = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(!d){ _showNoOp(); return; }
-  if(d.active){
-    opAtiva = d;
-    const info = `OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
-    _showOp(info);
-  }else{
-    opAtiva = null;
-    _showNoOp();
-  }
-}
-function openOpModal(mode){
-  _setOpModalMode(mode);
-  if(opModalMode==="edit"){
-    if(!opAtiva){ alert("Nao ha OP ativa para editar."); return; }
-    _fillOpFormFromData(opAtiva);
-  }else{
-    document.getElementById("op-form").reset();
-    _setBobinasToUI([]);
-    _syncHiddenBobinaFirst();
-  }
-  const bd=document.getElementById("opModalBackdrop");
-  if(bd)bd.style.display="flex";
-}
-function closeOpModal(){
-  const bd=document.getElementById("opModalBackdrop");
-  if(bd)bd.style.display="none";
-}
-async function _postJson(url,p){
-  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
-  let j=null;
-  try{j=await r.json();}catch(e){}
-  if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");}
-  return j;
-}
-function initOpUI(){
-  const bn=document.getElementById("btn-op-new"),
-        be=document.getElementById("btn-op-end"),
-        box=document.getElementById("op-ativo-box");
-  if(box) box.addEventListener("click",()=>openOpModal("edit"));
-  if(bn)bn.addEventListener("click",()=>openOpModal("new"));
-
-  if(be)be.addEventListener("click",async()=>{
-    if(!confirm("Confirmar encerramento da OP ativa?"))return;
-    try{
-      await _postJson("/producao/op/encerrar",{machine_id:machine_id});
-      await carregarOpUI();
-    }catch(err){
-      alert(String(err&&err.message?err.message:err));
-    }
-  });
-
-  const bd=document.getElementById("opModalBackdrop"),
-        bc=document.getElementById("btnCloseOpModal"),
-        bx=document.getElementById("btnCancelOp");
-  if(bc)bc.addEventListener("click",closeOpModal);
-  if(bx)bx.addEventListener("click",closeOpModal);
-  if(bd)bd.addEventListener("click",(e)=>{if(e&&e.target===bd)closeOpModal();});
-
-  const btnAdd=document.getElementById("btnAddBobina");
-  if(btnAdd) btnAdd.addEventListener("click",()=>{
-    const list=document.getElementById("op_bobinas_list");
-    if(!list) return;
-    list.appendChild(_createBobinaRow(""));
-    _syncHiddenBobinaFirst();
-  });
-
-  const list=document.getElementById("op_bobinas_list");
-  if(list){
-    list.addEventListener("input",()=>{ _syncHiddenBobinaFirst(); });
-    list.addEventListener("change",()=>{ _syncHiddenBobinaFirst(); });
-  }
-
-  const f=document.getElementById("op-form");
-  if(f)f.addEventListener("submit",async(e)=>{
-    e.preventDefault();
-    const os=String(document.getElementById("op_os").value||"").trim();
-    const lote=String(document.getElementById("op_lote").value||"").trim();
-    const oper=String(document.getElementById("op_operador").value||"").trim();
-    if(!os||!lote||!oper){alert("Preencha OS, Lote e Operador.");return;}
-    const payload={
-      machine_id:machine_id,
-      os:os,
-      lote:lote,
-      operador:oper,
-      bobina:String(document.getElementById("op_bobina").value||"").trim(),
-      gr_fio:String(document.getElementById("op_gr_fio").value||"").trim(),
-      observacoes:String(document.getElementById("op_obs").value||"").trim()
-    };
-    try{
-      const bobinas=_getBobinasFromUI();
-      payload.bobinas = bobinas;
-      payload.bobina = bobinas.length ? bobinas[0] : payload.bobina;
-
-      if(opModalMode === "edit"){
-        await _postJson("/producao/op/editar",payload);
-      }else{
-        await _postJson("/producao/op/iniciar",payload);
-      }
-
-      closeOpModal();
-      await carregarOpUI();
-    }catch(err){
-      alert(String(err&&err.message?err.message:err));
-    }
-  });
-}
-initOpUI();
-carregarOpUI();
-
-// ===============================
-// TABELA FIXA 24H
-// ===============================
-function pad2(n){ return String(n).padStart(2, "0"); }
-
-function buildFaixas24(){
-  const out = [];
-  for(let h = 0; h < 24; h++){
-    const h2 = (h + 1) % 24;
-    out.push(`${pad2(h)}:00-${pad2(h2)}:00`);
-  }
-  return out;
-}
-
+function pad2(n){ return String(n).padStart(2,"0"); }
+function buildFaixas24(){ const out=[]; for(let h=0; h<24; h++){ const h2=(h+1)%24; out.push(`${pad2(h)}:00-${pad2(h2)}:00`); } return out; }
 const HORAS_FIXAS_24 = buildFaixas24();
 
-// ===============================
-// TIME HELPERS
-// ===============================
-function parseHourFromTimeStr(s){
-  if(!s || typeof s !== "string") return null;
-  const parts = s.split(":");
-  const h = Number(parts[0]);
-  if(!Number.isFinite(h) || h < 0 || h > 23) return null;
-  return h;
+function parseMinFromTimeStr(s){ if(!s||typeof s!=="string")return null; const p=s.split(":"); const h=Number(p[0]); const m=Number(p[1]??0);
+  if(!Number.isFinite(h)||h<0||h>23)return null; if(!Number.isFinite(m)||m<0||m>59)return null; return h*60+m; }
+function minToHHMM(min){ const m=((min%1440)+1440)%1440; const h=Math.floor(m/60); const mm=m%60; return `${pad2(h)}:${pad2(mm)}`; }
+
+function normalizeRange(startMin,endMin){ startMin=((startMin%1440)+1440)%1440; endMin=((endMin%1440)+1440)%1440;
+  if(startMin===endMin) return []; if(startMin<endMin) return [[startMin,endMin]]; return [[startMin,1440],[0,endMin]]; }
+function overlap(a0,a1,b0,b1){ return Math.max(a0,b0) < Math.min(a1,b1); }
+function intervalPlannedMinutesInHour(hourMin0,hourMin1,shiftRanges,breakRanges){ let planned=0;
+  // planned = overlap with shift - overlap with breaks
+  for(const sr of shiftRanges){ const s0=sr[0], s1=sr[1]; if(!overlap(hourMin0,hourMin1,s0,s1)) continue; const inShift0=Math.max(hourMin0,s0); const inShift1=Math.min(hourMin1,s1); let seg=inShift1-inShift0;
+    for(const br of breakRanges){ const b0=br[0], b1=br[1]; if(!overlap(inShift0,inShift1,b0,b1)) continue; const cut0=Math.max(inShift0,b0); const cut1=Math.min(inShift1,b1); seg -= Math.max(0,cut1-cut0); }
+    planned += Math.max(0,seg);
+  }
+  return planned;
 }
 
-function parseMinFromTimeStr(s){
-  if(!s || typeof s !== "string") return null;
-  const parts = s.split(":");
-  const h = Number(parts[0]);
-  const m = Number(parts[1] ?? 0);
-  if(!Number.isFinite(h) || h < 0 || h > 23) return null;
-  if(!Number.isFinite(m) || m < 0 || m > 59) return null;
-  return h * 60 + m;
+function ensureArray(x){ return Array.isArray(x) ? x : []; }
+
+// Days UI
+const DAYS = [
+  {key:1,label:"Seg"},{key:2,label:"Ter"},{key:3,label:"Qua"},{key:4,label:"Qui"},{key:5,label:"Sex"},{key:6,label:"Sab"},{key:0,label:"Dom"}
+];
+function renderDays(activeSet){
+  const box=document.getElementById("dias-ativos");
+  box.innerHTML="";
+  for(const d of DAYS){
+    const wrap=document.createElement("label");
+    wrap.className="day-pill";
+    const cb=document.createElement("input");
+    cb.type="checkbox"; cb.dataset.day=String(d.key);
+    cb.checked = activeSet ? activeSet.has(d.key) : true;
+    wrap.appendChild(cb);
+    const span=document.createElement("span");
+    span.textContent=d.label;
+    wrap.appendChild(span);
+    box.appendChild(wrap);
+  }
+}
+function getActiveDays(){
+  const box=document.getElementById("dias-ativos");
+  const cbs=box.querySelectorAll("input[type=checkbox]");
+  const out=[];
+  cbs.forEach(cb=>{ if(cb.checked) out.push(Number(cb.dataset.day)); });
+  return out;
 }
 
-function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
-  const ini = parseMinFromTimeStr(inicioStr);
-  const fim = parseMinFromTimeStr(fimStr);
-  if(ini === null || fim === null) return false;
+// Shifts UI state
+let shiftsState = [];
 
-  const t = horaIndex * 60;
+function shiftDefaultName(idx){ return String.fromCharCode(65+idx); } // A,B,C
+function newShiftSkeleton(idx){
+  return {
+    name: shiftDefaultName(idx),
+    start: "06:00",
+    end: "14:00",
+    meta_pcs: 0,
+    breaks: [{name:"Almoco", start:"12:00", end:"13:00"}]
+  };
+}
+function newBreakSkeleton(){ return {name:"Almoco", start:"12:00", end:"13:00"}; }
 
-  if(ini < fim){
-    return (t >= ini) && (t < fim);
+function renderShifts(){
+  const container=document.getElementById("shifts-container");
+  container.innerHTML="";
+  shiftsState = ensureArray(shiftsState);
+
+  shiftsState.forEach((s, idx)=>{
+    const card=document.createElement("div");
+    card.className="shift-card";
+
+    const head=document.createElement("div");
+    head.className="shift-head";
+
+    const title=document.createElement("div");
+    title.className="shift-title";
+    title.textContent = "Turno " + (s.name || shiftDefaultName(idx));
+
+    const actions=document.createElement("div");
+    actions.className="shift-actions";
+
+    const btnRemove=document.createElement("button");
+    btnRemove.type="button";
+    btnRemove.className="btn btn-secondary";
+    btnRemove.textContent="Remover turno";
+    btnRemove.addEventListener("click",()=>{
+      shiftsState.splice(idx,1);
+      // reindex names if empty
+      shiftsState.forEach((sh,i)=>{ if(!sh.name) sh.name = shiftDefaultName(i); });
+      renderShifts(); renderSummary(); carregarTabela();
+    });
+
+    actions.appendChild(btnRemove);
+    head.appendChild(title);
+    head.appendChild(actions);
+    card.appendChild(head);
+
+    const grid=document.createElement("div");
+    grid.className="row";
+    grid.style.marginTop="10px";
+
+    const col1=document.createElement("div"); col1.className="col";
+    const col2=document.createElement("div"); col2.className="col";
+    const col3=document.createElement("div"); col3.className="col";
+
+    const lblName=document.createElement("label"); lblName.textContent="Nome do turno:";
+    const inpName=document.createElement("input"); inpName.type="text"; inpName.className="input"; inpName.value=String(s.name||"");
+    inpName.addEventListener("input",()=>{ s.name = String(inpName.value||"").trim(); title.textContent = "Turno " + (s.name || shiftDefaultName(idx)); renderSummary(); carregarTabela(); });
+    col1.appendChild(lblName); col1.appendChild(inpName);
+
+    const lblStart=document.createElement("label"); lblStart.textContent="Inicio:";
+    const inpStart=document.createElement("input"); inpStart.type="time"; inpStart.className="input"; inpStart.value=String(s.start||"");
+    inpStart.addEventListener("change",()=>{ s.start = String(inpStart.value||""); renderSummary(); carregarTabela(); });
+    col2.appendChild(lblStart); col2.appendChild(inpStart);
+
+    const lblEnd=document.createElement("label"); lblEnd.textContent="Fim:";
+    const inpEnd=document.createElement("input"); inpEnd.type="time"; inpEnd.className="input"; inpEnd.value=String(s.end||"");
+    inpEnd.addEventListener("change",()=>{ s.end = String(inpEnd.value||""); renderSummary(); carregarTabela(); });
+    col3.appendChild(lblEnd); col3.appendChild(inpEnd);
+
+    grid.appendChild(col1); grid.appendChild(col2); grid.appendChild(col3);
+    card.appendChild(grid);
+
+    const grid2=document.createElement("div");
+    grid2.className="row";
+    grid2.style.marginTop="10px";
+    const cmeta=document.createElement("div"); cmeta.className="col";
+    const lmeta=document.createElement("label"); lmeta.textContent="Meta do turno (pcs):";
+    const imeta=document.createElement("input"); imeta.type="number"; imeta.className="input"; imeta.min="0"; imeta.step="1"; imeta.value=String(s.meta_pcs ?? 0);
+    imeta.addEventListener("input",()=>{ const v=Number(imeta.value); s.meta_pcs = (Number.isFinite(v) && v>=0) ? Math.floor(v) : 0; renderSummary(); carregarTabela(); });
+    cmeta.appendChild(lmeta); cmeta.appendChild(imeta);
+    const cspacer=document.createElement("div"); cspacer.className="col";
+    grid2.appendChild(cmeta); grid2.appendChild(cspacer);
+    card.appendChild(grid2);
+
+    const breaksWrap=document.createElement("div");
+    breaksWrap.style.marginTop="12px";
+    const bl=document.createElement("label"); bl.textContent="Pausas planejadas:";
+    breaksWrap.appendChild(bl);
+
+    const list=document.createElement("div");
+    list.style.display="flex"; list.style.flexDirection="column"; list.style.gap="10px"; list.style.marginTop="8px";
+
+    const brks=ensureArray(s.breaks);
+    if(brks.length===0) brks.push(newBreakSkeleton());
+    s.breaks = brks;
+
+    brks.forEach((b, bidx)=>{
+      const row=document.createElement("div");
+      row.className="break-row";
+
+      const inName=document.createElement("input");
+      inName.type="text"; inName.className="input"; inName.placeholder="Nome"; inName.value=String(b.name||"");
+      inName.addEventListener("input",()=>{ b.name=String(inName.value||"").trim(); renderSummary(); carregarTabela(); });
+
+      const inStart=document.createElement("input");
+      inStart.type="time"; inStart.className="input"; inStart.value=String(b.start||"");
+      inStart.addEventListener("change",()=>{ b.start=String(inStart.value||""); renderSummary(); carregarTabela(); });
+
+      const inEnd=document.createElement("input");
+      inEnd.type="time"; inEnd.className="input"; inEnd.value=String(b.end||"");
+      inEnd.addEventListener("change",()=>{ b.end=String(inEnd.value||""); renderSummary(); carregarTabela(); });
+
+      const btnR=document.createElement("button");
+      btnR.type="button"; btnR.className="btn btn-secondary"; btnR.textContent="Remover pausa";
+      btnR.addEventListener("click",()=>{
+        s.breaks.splice(bidx,1);
+        renderShifts(); renderSummary(); carregarTabela();
+      });
+
+      row.appendChild(inName); row.appendChild(inStart); row.appendChild(inEnd); row.appendChild(btnR);
+      list.appendChild(row);
+    });
+
+    breaksWrap.appendChild(list);
+
+    const btnAddBreak=document.createElement("button");
+    btnAddBreak.type="button";
+    btnAddBreak.className="btn btn-secondary";
+    btnAddBreak.textContent="Adicionar pausa";
+    btnAddBreak.style.marginTop="10px";
+    btnAddBreak.addEventListener("click",()=>{
+      s.breaks.push(newBreakSkeleton());
+      renderShifts(); renderSummary(); carregarTabela();
+    });
+
+    breaksWrap.appendChild(btnAddBreak);
+    card.appendChild(breaksWrap);
+
+    container.appendChild(card);
+  });
+
+  const btnAddShift=document.getElementById("btnAddShift");
+  if(btnAddShift) btnAddShift.disabled = shiftsState.length >= 3;
+}
+
+function shiftsToRanges(sh){ 
+  const sm=parseMinFromTimeStr(sh.start); const em=parseMinFromTimeStr(sh.end);
+  if(sm===null || em===null) return {shiftRanges:[], breakRanges:[], dur:0, breakMin:0, plan:0};
+  const shiftRanges=normalizeRange(sm,em);
+  let dur=0; shiftRanges.forEach(r=>{ dur += (r[1]-r[0]); });
+  const breakRanges=[];
+  let breakMin=0;
+  for(const b of ensureArray(sh.breaks)){
+    const bm=parseMinFromTimeStr(b.start); const be=parseMinFromTimeStr(b.end);
+    if(bm===null || be===null) continue;
+    const br=normalizeRange(bm,be);
+    br.forEach(r=>breakRanges.push(r));
+    br.forEach(r=>{ breakMin += (r[1]-r[0]); });
   }
+  const plan=Math.max(0,dur-breakMin);
+  return {shiftRanges, breakRanges, dur, breakMin, plan};
+}
 
-  if(ini > fim){
-    return (t >= ini) || (t < fim);
+function computeMeta24FromShifts(){ 
+  const meta24=new Array(24).fill(0);
+  for(const sh of ensureArray(shiftsState)){
+    const meta = Number(sh.meta_pcs ?? 0);
+    if(!Number.isFinite(meta) || meta<=0) continue;
+    const r=shiftsToRanges(sh);
+    if(r.plan<=0) continue;
+
+    // planned minutes per hour
+    const perHour=new Array(24).fill(0);
+    for(let h=0; h<24; h++){
+      const h0=h*60, h1=(h+1)*60;
+      perHour[h]=intervalPlannedMinutesInHour(h0,h1,r.shiftRanges,r.breakRanges);
+    }
+    const total=perHour.reduce((a,b)=>a+b,0);
+    if(total<=0) continue;
+
+    let acc=0;
+    let assigned=0;
+    for(let h=0; h<24; h++){
+      if(perHour[h]<=0) continue;
+      const raw = meta * (perHour[h]/total);
+      const v = Math.floor(raw);
+      meta24[h] += v;
+      assigned += v;
+    }
+    // distribute remainder
+    const rem = Math.max(0, Math.floor(meta) - assigned);
+    if(rem>0){
+      // sort hours by planned minutes desc
+      const idxs=[...Array(24).keys()].filter(h=>perHour[h]>0).sort((a,b)=>perHour[b]-perHour[a]);
+      for(let i=0; i<rem; i++){ meta24[idxs[i % idxs.length]] += 1; }
+    }
   }
+  return meta24;
+}
 
+function isHourInAnyShift(h){ 
+  const h0=h*60, h1=(h+1)*60;
+  for(const sh of ensureArray(shiftsState)){
+    const r=shiftsToRanges(sh);
+    for(const sr of r.shiftRanges){ if(overlap(h0,h1,sr[0],sr[1])) return true; }
+  }
+  return false;
+}
+function isHourInAnyBreak(h){ 
+  const h0=h*60, h1=(h+1)*60;
+  for(const sh of ensureArray(shiftsState)){
+    const r=shiftsToRanges(sh);
+    for(const br of r.breakRanges){ if(overlap(h0,h1,br[0],br[1])) return true; }
+  }
   return false;
 }
 
-// ===============================
-// MAP TURNO -> 24H (meta)
-// ===============================
-function mapTurnoListPara24h(lista_turno, inicioStr, fillValue){
-  const out = new Array(24).fill(fillValue);
+function renderSummary(){
+  const wrap=document.getElementById("shifts-summary-wrap");
+  const body=document.getElementById("shifts-summary-body");
+  if(!wrap||!body) return;
 
-  const inicioHour = parseHourFromTimeStr(inicioStr);
-  if(inicioHour === null) return out;
+  const shifts=ensureArray(shiftsState).filter(s=>s && s.start && s.end);
+  if(shifts.length===0){ wrap.style.display="none"; return; }
 
-  const arr = Array.isArray(lista_turno) ? lista_turno : [];
-  for(let i = 0; i < arr.length; i++){
-    const hour = (inicioHour + i) % 24;
-    out[hour] = arr[i];
-  }
+  body.innerHTML="";
+  let sumDur=0, sumBreak=0, sumPlan=0, sumMeta=0;
+
+  shifts.forEach((s)=>{
+    const r=shiftsToRanges(s);
+    const meta=Number(s.meta_pcs ?? 0);
+    const planH = r.plan/60;
+    const metaH = (Number.isFinite(meta) && meta>0 && planH>0) ? (meta/planH) : 0;
+
+    sumDur += r.dur;
+    sumBreak += r.breakMin;
+    sumPlan += r.plan;
+    if(Number.isFinite(meta) && meta>0) sumMeta += Math.floor(meta);
+
+    const tr=document.createElement("tr");
+    const tds=[
+      String(s.name||"-"),
+      `${Math.round(r.dur)} min`,
+      `${Math.round(r.breakMin)} min`,
+      `${Math.round(r.plan)} min`,
+      Number.isFinite(meta)?String(Math.floor(meta)):"0",
+      metaH ? String(Math.round(metaH)) : "0"
+    ];
+    tds.forEach(v=>{ const td=document.createElement("td"); td.textContent=v; tr.appendChild(td); });
+    body.appendChild(tr);
+  });
+
+  wrap.style.display="block";
+  document.getElementById("sum-dur").textContent = `${Math.round(sumDur)} min`;
+  document.getElementById("sum-break").textContent = `${Math.round(sumBreak)} min`;
+  document.getElementById("sum-plan").textContent = `${Math.round(sumPlan)} min`;
+  document.getElementById("sum-meta").textContent = String(Math.floor(sumMeta));
+  const sumPlanH=sumPlan/60;
+  const sumMetaH = (sumMeta>0 && sumPlanH>0) ? (sumMeta/sumPlanH) : 0;
+  document.getElementById("sum-metah").textContent = sumMetaH ? String(Math.round(sumMetaH)) : "0";
+}
+
+// OP UI (mantido)
+let opAtiva=null;
+let opModalMode="new";
+function _setOpModalMode(mode){ opModalMode=(mode==="edit")?"edit":"new";
+  const t=document.getElementById("opModalTitle"); const b=document.getElementById("btnStartOp");
+  if(t) t.textContent = (opModalMode==="edit") ? "Editar Ordem de Producao (OP)" : "Nova Ordem de Producao (OP)";
+  if(b) b.textContent = (opModalMode==="edit") ? "Salvar Alteracoes" : "Iniciar OP";
+}
+function _createBobinaRow(value){
+  const row=document.createElement("div"); row.style.display="flex"; row.style.gap="10px"; row.style.alignItems="center";
+  const inp=document.createElement("input"); inp.type="number"; inp.min="0"; inp.step="1"; inp.className="input"; inp.placeholder="Metros"; inp.value=String(value||""); inp.style.flex="1";
+  const btn=document.createElement("button"); btn.type="button"; btn.className="btn btn-secondary"; btn.textContent="Remover";
+  btn.addEventListener("click",()=>{ row.remove(); _syncHiddenBobinaFirst(); });
+  row.appendChild(inp); row.appendChild(btn); return row;
+}
+function _getBobinasFromUI(){ const list=document.getElementById("op_bobinas_list"); if(!list) return []; const out=[];
+  const rows=list.querySelectorAll("div"); rows.forEach((r)=>{ const inp=r.querySelector("input"); const v=String((inp&&inp.value)?inp.value:"").trim(); if(v) out.push(v); });
   return out;
 }
-
-function turnoIdxParaHoraDoDia(turnoIdx, inicioStr){
-  const inicioHour = parseHourFromTimeStr(inicioStr);
-  if(inicioHour === null) return null;
-  if(typeof turnoIdx !== "number" || !Number.isFinite(turnoIdx)) return null;
-  return (inicioHour + turnoIdx) % 24;
+function _setBobinasToUI(arr){ const list=document.getElementById("op_bobinas_list"); if(!list) return; list.innerHTML="";
+  const a=Array.isArray(arr)?arr:[]; if(a.length===0){ list.appendChild(_createBobinaRow("")); return; }
+  a.forEach(v=>{ list.appendChild(_createBobinaRow(v)); });
 }
-
-function toNonNegInt(v){
-  const n = Number(v);
-  if(!Number.isFinite(n) || n < 0) return 0;
-  return Math.floor(n);
+function _syncHiddenBobinaFirst(){ const h=document.getElementById("op_bobina"); if(!h) return; const b=_getBobinasFromUI(); h.value=b.length?b[0]:""; }
+function _fillOpFormFromData(d){ document.getElementById("op_os").value=String(d.os||"");
+  document.getElementById("op_lote").value=String(d.lote||""); document.getElementById("op_operador").value=String(d.operador||"");
+  document.getElementById("op_gr_fio").value=String(d.gr_fio||""); document.getElementById("op_obs").value=String(d.observacoes||"");
+  const bobinas = Array.isArray(d.bobinas)?d.bobinas:(d.bobina?[String(d.bobina)]:[]);
+  _setBobinasToUI(bobinas); _syncHiddenBobinaFirst();
 }
+function _showOp(info){ const box=document.getElementById("op-ativo-box"), i=document.getElementById("op-ativo-info"),
+  bn=document.getElementById("btn-op-new"), be=document.getElementById("btn-op-end");
+  if(box) box.style.display="block"; if(i) i.textContent=info||"-"; if(bn) bn.style.display="none"; if(be) be.style.display="inline-block";
+}
+function _showNoOp(){ const box=document.getElementById("op-ativo-box"), i=document.getElementById("op-ativo-info"),
+  bn=document.getElementById("btn-op-new"), be=document.getElementById("btn-op-end");
+  if(box) box.style.display="none"; if(i) i.textContent="-"; if(bn) bn.style.display="inline-block"; if(be) be.style.display="none";
+}
+async function _getJson(url){ try{ const r=await fetch(url); if(!r.ok) return null; return await r.json(); }catch(e){ return null; } }
+function _normalizeMachineStatusPayload(payload){ if(payload && typeof payload==="object" && payload.machine_status) return {machine:payload.machine_status, op:(payload.op_status||null)}; return {machine:payload, op:null}; }
+async function carregarOpUI(){ const payload=await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
+  if(payload){ const norm=_normalizeMachineStatusPayload(payload);
+    if(norm.op && norm.op.active){ opAtiva=norm.op; const info=`OS ${String(opAtiva.os||"")} | Lote ${String(opAtiva.lote||"")} | Operador ${String(opAtiva.operador||"")}`; _showOp(info); return; }
+  }
+  const d=await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
+  if(!d){ _showNoOp(); return; }
+  if(d.active){ opAtiva=d; const info=`OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`; _showOp(info); } else { opAtiva=null; _showNoOp(); }
+}
+function openOpModal(mode){ _setOpModalMode(mode);
+  if(opModalMode==="edit"){ if(!opAtiva){ alert("Nao ha OP ativa para editar."); return; } _fillOpFormFromData(opAtiva); }
+  else { document.getElementById("op-form").reset(); _setBobinasToUI([]); _syncHiddenBobinaFirst(); }
+  const bd=document.getElementById("opModalBackdrop"); if(bd) bd.style.display="flex";
+}
+function closeOpModal(){ const bd=document.getElementById("opModalBackdrop"); if(bd) bd.style.display="none"; }
+async function _postJson(url,p){ const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+  let j=null; try{ j=await r.json(); }catch(e){}
+  if(!r.ok) throw new Error((j&&j.error)?j.error:"Falha na requisicao"); return j;
+}
+function initOpUI(){ const bn=document.getElementById("btn-op-new"), be=document.getElementById("btn-op-end"), box=document.getElementById("op-ativo-box");
+  if(box) box.addEventListener("click",()=>openOpModal("edit"));
+  if(bn) bn.addEventListener("click",()=>openOpModal("new"));
+  if(be) be.addEventListener("click",async()=>{ if(!confirm("Confirmar encerramento da OP ativa?")) return;
+    try{ await _postJson("/producao/op/encerrar",{machine_id:machine_id}); await carregarOpUI(); }catch(err){ alert(String(err&&err.message?err.message:err)); }
+  });
+  const bd=document.getElementById("opModalBackdrop"), bc=document.getElementById("btnCloseOpModal"), bx=document.getElementById("btnCancelOp");
+  if(bc) bc.addEventListener("click",closeOpModal); if(bx) bx.addEventListener("click",closeOpModal);
+  if(bd) bd.addEventListener("click",(e)=>{ if(e && e.target===bd) closeOpModal(); });
+  const btnAdd=document.getElementById("btnAddBobina"); if(btnAdd) btnAdd.addEventListener("click",()=>{ const list=document.getElementById("op_bobinas_list"); if(!list) return;
+    list.appendChild(_createBobinaRow("")); _syncHiddenBobinaFirst(); });
+  const list=document.getElementById("op_bobinas_list");
+  if(list){ list.addEventListener("input",()=>_syncHiddenBobinaFirst()); list.addEventListener("change",()=>_syncHiddenBobinaFirst()); }
+  const f=document.getElementById("op-form");
+  if(f) f.addEventListener("submit",async(e)=>{ e.preventDefault();
+    const os=String(document.getElementById("op_os").value||"").trim(); const lote=String(document.getElementById("op_lote").value||"").trim();
+    const oper=String(document.getElementById("op_operador").value||"").trim();
+    if(!os||!lote||!oper){ alert("Preencha OS, Lote e Operador."); return; }
+    const payload={machine_id:machine_id, os:os, lote:lote, operador:oper, bobina:String(document.getElementById("op_bobina").value||"").trim(),
+      gr_fio:String(document.getElementById("op_gr_fio").value||"").trim(), observacoes:String(document.getElementById("op_obs").value||"").trim()};
+    try{ const bobinas=_getBobinasFromUI(); payload.bobinas=bobinas; payload.bobina=bobinas.length?bobinas[0]:payload.bobina;
+      if(opModalMode==="edit") await _postJson("/producao/op/editar",payload); else await _postJson("/producao/op/iniciar",payload);
+      closeOpModal(); await carregarOpUI();
+    }catch(err){ alert(String(err&&err.message?err.message:err)); }
+  });
+}
+initOpUI(); carregarOpUI();
 
-// ===============================
-// API: SALVAR REFUGO (SQLITE)
-// ===============================
+// Reset manual
+document.getElementById("btn-reset").addEventListener("click",function(){
+  if(!confirm("CONFIRMAR RESET DA PRODUCAO?\nEssa acao grava historico e zera os contadores.")) return;
+  fetch("/admin/reset-manual",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({machine_id})})
+    .then(r=>r.json()).then(()=>{ alert("Producao zerada com sucesso."); carregarTabela(); });
+});
+
+// Units: nao permitir duplicado
+function garantirSemDuplicar(){ const u1=document.getElementById("unidade_1"); const u2=document.getElementById("unidade_2");
+  if(u1.value && u2.value && u1.value===u2.value) u2.value=""; }
+document.getElementById("unidade_1").addEventListener("change",garantirSemDuplicar);
+document.getElementById("unidade_2").addEventListener("change",garantirSemDuplicar);
+
+// Submit config v2
+document.getElementById("config-form").addEventListener("submit", function(e){
+  e.preventDefault();
+  garantirSemDuplicar();
+
+  const conv=Number(document.getElementById("conv_m_por_pcs").value);
+  if(!Number.isFinite(conv)||conv<=0){ alert("Conversao invalida. Use um numero maior que zero. Ex: 0.85"); return; }
+
+  const stopSec=Number(document.getElementById("no_count_stop_sec").value);
+  if(!Number.isFinite(stopSec)||stopSec<5){ alert("Alerta de parada por inatividade invalido. Use um valor >= 5 segundos."); return; }
+
+  const ideal=Number(document.getElementById("ideal_sec_per_piece").value);
+  if(!Number.isFinite(ideal)||ideal<=0){ alert("Tempo ideal por peca invalido. Use um valor maior que zero."); return; }
+
+  if(!Array.isArray(shiftsState) || shiftsState.length===0){ alert("Adicione pelo menos 1 turno."); return; }
+  if(shiftsState.length>3){ alert("Limite: ate 3 turnos."); return; }
+
+  const payload = {
+    machine_id: machine_id,
+    version: 2,
+    active_days: getActiveDays(),
+    shifts: shiftsState.map(s=>({
+      name: String(s.name||"").trim(),
+      start: String(s.start||""),
+      end: String(s.end||""),
+      meta_pcs: Number.isFinite(Number(s.meta_pcs)) ? Math.floor(Number(s.meta_pcs)) : 0,
+      breaks: ensureArray(s.breaks).map(b=>({
+        name: String(b.name||"").trim(),
+        start: String(b.start||""),
+        end: String(b.end||"")
+      }))
+    })),
+    oee: {
+      ideal_sec_per_piece: ideal,
+      no_count_stop_sec: Math.floor(stopSec),
+      ramp_percent: Number(document.getElementById("rampa").value||0)
+    },
+    units: {
+      unidade_1: document.getElementById("unidade_1").value,
+      unidade_2: document.getElementById("unidade_2").value,
+      conv_m_por_pcs: conv
+    }
+  };
+
+  fetch("/machine/config", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  })
+  .then(r=>r.json())
+  .then((resp)=>{
+    if(resp && resp.error){ alert(resp.error); return; }
+    alert("Configuracao salva com sucesso!");
+    carregarTabela();
+  })
+  .catch(()=>{ alert("Erro ao salvar configuracao."); });
+});
+
+// Refugo API
+function toNonNegInt(v){ const n=Number(v); if(!Number.isFinite(n)||n<0) return 0; return Math.floor(n); }
 function salvarRefugoAPI(machineId, diaRef, horaDia, refugo){
   return fetch("/machine/refugo", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      machine_id: machineId,
-      dia_ref: diaRef,
-      hora_dia: horaDia,
-      refugo: refugo
-    })
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({machine_id:machineId, dia_ref:diaRef, hora_dia:horaDia, refugo:refugo})
   })
-  .then(async (r) => {
-    let payload = null;
-    try{ payload = await r.json(); }catch(e){}
-    if(!r.ok){
-      const msg = (payload && payload.error) ? payload.error : "Erro ao salvar refugo";
-      throw new Error(msg);
-    }
+  .then(async (r)=>{
+    let payload=null; try{ payload=await r.json(); }catch(e){}
+    if(!r.ok) throw new Error((payload && payload.error) ? payload.error : "Erro ao salvar refugo");
     return payload;
   });
 }
 
-// ===============================
-// RESET MANUAL
-// ===============================
-document.getElementById("btn-reset").addEventListener("click", function(){
-  if(!confirm("CONFIRMAR RESET DA PRODUCAO?\nEssa acao grava historico e zera os contadores.")){
-    return;
-  }
-
-  fetch("/admin/reset-manual", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ machine_id })
-  })
-  .then(r => r.json())
-  .then(() => {
-    alert("Producao zerada com sucesso.");
-    carregarTabela();
-  });
-});
-
-// ===============================
-// UNIDADES: nao permitir duplicado
-// ===============================
-function garantirSemDuplicar(){
-  const u1 = document.getElementById("unidade_1");
-  const u2 = document.getElementById("unidade_2");
-  if(u1.value && u2.value && u1.value === u2.value){
-    u2.value = "";
-  }
+async function fetchStatus(){
+  const payload=await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
+  const norm=_normalizeMachineStatusPayload(payload||{});
+  return norm.machine || {};
 }
-document.getElementById("unidade_1").addEventListener("change", garantirSemDuplicar);
-document.getElementById("unidade_2").addEventListener("change", garantirSemDuplicar);
 
-// ===============================
-// SUBMIT DO FORMULARIO
-// ===============================
-document.getElementById("config-form").addEventListener("submit", function(e){
-  e.preventDefault();
-
+function applyConfigFromStatus(data){
+  // units
+  document.getElementById("unidade_1").value = data.unidade_1 ?? data.units?.unidade_1 ?? "";
+  document.getElementById("unidade_2").value = data.unidade_2 ?? data.units?.unidade_2 ?? "";
   garantirSemDuplicar();
+  document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? data.units?.conv_m_por_pcs ?? 1;
 
-  const conv = Number(document.getElementById("conv_m_por_pcs").value);
-  if(!Number.isFinite(conv) || conv <= 0){
-    alert("Conversao invalida. Use um numero maior que zero. Ex: 0.85");
-    return;
+  // oee/ramp/stop
+  const stopSec = Number(data.no_count_stop_sec ?? data.no_count_stop_threshold_sec ?? data.no_count_stop ?? data.oee?.no_count_stop_sec ?? 60);
+  document.getElementById("no_count_stop_sec").value = (Number.isFinite(stopSec)&&stopSec>=5) ? Math.floor(stopSec) : 60;
+  const ramp = Number(data.rampa_percentual ?? data.oee?.ramp_percent ?? 0);
+  document.getElementById("rampa").value = Number.isFinite(ramp) ? Math.floor(ramp) : 0;
+  const ideal = Number(data.ideal_sec_per_piece ?? data.oee?.ideal_sec_per_piece ?? 3);
+  document.getElementById("ideal_sec_per_piece").value = (Number.isFinite(ideal)&&ideal>0) ? ideal : 3;
+
+  // days
+  const ad = ensureArray(data.active_days ?? data.config?.active_days ?? data.config_v2?.active_days);
+  const set = new Set(ad.length ? ad.map(Number) : [0,1,2,3,4,5,6]);
+  renderDays(set);
+
+  // shifts v2
+  const sh = ensureArray(data.shifts ?? data.config?.shifts ?? data.config_v2?.shifts);
+  if(sh.length){
+    shiftsState = sh.map((s,i)=>({
+      name: String(s.name||shiftDefaultName(i)),
+      start: String(s.start||"06:00"),
+      end: String(s.end||"14:00"),
+      meta_pcs: Number.isFinite(Number(s.meta_pcs)) ? Math.floor(Number(s.meta_pcs)) : 0,
+      breaks: ensureArray(s.breaks).map(b=>({name:String(b.name||"Almoco"), start:String(b.start||""), end:String(b.end||"")}))
+    }));
+  } else {
+    // legacy: build 1 shift from turno_inicio/turno_fim + meta_turno
+    const start = String(data.turno_inicio || "06:00");
+    const end = String(data.turno_fim || "14:00");
+    const meta = Number(data.meta_turno ?? 0);
+    shiftsState = [{name:"A", start:start, end:end, meta_pcs:(Number.isFinite(meta)&&meta>0)?Math.floor(meta):0, breaks:[]}];
   }
+  if(shiftsState.length===0) shiftsState=[newShiftSkeleton(0)];
+  renderShifts();
+  renderSummary();
+}
 
-  const stopSec = Number(document.getElementById("no_count_stop_sec").value);
-  if(!Number.isFinite(stopSec) || stopSec < 5){
-    alert("Alerta de parada por inatividade invalido. Use um valor >= 5 segundos.");
-    return;
-  }
+function buildMeta24(data){
+  // prefer backend if available (24 already)
+  if(Array.isArray(data.meta_por_hora_24) && data.meta_por_hora_24.length===24) return data.meta_por_hora_24.map(x=>toNonNegInt(x));
+  // fallback: compute from shifts
+  return computeMeta24FromShifts();
+}
 
-  fetch("/machine/config", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      machine_id: machine_id,
-      meta_turno: document.getElementById("meta").value,
-      inicio: document.getElementById("inicio").value,
-      fim: document.getElementById("fim").value,
-      rampa: document.getElementById("rampa").value,
-      unidade_1: document.getElementById("unidade_1").value,
-      unidade_2: document.getElementById("unidade_2").value,
-      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value,
-      no_count_stop_sec: Math.floor(stopSec)
-    })
-  })
-  .then(r => r.json())
-  .then((resp) => {
-    if(resp && resp.error){
-      alert(resp.error);
-      return;
+// Table
+async function carregarTabela(){
+  const data = await fetchStatus();
+  applyConfigFromStatus(data);
+
+  const meta24 = buildMeta24(data);
+  const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length===24) ? data.producao_exibicao_24 : null;
+  const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
+  const horaDiaAtual = new Date().getHours();
+  const diaRef = data.ultimo_dia ?? data.dia_ref ?? "sem_dia";
+  const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
+
+  const tbody = document.querySelector("#tabela-horas tbody");
+  tbody.innerHTML = "";
+
+  for(let i=0; i<24; i++){ 
+    const tr = document.createElement("tr");
+    const inShift = isHourInAnyShift(i);
+    const inBreak = isHourInAnyBreak(i);
+    if(inBreak) tr.classList.add("pausa-planejada");
+    else if(inShift) tr.classList.add("turno-ativo");
+
+    const tdHora=document.createElement("td"); tdHora.textContent = HORAS_FIXAS_24[i];
+    const tdMeta=document.createElement("td"); tdMeta.textContent = meta24[i] ?? 0;
+
+    let baseVal=0;
+    if(i > horaDiaAtual) baseVal = null;
+    else {
+      const fonte = exibicao24 ? exibicao24 : np24;
+      const v = Number(fonte[i] ?? 0);
+      baseVal = (Number.isFinite(v) && v>=0) ? v : 0;
     }
-    alert("Configuracao salva com sucesso!");
-    carregarTabela();
-  })
-  .catch(() => {
-    alert("Erro ao salvar configuracao.");
-  });
-});
 
-// ===============================
-// BUSCAR STATUS + TABELA (FIXA 24H)
-// ===============================
-function carregarTabela(){
-  fetch(`/machine/status?machine_id=${machine_id}`)
-    .then(r => r.json())
-    .then(data => {
+    const ref = toNonNegInt(refugo24[i] ?? 0);
+    const tdProd=document.createElement("td");
+    if(baseVal===null) tdProd.textContent="-";
+    else tdProd.textContent = Math.max(0, Math.floor(baseVal) - ref);
 
-      const norm = _normalizeMachineStatusPayload(data);
-      const opStatus = norm.op; // pode ser null
-      data = norm.machine || {};
+    const tdRef=document.createElement("td");
+    const input=document.createElement("input");
+    input.type="number"; input.min="0"; input.step="1"; input.className="refugo-input"; input.value = ref;
+    const podeEditar = (i < horaDiaAtual);
+    input.disabled = !podeEditar;
 
-      document.getElementById("unidade_1").value = data.unidade_1 ?? "";
-      document.getElementById("unidade_2").value = data.unidade_2 ?? "";
-      garantirSemDuplicar();
-
-      document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
-
-      if(data.turno_inicio) document.getElementById("inicio").value = data.turno_inicio;
-      if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
-      if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
-      if(data.rampa_percentual !== undefined && data.rampa_percentual !== null) document.getElementById("rampa").value = data.rampa_percentual;
-
-      const stopSec = Number(
-        data.no_count_stop_sec ?? data.no_count_stop_threshold_sec ?? data.no_count_stop ?? 60
-      );
-      document.getElementById("no_count_stop_sec").value =
-        (Number.isFinite(stopSec) && stopSec >= 5) ? Math.floor(stopSec) : 60;
-
-      const inicioTurnoStr = (data.turno_inicio ?? document.getElementById("inicio").value);
-      const fimTurnoStr = (data.turno_fim ?? document.getElementById("fim").value);
-
-      const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
-
-      const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length === 24)
-        ? data.producao_exibicao_24
-        : null;
-
-      const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
-      if(!exibicao24){
-        console.warn("[config_maquina] backend nao enviou producao_exibicao_24; usando np_por_hora_24 como fallback.");
-      }
-
-      const horaDiaAtual =
-        (typeof data.ultima_hora === "number")
-          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
-          : new Date().getHours();
-
-      const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
-      const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
-
-      const tbody = document.querySelector("#tabela-horas tbody");
-      tbody.innerHTML = "";
-
-      for(let i = 0; i < 24; i++){
-        const tr = document.createElement("tr");
-
-        const dentroTurno = horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr);
-        if(dentroTurno){
-          tr.classList.add("turno-ativo");
-        }
-
-        const tdHora = document.createElement("td");
-        tdHora.textContent = HORAS_FIXAS_24[i];
-
-        const tdMeta = document.createElement("td");
-        tdMeta.textContent = meta24[i] ?? 0;
-
-        let baseVal = 0;
-
-        if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
-          baseVal = null;
-        } else {
-          const fonte = exibicao24 ? exibicao24 : np24;
-          const v = Number(fonte[i] ?? 0);
-          baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
-        }
-
-        const ref = toNonNegInt(refugo24[i] ?? 0);
-
-        const tdProduzidoHora = document.createElement("td");
-        if(baseVal === null){
-          tdProduzidoHora.textContent = "-";
-        }else{
-          tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - ref);
-        }
-
-        const tdRefugoHora = document.createElement("td");
-
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = "0";
-        input.step = "1";
-        input.className = "refugo-input";
-        input.value = ref;
-
-        const podeEditar = (typeof horaDiaAtual === "number") ? (i < horaDiaAtual) : false;
-        input.disabled = !podeEditar;
-
-        input.addEventListener("blur", async () => {
-          if(!podeEditar){
-            input.value = toNonNegInt(refugo24[i] ?? 0);
-            return;
-          }
-
-          const anterior = toNonNegInt(refugo24[i] ?? 0);
-          const novo = toNonNegInt(input.value);
-
-          if(novo === anterior){
-            input.value = novo;
-            return;
-          }
-
-          try{
-            await salvarRefugoAPI(machine_id, diaRef, i, novo);
-
-            refugo24[i] = novo;
-
-            if(baseVal === null){
-              tdProduzidoHora.textContent = "-";
-            }else{
-              tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - novo);
-            }
-
-            input.value = novo;
-          }catch(err){
-            alert(String(err && err.message ? err.message : err));
-
-            input.value = anterior;
-            if(baseVal === null){
-              tdProduzidoHora.textContent = "-";
-            }else{
-              tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - anterior);
-            }
-          }
-        });
-
-        tdRefugoHora.appendChild(input);
-
-        tr.appendChild(tdHora);
-        tr.appendChild(tdMeta);
-        tr.appendChild(tdProduzidoHora);
-        tr.appendChild(tdRefugoHora);
-
-        tbody.appendChild(tr);
+    input.addEventListener("blur", async()=>{
+      if(!podeEditar){ input.value = toNonNegInt(refugo24[i] ?? 0); return; }
+      const anterior = toNonNegInt(refugo24[i] ?? 0);
+      const novo = toNonNegInt(input.value);
+      if(novo === anterior){ input.value = novo; return; }
+      try{
+        await salvarRefugoAPI(machine_id, diaRef, i, novo);
+        refugo24[i] = novo;
+        if(baseVal===null) tdProd.textContent="-";
+        else tdProd.textContent = Math.max(0, Math.floor(baseVal) - novo);
+        input.value = novo;
+      }catch(err){
+        alert(String(err && err.message ? err.message : err));
+        input.value = anterior;
+        if(baseVal===null) tdProd.textContent="-";
+        else tdProd.textContent = Math.max(0, Math.floor(baseVal) - anterior);
       }
     });
+
+    tdRef.appendChild(input);
+    tr.appendChild(tdHora); tr.appendChild(tdMeta); tr.appendChild(tdProd); tr.appendChild(tdRef);
+    tbody.appendChild(tr);
+  }
 }
 
+// init
+renderDays(new Set([0,1,2,3,4,5,6]));
+shiftsState = [newShiftSkeleton(0)];
+renderShifts();
+renderSummary();
+document.getElementById("btnAddShift").addEventListener("click",()=>{
+  if(shiftsState.length>=3){ alert("Limite: ate 3 turnos."); return; }
+  shiftsState.push(newShiftSkeleton(shiftsState.length));
+  renderShifts(); renderSummary(); carregarTabela();
+});
 carregarTabela();
 </script>
 {% endblock %}
