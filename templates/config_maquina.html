@@ -329,7 +329,7 @@ document.title = machine_id.toUpperCase();
 
 document.getElementById("link-historico").href = `/producao/historico?machine_id=${encodeURIComponent(machine_id)}`;
 document.getElementById("link-chamados").href = `/maquina/${encodeURIComponent(machine_id)}/chamados`;
-document.getElementById("link-config").href = `/maquina/${encodeURIComponent(machine_id)}/configuracao`;
+document.getElementById("link-config").href = `/producao/config/${encodeURIComponent(machine_id)}`;
 
 let opAtiva = null;
 let opModalMode = "new";
