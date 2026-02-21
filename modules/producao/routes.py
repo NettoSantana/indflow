@@ -1,6 +1,6 @@
 # PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-18 16:37 America/Bahia
-# MOTIVO: Corrigir IndentationError no op_editar (payload e indentacao do _update_op_row) para app voltar a subir no Railway.
+# LAST_RECODE: 2026-02-21 07:02 America/Bahia
+# MOTIVO: Historico deve anexar OP apenas no dia de abertura (evita duplicacao ao encerrar apos virada).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -1662,14 +1662,14 @@ def api_historico():
             for op in ops:
                 mid = str(op.get("machine_id") or "").strip()
                 sd = _safe_date_only(op.get("started_at"))
-                ed = _safe_date_only(op.get("ended_at")) or sd
                 if not mid or not sd:
                     continue
 
-                for d in _iter_days_inclusive(sd, ed, max_days=40):
-                    if d < day_min or d > day_max:
-                        continue
-                    ops_map.setdefault((mid, d), []).append(op)
+                # Regra oficial: OP pertence exclusivamente ao dia de abertura (started_at).
+                d = sd
+                if d < day_min or d > day_max:
+                    continue
+                ops_map.setdefault((mid, d), []).append(op)
     except Exception:
         ops_map = {}
 
@@ -2489,4 +2489,3 @@ def op_salvar():
             conn.close()
 
     return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"})
-
