@@ -1,5 +1,5 @@
-﻿fix(ui): destravar edicao de horarios em turnos/pausas na config_maquina_for
+﻿fix(calc): meta do dia no multi-turno (soma das metas dos turnos) para refletir no card
 
-- Evita recarregar config do servidor durante edicao (configDirty)
-- Atualiza tabela 24h via cache local (atualizarTabelaLocal)
-- Limpa dirty apos salvar e recarrega do servidor
+- Quando existir config_v2 com shifts, meta_turno vira meta do dia (soma de meta_pcs)
+- Respeita active_days (dia inativo -> meta 0)
+- Mantem compatibilidade guardando meta do turno ativo em meta_turno_shift

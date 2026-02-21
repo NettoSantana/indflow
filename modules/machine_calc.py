@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-16 10:30 America/Bahia
-# MOTIVO: corrigir indexacao horaria 24h (00-23) e virada de dia em 00:01 para nao perder contagem entre 00:00-04:59.
+# LAST_RECODE: 2026-02-21 00:00 America/Bahia
+# MOTIVO: ajustar meta do dia para multi-turno (soma das metas dos turnos) e refletir no card (Meta do Dia).
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -258,6 +258,43 @@ def _percentual(prod, meta):
     return 0
 
 
+
+def _calc_meta_dia_pcs_from_cfgv2(m, agora_dt):
+    """Retorna a meta do dia (pcs) somando metas de todos os turnos do cfg_v2.
+    Considera active_days; se o dia nao estiver ativo, retorna 0.
+    """
+    try:
+        cfg = m.get("config_v2") if isinstance(m, dict) else None
+        if not isinstance(cfg, dict):
+            return None
+        shifts = cfg.get("shifts")
+        if not isinstance(shifts, list) or not shifts:
+            return None
+        active_days = cfg.get("active_days") or [1, 2, 3, 4, 5, 6, 7]
+        try:
+            wd = int(agora_dt.weekday()) + 1
+        except Exception:
+            wd = None
+        if wd is not None:
+            try:
+                if int(wd) not in [int(x) for x in (active_days or [])]:
+                    return 0
+            except Exception:
+                pass
+        total = 0
+        for s in shifts:
+            if not isinstance(s, dict):
+                continue
+            try:
+                total += int(s.get("meta_pcs", 0) or 0)
+            except Exception:
+                continue
+        if total < 0:
+            total = 0
+        return int(total)
+    except Exception:
+        return None
+
 def atualizar_producao_hora(m):
     # import local para evitar circular
     from modules.repos.producao_horaria_repo import (
@@ -271,6 +308,23 @@ def atualizar_producao_hora(m):
     # NOVO: acumular "não programado" (fora do turno)
     # ============================================================
     agora = agora_ref(m)
+
+    # ============================================================
+    # MULTI-TURNO (v2): Meta do Dia = soma das metas dos turnos
+    # Objetivo: refletir corretamente no card (Meta do Dia) e nos calculos diarios.
+    # Mantem compatibilidade: preserva meta do turno ativo em meta_turno_shift.
+    # ============================================================
+    try:
+        meta_dia_cfg = _calc_meta_dia_pcs_from_cfgv2(m, agora)
+        if meta_dia_cfg is not None:
+            try:
+                m["meta_turno_shift"] = int(m.get("meta_turno", 0) or 0)
+            except Exception:
+                m["meta_turno_shift"] = 0
+            m["meta_turno"] = int(meta_dia_cfg)
+    except Exception:
+        pass
+
 
     # ============================================================
     # FIX (OPÇÃO 1): garantir reset diário sempre que houver cálculo
