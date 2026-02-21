@@ -1,5 +1,5 @@
-﻿fix(ui): corrigir salvamento de unidade (metro linear) e conversao mantendo compatibilidade no payload
+﻿fix(calc): meta do dia no multi-turno (soma das metas dos turnos) para refletir no card
 
-- Envia unidade_1, unidade_2 e conv_m_por_pcs tambem no top-level (alem de units)
-- Conversao so vira obrigatoria quando existir pcs + (m ou m2); caso contrario usa conv=1
-- Evita perda de configuracao ao recarregar a tela
+- Quando existir config_v2 com shifts, meta_turno vira meta do dia (soma de meta_pcs)
+- Respeita active_days (dia inativo -> meta 0)
+- Mantem compatibilidade guardando meta do turno ativo em meta_turno_shift
