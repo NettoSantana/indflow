@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
-LAST_RECODE: 2026-02-21 12:22 (America/Bahia)
-MOTIVO: Padronizar layout usando templates/base.html (navbar nova). Remover navbar antiga desta pagina sem alterar logica/JS do formulario.
+LAST_RECODE: 2026-02-21 12:25 (America/Bahia)
+MOTIVO: Remover botoes Historico, Novo OP e Zerar Producao do topo da pagina de configuracao.
 -->
 
 {% extends "base.html" %}
@@ -138,16 +138,7 @@ MOTIVO: Padronizar layout usando templates/base.html (navbar nova). Remover navb
   <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
     <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
 
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
-
-      <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
-      <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
-
-      <div id="op-ativo-box" class="op-ativo-box" style="display:none;">
-        <div class="op-ativo-title">OP ativa</div>
-        <div id="op-ativo-info" class="op-ativo-info">-</div>
-      </div>
+    </div>
 
       <button id="btn-reset" type="button" class="btn" style="background:#dc2626;color:#fff;">Zerar Producao</button>
     </div>
