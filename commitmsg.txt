@@ -1,6 +1,5 @@
-﻿feat(ui): configurar turnos multiplos com pausas planejadas (almoco) na tela config_maquina_for
+﻿fix(ui): destravar edicao de horarios em turnos/pausas na config_maquina_for
 
-- Adiciona editor de ate 3 turnos com pausas por turno
-- Envia payload v2 para POST /machine/config (shifts/breaks/active_days/oee/units)
-- Exibe resumo de tempo planejado e meta/h
-- Mantem compatibilidade e destaca turno/pausa na tabela 24h
+- Evita recarregar config do servidor durante edicao (configDirty)
+- Atualiza tabela 24h via cache local (atualizarTabelaLocal)
+- Limpa dirty apos salvar e recarrega do servidor
