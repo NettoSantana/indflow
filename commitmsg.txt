@@ -1,5 +1,4 @@
-﻿fix: adicionar rota /maquina/<machine_id>/historico no MAIN
+﻿fix(producao): rota /config renderiza template do formulario
 
-- Corrige 404 do HUB ao abrir Historico
-- Rota nova redireciona para /producao/historico?machine_id=...
-- Preserva querystring (inicio/fim/format)
+- GET /producao/config/<machine_id> agora renderiza config_maquina_for.html
+- Evita abrir o HUB antigo (config_maquina.html global) por engano
