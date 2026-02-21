@@ -1,6 +1,6 @@
-﻿feat(machine): suportar configuracao v2 (turnos + pausas planejadas) no POST /machine/config
+﻿feat(ui): configurar turnos multiplos com pausas planejadas (almoco) na tela config_maquina_for
 
-- Aceita payload v2 com shifts/breaks/active_days/oee/units
-- Converte formato legado (1 turno) para v2 automaticamente
-- Persiste config_json na tabela machine_config (SQLite)
-- Mantem compatibilidade atual atualizando memoria e chamando upsert_machine_config
+- Adiciona editor de ate 3 turnos com pausas por turno
+- Envia payload v2 para POST /machine/config (shifts/breaks/active_days/oee/units)
+- Exibe resumo de tempo planejado e meta/h
+- Mantem compatibilidade e destaca turno/pausa na tabela 24h

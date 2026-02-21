@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
-LAST_RECODE: 2026-02-21 17:00 (America/Bahia)
-MOTIVO: Implementar configuracao industrial (multiplos turnos + pausas planejadas) no frontend, enviando payload v2 para /machine/config e mantendo compatibilidade.
+LAST_RECODE: 2026-02-21 19:45 (America/Bahia)
+MOTIVO: Corrigir travamento dos inputs de horario (type=time) evitando re-render e reload do servidor durante edicao.
 -->
 
 {% extends "base.html" %}
@@ -199,6 +199,12 @@ function getActiveDays(){
 
 // Shifts UI state
 let shiftsState = [];
+let lastStatusCache = null;
+let configDirty = false;
+
+function markConfigDirty(){ configDirty = true; }
+function clearConfigDirty(){ configDirty = false; }
+
 
 function shiftDefaultName(idx){ return String.fromCharCode(65+idx); } // A,B,C
 function newShiftSkeleton(idx){
@@ -235,11 +241,11 @@ function renderShifts(){
     btnRemove.type="button";
     btnRemove.className="btn btn-secondary";
     btnRemove.textContent="Remover turno";
-    btnRemove.addEventListener("click",()=>{
+    btnRemove.addEventListener("click",()=>{ markConfigDirty(); 
       shiftsState.splice(idx,1);
       // reindex names if empty
       shiftsState.forEach((sh,i)=>{ if(!sh.name) sh.name = shiftDefaultName(i); });
-      renderShifts(); renderSummary(); carregarTabela();
+      renderShifts(); renderSummary(); atualizarTabelaLocal();
     });
 
     actions.appendChild(btnRemove);
@@ -257,17 +263,17 @@ function renderShifts(){
 
     const lblName=document.createElement("label"); lblName.textContent="Nome do turno:";
     const inpName=document.createElement("input"); inpName.type="text"; inpName.className="input"; inpName.value=String(s.name||"");
-    inpName.addEventListener("input",()=>{ s.name = String(inpName.value||"").trim(); title.textContent = "Turno " + (s.name || shiftDefaultName(idx)); renderSummary(); carregarTabela(); });
+    inpName.addEventListener("input",()=>{ markConfigDirty();  s.name = String(inpName.value||"").trim(); title.textContent = "Turno " + (s.name || shiftDefaultName(idx)); renderSummary(); atualizarTabelaLocal(); });
     col1.appendChild(lblName); col1.appendChild(inpName);
 
     const lblStart=document.createElement("label"); lblStart.textContent="Inicio:";
     const inpStart=document.createElement("input"); inpStart.type="time"; inpStart.className="input"; inpStart.value=String(s.start||"");
-    inpStart.addEventListener("change",()=>{ s.start = String(inpStart.value||""); renderSummary(); carregarTabela(); });
+    inpStart.addEventListener("change",()=>{ markConfigDirty();  s.start = String(inpStart.value||""); renderSummary(); atualizarTabelaLocal(); });
     col2.appendChild(lblStart); col2.appendChild(inpStart);
 
     const lblEnd=document.createElement("label"); lblEnd.textContent="Fim:";
     const inpEnd=document.createElement("input"); inpEnd.type="time"; inpEnd.className="input"; inpEnd.value=String(s.end||"");
-    inpEnd.addEventListener("change",()=>{ s.end = String(inpEnd.value||""); renderSummary(); carregarTabela(); });
+    inpEnd.addEventListener("change",()=>{ markConfigDirty();  s.end = String(inpEnd.value||""); renderSummary(); atualizarTabelaLocal(); });
     col3.appendChild(lblEnd); col3.appendChild(inpEnd);
 
     grid.appendChild(col1); grid.appendChild(col2); grid.appendChild(col3);
@@ -279,7 +285,7 @@ function renderShifts(){
     const cmeta=document.createElement("div"); cmeta.className="col";
     const lmeta=document.createElement("label"); lmeta.textContent="Meta do turno (pcs):";
     const imeta=document.createElement("input"); imeta.type="number"; imeta.className="input"; imeta.min="0"; imeta.step="1"; imeta.value=String(s.meta_pcs ?? 0);
-    imeta.addEventListener("input",()=>{ const v=Number(imeta.value); s.meta_pcs = (Number.isFinite(v) && v>=0) ? Math.floor(v) : 0; renderSummary(); carregarTabela(); });
+    imeta.addEventListener("input",()=>{ markConfigDirty();  const v=Number(imeta.value); s.meta_pcs = (Number.isFinite(v) && v>=0) ? Math.floor(v) : 0; renderSummary(); atualizarTabelaLocal(); });
     cmeta.appendChild(lmeta); cmeta.appendChild(imeta);
     const cspacer=document.createElement("div"); cspacer.className="col";
     grid2.appendChild(cmeta); grid2.appendChild(cspacer);
@@ -303,21 +309,21 @@ function renderShifts(){
 
       const inName=document.createElement("input");
       inName.type="text"; inName.className="input"; inName.placeholder="Nome"; inName.value=String(b.name||"");
-      inName.addEventListener("input",()=>{ b.name=String(inName.value||"").trim(); renderSummary(); carregarTabela(); });
+      inName.addEventListener("input",()=>{ markConfigDirty();  b.name=String(inName.value||"").trim(); renderSummary(); atualizarTabelaLocal(); });
 
       const inStart=document.createElement("input");
       inStart.type="time"; inStart.className="input"; inStart.value=String(b.start||"");
-      inStart.addEventListener("change",()=>{ b.start=String(inStart.value||""); renderSummary(); carregarTabela(); });
+      inStart.addEventListener("change",()=>{ markConfigDirty();  b.start=String(inStart.value||""); renderSummary(); atualizarTabelaLocal(); });
 
       const inEnd=document.createElement("input");
       inEnd.type="time"; inEnd.className="input"; inEnd.value=String(b.end||"");
-      inEnd.addEventListener("change",()=>{ b.end=String(inEnd.value||""); renderSummary(); carregarTabela(); });
+      inEnd.addEventListener("change",()=>{ markConfigDirty();  b.end=String(inEnd.value||""); renderSummary(); atualizarTabelaLocal(); });
 
       const btnR=document.createElement("button");
       btnR.type="button"; btnR.className="btn btn-secondary"; btnR.textContent="Remover pausa";
-      btnR.addEventListener("click",()=>{
+      btnR.addEventListener("click",()=>{ markConfigDirty(); 
         s.breaks.splice(bidx,1);
-        renderShifts(); renderSummary(); carregarTabela();
+        renderShifts(); renderSummary(); atualizarTabelaLocal();
       });
 
       row.appendChild(inName); row.appendChild(inStart); row.appendChild(inEnd); row.appendChild(btnR);
@@ -331,9 +337,9 @@ function renderShifts(){
     btnAddBreak.className="btn btn-secondary";
     btnAddBreak.textContent="Adicionar pausa";
     btnAddBreak.style.marginTop="10px";
-    btnAddBreak.addEventListener("click",()=>{
+    btnAddBreak.addEventListener("click",()=>{ markConfigDirty(); 
       s.breaks.push(newBreakSkeleton());
-      renderShifts(); renderSummary(); carregarTabela();
+      renderShifts(); renderSummary(); atualizarTabelaLocal();
     });
 
     breaksWrap.appendChild(btnAddBreak);
@@ -615,6 +621,7 @@ document.getElementById("config-form").addEventListener("submit", function(e){
   .then((resp)=>{
     if(resp && resp.error){ alert(resp.error); return; }
     alert("Configuracao salva com sucesso!");
+    clearConfigDirty();
     carregarTabela();
   })
   .catch(()=>{ alert("Erro ao salvar configuracao."); });
@@ -684,28 +691,106 @@ function applyConfigFromStatus(data){
 }
 
 function buildMeta24(data){
-  // prefer backend if available (24 already)
+  if(configDirty){
+    return computeMeta24FromShifts();
+  }
   if(Array.isArray(data.meta_por_hora_24) && data.meta_por_hora_24.length===24) return data.meta_por_hora_24.map(x=>toNonNegInt(x));
-  // fallback: compute from shifts
   return computeMeta24FromShifts();
+}
+
+
+function atualizarTabelaLocal(){
+  if(!lastStatusCache){
+    carregarTabela();
+    return;
+  }
+  const data = lastStatusCache;
+
+  const meta24 = computeMeta24FromShifts();
+  const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length===24) ? data.producao_exibicao_24 : null;
+  const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
+  const horaDiaAtual = new Date().getHours();
+  const diaRef = data.ultimo_dia ?? data.dia_ref ?? "sem_dia";
+  if(!Array.isArray(data.refugo_por_hora)) data.refugo_por_hora = new Array(24).fill(0);
+  const refugo24 = data.refugo_por_hora;
+
+  const tbody = document.querySelector("#tabela-horas tbody");
+  tbody.innerHTML = "";
+
+  for(let i=0; i<24; i++){
+    const tr = document.createElement("tr");
+    const inShift = isHourInAnyShift(i);
+    const inBreak = isHourInAnyBreak(i);
+    if(inBreak) tr.classList.add("pausa-planejada");
+    else if(inShift) tr.classList.add("turno-ativo");
+
+    const tdHora=document.createElement("td"); tdHora.textContent = HORAS_FIXAS_24[i];
+    const tdMeta=document.createElement("td"); tdMeta.textContent = meta24[i] ?? 0;
+
+    let baseVal=0;
+    if(i > horaDiaAtual) baseVal = null;
+    else {
+      const fonte = exibicao24 ? exibicao24 : np24;
+      const v = Number(fonte[i] ?? 0);
+      baseVal = (Number.isFinite(v) && v>=0) ? v : 0;
+    }
+
+    const ref = toNonNegInt(refugo24[i] ?? 0);
+    const tdProd=document.createElement("td");
+    if(baseVal===null) tdProd.textContent="-";
+    else tdProd.textContent = Math.max(0, Math.floor(baseVal) - ref);
+
+    const tdRef=document.createElement("td");
+    const input=document.createElement("input");
+    input.type="number"; input.min="0"; input.step="1"; input.className="refugo-input"; input.value = ref;
+    const podeEditar = (i < horaDiaAtual);
+    input.disabled = !podeEditar;
+
+    input.addEventListener("blur", async()=>{
+      if(!podeEditar){ input.value = toNonNegInt(refugo24[i] ?? 0); return; }
+      const anterior = toNonNegInt(refugo24[i] ?? 0);
+      const novo = toNonNegInt(input.value);
+      if(novo === anterior){ input.value = novo; return; }
+      try{
+        await salvarRefugoAPI(machine_id, diaRef, i, novo);
+        refugo24[i] = novo;
+        if(baseVal===null) tdProd.textContent="-";
+        else tdProd.textContent = Math.max(0, Math.floor(baseVal) - novo);
+        input.value = novo;
+      }catch(err){
+        alert(String(err && err.message ? err.message : err));
+        input.value = anterior;
+        if(baseVal===null) tdProd.textContent="-";
+        else tdProd.textContent = Math.max(0, Math.floor(baseVal) - anterior);
+      }
+    });
+
+    tdRef.appendChild(input);
+    tr.appendChild(tdHora); tr.appendChild(tdMeta); tr.appendChild(tdProd); tr.appendChild(tdRef);
+    tbody.appendChild(tr);
+  }
 }
 
 // Table
 async function carregarTabela(){
   const data = await fetchStatus();
-  applyConfigFromStatus(data);
+  lastStatusCache = data;
+
+  if(!configDirty){
+    applyConfigFromStatus(data);
+  }
 
   const meta24 = buildMeta24(data);
   const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length===24) ? data.producao_exibicao_24 : null;
   const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
   const horaDiaAtual = new Date().getHours();
   const diaRef = data.ultimo_dia ?? data.dia_ref ?? "sem_dia";
-  const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
+  const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : (data.refugo_por_hora = new Array(24).fill(0));
 
   const tbody = document.querySelector("#tabela-horas tbody");
   tbody.innerHTML = "";
 
-  for(let i=0; i<24; i++){ 
+  for(let i=0; i<24; i++){
     const tr = document.createElement("tr");
     const inShift = isHourInAnyShift(i);
     const inBreak = isHourInAnyBreak(i);
@@ -767,7 +852,7 @@ renderSummary();
 document.getElementById("btnAddShift").addEventListener("click",()=>{
   if(shiftsState.length>=3){ alert("Limite: ate 3 turnos."); return; }
   shiftsState.push(newShiftSkeleton(shiftsState.length));
-  renderShifts(); renderSummary(); carregarTabela();
+  renderShifts(); renderSummary(); atualizarTabelaLocal();
 });
 carregarTabela();
 </script>
