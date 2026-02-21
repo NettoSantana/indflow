@@ -1,4 +1,5 @@
-﻿fix(producao): rota /config renderiza template do formulario
+﻿fix(producao): criar rota dedicada para formulario de configuracao
 
-- GET /producao/config/<machine_id> agora renderiza config_maquina_for.html
-- Evita abrir o HUB antigo (config_maquina.html global) por engano
+- Adiciona GET /producao/config-for/<machine_id>
+- Renderiza config_maquina_for.html
+- Nao altera /producao/config/<machine_id> para evitar pular o HUB
