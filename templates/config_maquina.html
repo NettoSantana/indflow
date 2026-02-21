@@ -1,7 +1,7 @@
 <!--
-Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-02 14:16 (America/Bahia)
-Motivo: Normalizar payload do /machine/status (machine_status/op_status) para preencher tela e OP ativa. Ajustar carregarOpUI para usar op_status quando presente.
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
+Ultimo recode: 2026-02-21 09:02 (America/Bahia)
+Motivo: Transformar a tela em Hub da Maquina (cards). OP passa a ser gerenciada por modal na propria pagina. Historico/Chamados/Configuracao seguem por rotas separadas.
 -->
 
 <!--
@@ -16,17 +16,15 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1200, initial-scale=1.0">
-  <title>Configuração da Máquina</title>
+  <title>Maquina</title>
   <link rel="stylesheet" href="/static/style.css?v=2">
 
   <style>
-    /* ===== FORCAR LAYOUT DESKTOP EM MOBILE ===== */
     html, body{
       min-width:1200px;
       overflow-x:auto;
     }
 
-    /* ===== NAVBAR INDUSTRIAL ===== */
     .navbar{
       width:100%;
       height:76px;
@@ -76,7 +74,6 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       color:#0f172a;
     }
 
-    /* ===== AREA DE CONTEUDO ===== */
     .content-area{
       padding:24px;
       width:100%;
@@ -87,13 +84,143 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       max-width:1200px;
       margin:0 auto;
     }
+
+    .top-row{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+    }
+
+    .op-ativo-box{
+      cursor:pointer;
+      user-select:none;
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      padding:8px 10px;
+      background:#f8fafc;
+      min-width:220px;
+    }
+    .op-ativo-title{
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      text-transform:uppercase;
+      letter-spacing:0.03em;
+      margin-bottom:2px;
+    }
+    .op-ativo-info{
+      font-size:13px;
+      font-weight:900;
+      color:#0f172a;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .cards-grid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:16px;
+      margin-top:18px;
+    }
+
+    .machine-card{
+      background:#ffffff;
+      border:1px solid #e5e7eb;
+      border-radius:16px;
+      padding:18px;
+      box-shadow:0 6px 18px rgba(15,23,42,0.06);
+    }
+
+    .machine-card-title{
+      font-size:18px;
+      font-weight:900;
+      color:#0f172a;
+      margin:0 0 8px 0;
+    }
+
+    .machine-card-desc{
+      font-size:14px;
+      color:#64748b;
+      margin:0 0 14px 0;
+      line-height:1.35;
+      min-height:38px;
+    }
+
+    .machine-card-actions{
+      display:flex;
+      gap:10px;
+    }
+
+    @media (max-width: 1240px){
+      .cards-grid{
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(15,23,42,0.35);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:18px;
+      z-index:50;
+    }
+    .modal{
+      width:100%;
+      max-width:640px;
+      background:#fff;
+      border-radius:18px;
+      border:1px solid #e5e7eb;
+      box-shadow:0 18px 40px rgba(0,0,0,0.18);
+      overflow:hidden;
+    }
+    .modal-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:14px 16px;
+      border-bottom:1px solid #e5e7eb;
+      background:#f8fafc;
+    }
+    .modal-title{
+      font-size:14px;
+      font-weight:900;
+      color:#0f172a;
+    }
+    .modal-close{
+      border:1px solid #e5e7eb;
+      background:#fff;
+      border-radius:10px;
+      width:34px;
+      height:34px;
+      font-size:16px;
+      line-height:32px;
+      text-align:center;
+      cursor:pointer;
+    }
+    .modal-body{
+      padding:16px;
+      max-height:80vh;
+      overflow-y:auto;
+    }
+
+    .help-text{
+      font-size:13px;
+      color:#64748b;
+      margin-top:6px;
+      line-height:1.3;
+    }
   </style>
 
 </head>
 
 <body>
 
-  <!-- NAVBAR SUPERIOR -->
   <nav class="navbar">
     <div class="nav-left">
       <img src="/static/img/logo.png" alt="NettSan Technology" class="logo">
@@ -101,329 +228,135 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
     </div>
 
     <div class="nav-links">
-      
-        <a href="/producao">Produção</a>
-        <a href="/manutencao">Manutenção</a>
-        <a href="/ativos">Ativos</a>
-        <a href="/devices/">Dispositivos</a>
-        <a href="/clientes">Clientes</a>
-        <a href="/utilidades">Utilidades</a>
-        <a href="/admin">Admin</a>
-        <a href="/admin/logout">Sair</a>
-      
+      <a href="/producao">Produção</a>
+      <a href="/manutencao">Manutenção</a>
+      <a href="/ativos">Ativos</a>
+      <a href="/devices/">Dispositivos</a>
+      <a href="/clientes">Clientes</a>
+      <a href="/utilidades">Utilidades</a>
+      <a href="/admin">Admin</a>
+      <a href="/admin/logout">Sair</a>
     </div>
   </nav>
 
-  <!-- CONTEUDO DA PAGINA -->
   <main class="content-area">
     <div class="container">
-      
 
-<style>
-  /* TABELA ZEBRADA */
-  #tabela-horas tbody tr:nth-child(even) { background-color: #f3f4f6; }
-  #tabela-horas tbody tr:nth-child(odd) { background-color: #ffffff; }
-  #tabela-horas tbody tr:hover { background-color: #e5e7eb; }
+      <div class="top-row">
+        <h1 class="section-title" id="titulo-maquina">MAQUINA</h1>
 
-  /* DESTAQUE: TURNO ATIVO (linha dentro do intervalo inicio->fim)
-     Azul claro + branco, com "duas faixas" (topo mais claro / base mais azul). */
-  #tabela-horas tbody tr.turno-ativo{
-    background-color:#e0f2fe; /* fallback */
-    background-image:linear-gradient(180deg, #ffffff 0%, #e0f2fe 100%);
-    border-top:1px solid #ffffff;
-    border-bottom:1px solid #bfdbfe;
-  }
-  #tabela-horas tbody tr.turno-ativo:hover{
-    background-color:#bae6fd; /* fallback */
-    background-image:linear-gradient(180deg, #f0f9ff 0%, #bae6fd 100%);
-  }
-
-  /* REFUGO EDITAVEL */
-  .refugo-input{
-    width: 90px;
-    padding: 6px 8px;
-    border: 1px solid #cbd5e1;
-    border-radius: 10px;
-    font-size: 14px;
-    text-align: center;
-    background: #ffffff;
-  }
-  .refugo-input:focus{
-    outline: none;
-    border-color: #2563eb;
-    box-shadow: 0 0 0 2px rgba(37,99,235,0.20);
-  }
-  .refugo-input:disabled{
-    background: #e5e7eb;
-    color: #64748b;
-    cursor: not-allowed;
-  }
-
-  /* HELP TEXT */
-  .help-text{
-    font-size: 13px;
-    color: #64748b;
-    margin-top: 6px;
-    line-height: 1.3;
-  }
-
-  .op-ativo-box{
-    cursor:pointer;
-    user-select:none;
-
-    border:1px solid #e5e7eb;
-    border-radius:14px;
-    padding:8px 10px;
-    background:#f8fafc;
-    min-width:220px;
-  }
-  .op-ativo-title{
-    font-size:12px;
-    font-weight:900;
-    color:#334155;
-    text-transform:uppercase;
-    letter-spacing:0.03em;
-    margin-bottom:2px;
-  }
-  .op-ativo-info{
-    font-size:13px;
-    font-weight:900;
-    color:#0f172a;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
-  }
-
-  .modal-backdrop{
-    position:fixed;
-    inset:0;
-    background:rgba(15,23,42,0.35);
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    padding:18px;
-    z-index:50;
-  }
-  .modal{
-    width:100%;
-    max-width:640px;
-    background:#fff;
-    border-radius:18px;
-    border:1px solid #e5e7eb;
-    box-shadow:0 18px 40px rgba(0,0,0,0.18);
-    overflow:hidden;
-  }
-  .modal-header{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    padding:14px 16px;
-    border-bottom:1px solid #e5e7eb;
-    background:#f8fafc;
-  }
-  .modal-title{
-    font-size:14px;
-    font-weight:900;
-    color:#0f172a;
-  }
-  .modal-close{
-    border:1px solid #e5e7eb;
-    background:#fff;
-    border-radius:10px;
-    width:34px;
-    height:34px;
-    font-size:16px;
-    line-height:32px;
-    text-align:center;
-    cursor:pointer;
-  }
-  .modal-body{ padding:16px; 
-    max-height: 80vh;
-    overflow-y: auto;
-}
-</style>
-
-<div class="container">
-
-  <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
-    <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
-
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <a id="btn-historico" href="#" class="btn btn-secondary">Historico</a>
-
-      <button id="btn-op-new" type="button" class="btn btn-primary">Novo OP</button>
-      <button id="btn-op-end" type="button" class="btn" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
-
-      <div id="op-ativo-box" class="op-ativo-box" style="display:none;">
-        <div class="op-ativo-title">OP ativa</div>
-        <div id="op-ativo-info" class="op-ativo-info">-</div>
-      </div>
-
-      <button id="btn-reset" type="button" class="btn" style="background:#dc2626;color:#fff;">Zerar Producao</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <form id="config-form">
-
-      <label>Meta do Turno (pcs):</label>
-      <input type="number" id="meta" required>
-
-      <label class="mt-20">Unidade de Produção (até 2):</label>
-
-      <div class="row">
-        <div class="col">
-          <select id="unidade_1" class="input">
-            <option value="">-</option>
-            <option value="pcs">Unidade (pcs)</option>
-            <option value="m">Metro linear (m)</option>
-            <option value="m2">Metro quadrado (m2)</option>
-          </select>
-        </div>
-
-        <div class="col">
-          <select id="unidade_2" class="input">
-            <option value="">-</option>
-            <option value="pcs">Unidade (pcs)</option>
-            <option value="m">Metro linear (m)</option>
-            <option value="m2">Metro quadrado (m2)</option>
-          </select>
-        </div>
-      </div>
-
-      <label class="mt-20">Conversão (1 pcs = X metros):</label>
-      <input
-        type="number"
-        id="conv_m_por_pcs"
-        class="input"
-        step="0.001"
-        min="0.001"
-        placeholder="Ex: 0.85"
-        required
-      >
-
-      <div class="row mt-20">
-        <div class="col">
-          <label>Início do Turno:</label>
-          <input type="time" id="inicio" required>
-        </div>
-
-        <div class="col">
-          <label>Fim do Turno:</label>
-          <input type="time" id="fim" required>
-        </div>
-      </div>
-
-      <label class="mt-20">Rampa Inicial (%):</label>
-      <input type="number" id="rampa" min="0" max="100" required>
-
-      <label class="mt-20">Alerta de Parada por Inatividade (segundos sem produção):</label>
-      <input
-        type="number"
-        id="no_count_stop_sec"
-        class="input"
-        min="5"
-        step="1"
-        placeholder="Ex: 60"
-        required
-      >
-      <div class="help-text">
-        Mesmo que a maquina esteja em AUTO/PRODUZINDO, se nao houver aumento de contagem por este tempo,
-        o sistema considera PARADA. Use valores maiores para ciclos longos (ex: 180s).
-      </div>
-
-      <button class="btn btn-primary mt-20" type="submit">
-        Salvar Configuração
-      </button>
-    </form>
-  </div>
-
-  <div class="modal-backdrop" id="opModalBackdrop" style="display:none;">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title" id="opModalTitle">Nova Ordem de Producao (OP)</div>
-        <button class="modal-close" id="btnCloseOpModal" type="button" aria-label="Fechar">x</button>
-      </div>
-      <div class="modal-body">
-        <form id="op-form">
-          <label>OS:</label><input type="text" id="op_os" class="input" required>
-          <label class="mt-20">Lote:</label><input type="text" id="op_lote" class="input" required>
-          <label class="mt-20">Operador:</label><input type="text" id="op_operador" class="input" required>
-          <label class="mt-20">Bobinas (opcional):</label>
-          <div class="help-text">Adicione uma ou mais bobinas em metros (somente numeros). Se ficar vazio, nenhuma bobina sera registrada.</div>
-          <div id="op_bobinas_list" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;"></div>
-          <button id="btnAddBobina" type="button" class="btn btn-secondary" style="margin-top:10px;">Adicionar bobina</button>
-          <input type="hidden" id="op_bobina" value="">
-          <label class="mt-20">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
-          <label class="mt-20">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
-          <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
-            <button type="button" class="btn btn-secondary" id="btnCancelOp">Cancelar</button>
-            <button type="submit" class="btn btn-primary" id="btnStartOp">Iniciar OP</button>
+        <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <div id="op-ativo-box" class="op-ativo-box" style="display:none;">
+            <div class="op-ativo-title">OP ativa</div>
+            <div id="op-ativo-info" class="op-ativo-info">-</div>
           </div>
-        </form>
-        <div class="help-text" style="margin-top:10px;">Inicio e fim da OP sao automaticos (ao iniciar e encerrar).</div>
+        </div>
       </div>
+
+      <div class="cards-grid">
+
+        <div class="machine-card">
+          <div class="machine-card-title">OP</div>
+          <p class="machine-card-desc">Abrir, editar ou encerrar Ordem de Produção da máquina.</p>
+          <div class="machine-card-actions">
+            <button id="btn-op-manage" type="button" class="btn btn-primary">Abrir</button>
+          </div>
+        </div>
+
+        <div class="machine-card">
+          <div class="machine-card-title">Historico</div>
+          <p class="machine-card-desc">Consultar histórico de produção e desempenho por período.</p>
+          <div class="machine-card-actions">
+            <a id="link-historico" href="#" class="btn btn-primary">Abrir</a>
+          </div>
+        </div>
+
+        <div class="machine-card">
+          <div class="machine-card-title">Chamados</div>
+          <p class="machine-card-desc">Abrir, acompanhar e encerrar chamados da máquina.</p>
+          <div class="machine-card-actions">
+            <a id="link-chamados" href="#" class="btn btn-primary">Abrir</a>
+          </div>
+        </div>
+
+        <div class="machine-card">
+          <div class="machine-card-title">Configuracao</div>
+          <p class="machine-card-desc">Editar metas, turnos, conversões e parâmetros da máquina.</p>
+          <div class="machine-card-actions">
+            <a id="link-config" href="#" class="btn btn-primary">Abrir</a>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-backdrop" id="opModalBackdrop" style="display:none;">
+        <div class="modal">
+          <div class="modal-header">
+            <div class="modal-title" id="opModalTitle">Ordem de Producao (OP)</div>
+            <button class="modal-close" id="btnCloseOpModal" type="button" aria-label="Fechar">x</button>
+          </div>
+          <div class="modal-body">
+            <form id="op-form">
+              <label>OS:</label><input type="text" id="op_os" class="input" required>
+              <label class="mt-20">Lote:</label><input type="text" id="op_lote" class="input" required>
+              <label class="mt-20">Operador:</label><input type="text" id="op_operador" class="input" required>
+
+              <label class="mt-20">Bobinas (opcional):</label>
+              <div class="help-text">Adicione uma ou mais bobinas em metros (somente numeros). Se ficar vazio, nenhuma bobina sera registrada.</div>
+              <div id="op_bobinas_list" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;"></div>
+              <button id="btnAddBobina" type="button" class="btn btn-secondary" style="margin-top:10px;">Adicionar bobina</button>
+              <input type="hidden" id="op_bobina" value="">
+
+              <label class="mt-20">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
+              <label class="mt-20">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
+
+              <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; flex-wrap:wrap;">
+                <button type="button" class="btn btn-secondary" id="btnCancelOp">Cancelar</button>
+                <button type="button" class="btn" id="btnEndOpInside" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
+                <button type="submit" class="btn btn-primary" id="btnSaveOp">Salvar</button>
+              </div>
+            </form>
+            <div class="help-text" style="margin-top:10px;">Inicio e fim da OP sao automaticos (ao iniciar e encerrar).</div>
+          </div>
+        </div>
+      </div>
+
     </div>
-  </div>
-
-  <h2 class="section-title mt-30">Distribuicao da Meta por Hora</h2>
-
-  <div class="card">
-    <table class="table" id="tabela-horas">
-      <thead>
-        <tr>
-          <th>Faixa Horária</th>
-          <th>Meta da Hora</th>
-          <th>Produzido Hora</th>
-          <th>Refugo Hora</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-</div>
+  </main>
 
 <script>
 const machine_id = window.location.pathname.split("/").pop();
 
-document.getElementById("titulo-maquina").textContent =
-  "Configuração da Máquina - " + machine_id.toUpperCase();
+document.getElementById("titulo-maquina").textContent = machine_id.toUpperCase();
+document.title = machine_id.toUpperCase();
 
-document.getElementById("btn-historico").href =
-  `/producao/historico?machine_id=${machine_id}`;
+document.getElementById("link-historico").href = `/maquina/${encodeURIComponent(machine_id)}/historico`;
+document.getElementById("link-chamados").href = `/maquina/${encodeURIComponent(machine_id)}/chamados`;
+document.getElementById("link-config").href = `/maquina/${encodeURIComponent(machine_id)}/configuracao`;
 
-let opAtiva=null;
-let opModalMode="new"; // "new" | "edit"
-
-function _setOpModalMode(mode){
-  opModalMode = (mode === "edit") ? "edit" : "new";
-  const t=document.getElementById("opModalTitle");
-  const b=document.getElementById("btnStartOp");
-  if(t) t.textContent = (opModalMode === "edit") ? "Editar Ordem de Producao (OP)" : "Nova Ordem de Producao (OP)";
-  if(b) b.textContent = (opModalMode === "edit") ? "Salvar Alteracoes" : "Iniciar OP";
-}
+let opAtiva = null;
+let opModalMode = "new";
 
 function _createBobinaRow(value){
-  const row=document.createElement("div");
-  row.style.display="flex";
-  row.style.gap="10px";
-  row.style.alignItems="center";
+  const row = document.createElement("div");
+  row.style.display = "flex";
+  row.style.gap = "10px";
+  row.style.alignItems = "center";
 
-  const inp=document.createElement("input");
-  inp.type="number";
-  inp.min="0";
-  inp.step="1";
-  inp.className="input";
-  inp.placeholder="Metros";
-  inp.value=String(value||"");
-  inp.style.flex="1";
+  const inp = document.createElement("input");
+  inp.type = "number";
+  inp.min = "0";
+  inp.step = "1";
+  inp.className = "input";
+  inp.placeholder = "Metros";
+  inp.value = String(value || "");
+  inp.style.flex = "1";
 
-  const btn=document.createElement("button");
-  btn.type="button";
-  btn.className="btn btn-secondary";
-  btn.textContent="Remover";
-  btn.addEventListener("click",()=>{ row.remove(); _syncHiddenBobinaFirst(); });
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-secondary";
+  btn.textContent = "Remover";
+  btn.addEventListener("click", () => { row.remove(); _syncHiddenBobinaFirst(); });
 
   row.appendChild(inp);
   row.appendChild(btn);
@@ -431,43 +364,43 @@ function _createBobinaRow(value){
 }
 
 function _getBobinasFromUI(){
-  const list=document.getElementById("op_bobinas_list");
+  const list = document.getElementById("op_bobinas_list");
   if(!list) return [];
-  const out=[];
-  const rows=list.querySelectorAll("div");
-  rows.forEach((r)=>{
-    const inp=r.querySelector("input");
-    const v=String((inp && inp.value) ? inp.value : "").trim();
+  const out = [];
+  const rows = list.querySelectorAll("div");
+  rows.forEach((r) => {
+    const inp = r.querySelector("input");
+    const v = String((inp && inp.value) ? inp.value : "").trim();
     if(v) out.push(v);
   });
   return out;
 }
 
 function _setBobinasToUI(arr){
-  const list=document.getElementById("op_bobinas_list");
+  const list = document.getElementById("op_bobinas_list");
   if(!list) return;
-  list.innerHTML="";
+  list.innerHTML = "";
   const a = Array.isArray(arr) ? arr : [];
   if(a.length === 0){
     list.appendChild(_createBobinaRow(""));
     return;
   }
-  a.forEach((v)=>{ list.appendChild(_createBobinaRow(v)); });
+  a.forEach((v) => { list.appendChild(_createBobinaRow(v)); });
 }
 
 function _syncHiddenBobinaFirst(){
-  const h=document.getElementById("op_bobina");
+  const h = document.getElementById("op_bobina");
   if(!h) return;
-  const bobinas=_getBobinasFromUI();
+  const bobinas = _getBobinasFromUI();
   h.value = bobinas.length ? bobinas[0] : "";
 }
 
 function _fillOpFormFromData(d){
-  document.getElementById("op_os").value = String(d.os||"");
-  document.getElementById("op_lote").value = String(d.lote||"");
-  document.getElementById("op_operador").value = String(d.operador||"");
-  document.getElementById("op_gr_fio").value = String(d.gr_fio||"");
-  document.getElementById("op_obs").value = String(d.observacoes||"");
+  document.getElementById("op_os").value = String(d.os || "");
+  document.getElementById("op_lote").value = String(d.lote || "");
+  document.getElementById("op_operador").value = String(d.operador || "");
+  document.getElementById("op_gr_fio").value = String(d.gr_fio || "");
+  document.getElementById("op_obs").value = String(d.observacoes || "");
 
   const bobinas =
     Array.isArray(d.bobinas) ? d.bobinas :
@@ -475,30 +408,24 @@ function _fillOpFormFromData(d){
   _setBobinasToUI(bobinas);
   _syncHiddenBobinaFirst();
 }
-function _showOp(info){
-  const box=document.getElementById("op-ativo-box"),
-        i=document.getElementById("op-ativo-info"),
-        bn=document.getElementById("btn-op-new"),
-        be=document.getElementById("btn-op-end");
-  if(box)box.style.display="block";
-  if(i)i.textContent=info||"-";
-  if(bn)bn.style.display="none";
-  if(be)be.style.display="inline-block";
+
+function _setOpTopBox(info){
+  const box = document.getElementById("op-ativo-box");
+  const i = document.getElementById("op-ativo-info");
+  if(!box || !i) return;
+  if(info){
+    box.style.display = "block";
+    i.textContent = info;
+  }else{
+    box.style.display = "none";
+    i.textContent = "-";
+  }
 }
-function _showNoOp(){
-  const box=document.getElementById("op-ativo-box"),
-        i=document.getElementById("op-ativo-info"),
-        bn=document.getElementById("btn-op-new"),
-        be=document.getElementById("btn-op-end");
-  if(box)box.style.display="none";
-  if(i)i.textContent="-";
-  if(bn)bn.style.display="inline-block";
-  if(be)be.style.display="none";
-}
+
 async function _getJson(url){
   try{
-    const r=await fetch(url);
-    if(!r.ok)return null;
+    const r = await fetch(url);
+    if(!r.ok) return null;
     return await r.json();
   }catch(e){
     return null;
@@ -506,485 +433,169 @@ async function _getJson(url){
 }
 
 function _normalizeMachineStatusPayload(payload){
-  // Alguns endpoints retornam { machine_status: {...}, op_status: {...} }
-  // Outros retornam o status direto. Aqui normalizamos para evitar tela vazia.
   if(payload && typeof payload === "object" && payload.machine_status){
     return { machine: payload.machine_status, op: (payload.op_status || null) };
   }
   return { machine: payload, op: null };
 }
 
-async function carregarOpUI(){
-  // Preferir o endpoint que ja retorna tudo (status da maquina + op_status), quando disponivel.
+async function carregarOpStatus(){
   const payload = await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
   if(payload){
     const norm = _normalizeMachineStatusPayload(payload);
     if(norm.op && norm.op.active){
       opAtiva = norm.op;
       const info = `OS ${String(opAtiva.os||"")} | Lote ${String(opAtiva.lote||"")} | Operador ${String(opAtiva.operador||"")}`;
-      _showOp(info);
+      _setOpTopBox(info);
       return;
     }
   }
 
-  // Fallback: endpoint antigo (caso exista no backend)
   const d = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(!d){ _showNoOp(); return; }
-  if(d.active){
+  if(d && d.active){
     opAtiva = d;
     const info = `OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
-    _showOp(info);
+    _setOpTopBox(info);
   }else{
     opAtiva = null;
-    _showNoOp();
+    _setOpTopBox(null);
   }
 }
-function openOpModal(mode){
-  _setOpModalMode(mode);
-  if(opModalMode==="edit"){
-    if(!opAtiva){ alert("Nao ha OP ativa para editar."); return; }
+
+function _setModalMode(mode){
+  opModalMode = (mode === "edit") ? "edit" : "new";
+  const t = document.getElementById("opModalTitle");
+  const btnSave = document.getElementById("btnSaveOp");
+  const btnEnd = document.getElementById("btnEndOpInside");
+
+  if(opModalMode === "edit"){
+    if(t) t.textContent = "Editar Ordem de Producao (OP)";
+    if(btnSave) btnSave.textContent = "Salvar Alteracoes";
+    if(btnEnd) btnEnd.style.display = "inline-block";
+  }else{
+    if(t) t.textContent = "Nova Ordem de Producao (OP)";
+    if(btnSave) btnSave.textContent = "Iniciar OP";
+    if(btnEnd) btnEnd.style.display = "none";
+  }
+}
+
+function openOpModal(){
+  if(opAtiva && opAtiva.active){
+    _setModalMode("edit");
     _fillOpFormFromData(opAtiva);
   }else{
+    _setModalMode("new");
     document.getElementById("op-form").reset();
     _setBobinasToUI([]);
     _syncHiddenBobinaFirst();
   }
-  const bd=document.getElementById("opModalBackdrop");
-  if(bd)bd.style.display="flex";
+
+  const bd = document.getElementById("opModalBackdrop");
+  if(bd) bd.style.display = "flex";
 }
+
 function closeOpModal(){
-  const bd=document.getElementById("opModalBackdrop");
-  if(bd)bd.style.display="none";
+  const bd = document.getElementById("opModalBackdrop");
+  if(bd) bd.style.display = "none";
 }
+
 async function _postJson(url,p){
-  const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
-  let j=null;
-  try{j=await r.json();}catch(e){}
-  if(!r.ok){throw new Error((j&&j.error)?j.error:"Falha na requisicao");}
+  const r = await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)});
+  let j = null;
+  try{ j = await r.json(); }catch(e){}
+  if(!r.ok){ throw new Error((j && j.error) ? j.error : "Falha na requisicao"); }
   return j;
 }
+
 function initOpUI(){
-  const bn=document.getElementById("btn-op-new"),
-        be=document.getElementById("btn-op-end"),
-        box=document.getElementById("op-ativo-box");
-  if(box) box.addEventListener("click",()=>openOpModal("edit"));
-  if(bn)bn.addEventListener("click",()=>openOpModal("new"));
+  const btnManage = document.getElementById("btn-op-manage");
+  const box = document.getElementById("op-ativo-box");
 
-  if(be)be.addEventListener("click",async()=>{
-    if(!confirm("Confirmar encerramento da OP ativa?"))return;
-    try{
-      await _postJson("/producao/op/encerrar",{machine_id:machine_id});
-      await carregarOpUI();
-    }catch(err){
-      alert(String(err&&err.message?err.message:err));
-    }
-  });
+  if(btnManage) btnManage.addEventListener("click", openOpModal);
+  if(box) box.addEventListener("click", openOpModal);
 
-  const bd=document.getElementById("opModalBackdrop"),
-        bc=document.getElementById("btnCloseOpModal"),
-        bx=document.getElementById("btnCancelOp");
-  if(bc)bc.addEventListener("click",closeOpModal);
-  if(bx)bx.addEventListener("click",closeOpModal);
-  if(bd)bd.addEventListener("click",(e)=>{if(e&&e.target===bd)closeOpModal();});
+  const bd = document.getElementById("opModalBackdrop");
+  const bc = document.getElementById("btnCloseOpModal");
+  const bx = document.getElementById("btnCancelOp");
+  if(bc) bc.addEventListener("click", closeOpModal);
+  if(bx) bx.addEventListener("click", closeOpModal);
+  if(bd) bd.addEventListener("click", (e) => { if(e && e.target === bd) closeOpModal(); });
 
-  const btnAdd=document.getElementById("btnAddBobina");
-  if(btnAdd) btnAdd.addEventListener("click",()=>{
-    const list=document.getElementById("op_bobinas_list");
+  const btnAdd = document.getElementById("btnAddBobina");
+  if(btnAdd) btnAdd.addEventListener("click", () => {
+    const list = document.getElementById("op_bobinas_list");
     if(!list) return;
     list.appendChild(_createBobinaRow(""));
     _syncHiddenBobinaFirst();
   });
 
-  const list=document.getElementById("op_bobinas_list");
+  const list = document.getElementById("op_bobinas_list");
   if(list){
-    list.addEventListener("input",()=>{ _syncHiddenBobinaFirst(); });
-    list.addEventListener("change",()=>{ _syncHiddenBobinaFirst(); });
+    list.addEventListener("input", () => { _syncHiddenBobinaFirst(); });
+    list.addEventListener("change", () => { _syncHiddenBobinaFirst(); });
   }
 
-  const f=document.getElementById("op-form");
-  if(f)f.addEventListener("submit",async(e)=>{
-    e.preventDefault();
-    const os=String(document.getElementById("op_os").value||"").trim();
-    const lote=String(document.getElementById("op_lote").value||"").trim();
-    const oper=String(document.getElementById("op_operador").value||"").trim();
-    if(!os||!lote||!oper){alert("Preencha OS, Lote e Operador.");return;}
-    const payload={
-      machine_id:machine_id,
-      os:os,
-      lote:lote,
-      operador:oper,
-      bobina:String(document.getElementById("op_bobina").value||"").trim(),
-      gr_fio:String(document.getElementById("op_gr_fio").value||"").trim(),
-      observacoes:String(document.getElementById("op_obs").value||"").trim()
-    };
+  const btnEnd = document.getElementById("btnEndOpInside");
+  if(btnEnd) btnEnd.addEventListener("click", async () => {
+    if(!opAtiva || !opAtiva.active){
+      alert("Nao ha OP ativa para encerrar.");
+      return;
+    }
+    if(!confirm("Confirmar encerramento da OP ativa?")) return;
+
     try{
-      const bobinas=_getBobinasFromUI();
+      await _postJson("/producao/op/encerrar", {machine_id: machine_id});
+      closeOpModal();
+      await carregarOpStatus();
+    }catch(err){
+      alert(String(err && err.message ? err.message : err));
+    }
+  });
+
+  const f = document.getElementById("op-form");
+  if(f) f.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const os = String(document.getElementById("op_os").value || "").trim();
+    const lote = String(document.getElementById("op_lote").value || "").trim();
+    const oper = String(document.getElementById("op_operador").value || "").trim();
+    if(!os || !lote || !oper){
+      alert("Preencha OS, Lote e Operador.");
+      return;
+    }
+
+    const payload = {
+      machine_id: machine_id,
+      os: os,
+      lote: lote,
+      operador: oper,
+      bobina: String(document.getElementById("op_bobina").value || "").trim(),
+      gr_fio: String(document.getElementById("op_gr_fio").value || "").trim(),
+      observacoes: String(document.getElementById("op_obs").value || "").trim()
+    };
+
+    try{
+      const bobinas = _getBobinasFromUI();
       payload.bobinas = bobinas;
       payload.bobina = bobinas.length ? bobinas[0] : payload.bobina;
 
       if(opModalMode === "edit"){
-        await _postJson("/producao/op/editar",payload);
+        await _postJson("/producao/op/editar", payload);
       }else{
-        await _postJson("/producao/op/iniciar",payload);
+        await _postJson("/producao/op/iniciar", payload);
       }
 
       closeOpModal();
-      await carregarOpUI();
+      await carregarOpStatus();
     }catch(err){
-      alert(String(err&&err.message?err.message:err));
+      alert(String(err && err.message ? err.message : err));
     }
   });
 }
+
 initOpUI();
-carregarOpUI();
-
-// ===============================
-// TABELA FIXA 24H
-// ===============================
-function pad2(n){ return String(n).padStart(2, "0"); }
-
-function buildFaixas24(){
-  const out = [];
-  for(let h = 0; h < 24; h++){
-    const h2 = (h + 1) % 24;
-    out.push(`${pad2(h)}:00-${pad2(h2)}:00`);
-  }
-  return out;
-}
-
-const HORAS_FIXAS_24 = buildFaixas24();
-
-// ===============================
-// TIME HELPERS
-// ===============================
-function parseHourFromTimeStr(s){
-  if(!s || typeof s !== "string") return null;
-  const parts = s.split(":");
-  const h = Number(parts[0]);
-  if(!Number.isFinite(h) || h < 0 || h > 23) return null;
-  return h;
-}
-
-function parseMinFromTimeStr(s){
-  if(!s || typeof s !== "string") return null;
-  const parts = s.split(":");
-  const h = Number(parts[0]);
-  const m = Number(parts[1] ?? 0);
-  if(!Number.isFinite(h) || h < 0 || h > 23) return null;
-  if(!Number.isFinite(m) || m < 0 || m > 59) return null;
-  return h * 60 + m;
-}
-
-function horaDentroDoTurno(horaIndex, inicioStr, fimStr){
-  const ini = parseMinFromTimeStr(inicioStr);
-  const fim = parseMinFromTimeStr(fimStr);
-  if(ini === null || fim === null) return false;
-
-  const t = horaIndex * 60;
-
-  if(ini < fim){
-    return (t >= ini) && (t < fim);
-  }
-
-  if(ini > fim){
-    return (t >= ini) || (t < fim);
-  }
-
-  return false;
-}
-
-// ===============================
-// MAP TURNO -> 24H (meta)
-// ===============================
-function mapTurnoListPara24h(lista_turno, inicioStr, fillValue){
-  const out = new Array(24).fill(fillValue);
-
-  const inicioHour = parseHourFromTimeStr(inicioStr);
-  if(inicioHour === null) return out;
-
-  const arr = Array.isArray(lista_turno) ? lista_turno : [];
-  for(let i = 0; i < arr.length; i++){
-    const hour = (inicioHour + i) % 24;
-    out[hour] = arr[i];
-  }
-  return out;
-}
-
-function turnoIdxParaHoraDoDia(turnoIdx, inicioStr){
-  const inicioHour = parseHourFromTimeStr(inicioStr);
-  if(inicioHour === null) return null;
-  if(typeof turnoIdx !== "number" || !Number.isFinite(turnoIdx)) return null;
-  return (inicioHour + turnoIdx) % 24;
-}
-
-function toNonNegInt(v){
-  const n = Number(v);
-  if(!Number.isFinite(n) || n < 0) return 0;
-  return Math.floor(n);
-}
-
-// ===============================
-// API: SALVAR REFUGO (SQLITE)
-// ===============================
-function salvarRefugoAPI(machineId, diaRef, horaDia, refugo){
-  return fetch("/machine/refugo", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      machine_id: machineId,
-      dia_ref: diaRef,
-      hora_dia: horaDia,
-      refugo: refugo
-    })
-  })
-  .then(async (r) => {
-    let payload = null;
-    try{ payload = await r.json(); }catch(e){}
-    if(!r.ok){
-      const msg = (payload && payload.error) ? payload.error : "Erro ao salvar refugo";
-      throw new Error(msg);
-    }
-    return payload;
-  });
-}
-
-// ===============================
-// RESET MANUAL
-// ===============================
-document.getElementById("btn-reset").addEventListener("click", function(){
-  if(!confirm("CONFIRMAR RESET DA PRODUCAO?\nEssa acao grava historico e zera os contadores.")){
-    return;
-  }
-
-  fetch("/admin/reset-manual", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ machine_id })
-  })
-  .then(r => r.json())
-  .then(() => {
-    alert("Producao zerada com sucesso.");
-    carregarTabela();
-  });
-});
-
-// ===============================
-// UNIDADES: nao permitir duplicado
-// ===============================
-function garantirSemDuplicar(){
-  const u1 = document.getElementById("unidade_1");
-  const u2 = document.getElementById("unidade_2");
-  if(u1.value && u2.value && u1.value === u2.value){
-    u2.value = "";
-  }
-}
-document.getElementById("unidade_1").addEventListener("change", garantirSemDuplicar);
-document.getElementById("unidade_2").addEventListener("change", garantirSemDuplicar);
-
-// ===============================
-// SUBMIT DO FORMULARIO
-// ===============================
-document.getElementById("config-form").addEventListener("submit", function(e){
-  e.preventDefault();
-
-  garantirSemDuplicar();
-
-  const conv = Number(document.getElementById("conv_m_por_pcs").value);
-  if(!Number.isFinite(conv) || conv <= 0){
-    alert("Conversao invalida. Use um numero maior que zero. Ex: 0.85");
-    return;
-  }
-
-  const stopSec = Number(document.getElementById("no_count_stop_sec").value);
-  if(!Number.isFinite(stopSec) || stopSec < 5){
-    alert("Alerta de parada por inatividade invalido. Use um valor >= 5 segundos.");
-    return;
-  }
-
-  fetch("/machine/config", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      machine_id: machine_id,
-      meta_turno: document.getElementById("meta").value,
-      inicio: document.getElementById("inicio").value,
-      fim: document.getElementById("fim").value,
-      rampa: document.getElementById("rampa").value,
-      unidade_1: document.getElementById("unidade_1").value,
-      unidade_2: document.getElementById("unidade_2").value,
-      conv_m_por_pcs: document.getElementById("conv_m_por_pcs").value,
-      no_count_stop_sec: Math.floor(stopSec)
-    })
-  })
-  .then(r => r.json())
-  .then((resp) => {
-    if(resp && resp.error){
-      alert(resp.error);
-      return;
-    }
-    alert("Configuracao salva com sucesso!");
-    carregarTabela();
-  })
-  .catch(() => {
-    alert("Erro ao salvar configuracao.");
-  });
-});
-
-// ===============================
-// BUSCAR STATUS + TABELA (FIXA 24H)
-// ===============================
-function carregarTabela(){
-  fetch(`/machine/status?machine_id=${machine_id}`)
-    .then(r => r.json())
-    .then(data => {
-
-      const norm = _normalizeMachineStatusPayload(data);
-      const opStatus = norm.op; // pode ser null
-      data = norm.machine || {};
-
-      document.getElementById("unidade_1").value = data.unidade_1 ?? "";
-      document.getElementById("unidade_2").value = data.unidade_2 ?? "";
-      garantirSemDuplicar();
-
-      document.getElementById("conv_m_por_pcs").value = data.conv_m_por_pcs ?? 1;
-
-      if(data.turno_inicio) document.getElementById("inicio").value = data.turno_inicio;
-      if(data.turno_fim) document.getElementById("fim").value = data.turno_fim;
-      if(data.meta_turno !== undefined && data.meta_turno !== null) document.getElementById("meta").value = data.meta_turno;
-      if(data.rampa_percentual !== undefined && data.rampa_percentual !== null) document.getElementById("rampa").value = data.rampa_percentual;
-
-      const stopSec = Number(
-        data.no_count_stop_sec ?? data.no_count_stop_threshold_sec ?? data.no_count_stop ?? 60
-      );
-      document.getElementById("no_count_stop_sec").value =
-        (Number.isFinite(stopSec) && stopSec >= 5) ? Math.floor(stopSec) : 60;
-
-      const inicioTurnoStr = (data.turno_inicio ?? document.getElementById("inicio").value);
-      const fimTurnoStr = (data.turno_fim ?? document.getElementById("fim").value);
-
-      const meta24 = mapTurnoListPara24h(data.meta_por_hora, inicioTurnoStr, 0);
-
-      const exibicao24 = (Array.isArray(data.producao_exibicao_24) && data.producao_exibicao_24.length === 24)
-        ? data.producao_exibicao_24
-        : null;
-
-      const np24 = Array.isArray(data.np_por_hora_24) ? data.np_por_hora_24 : new Array(24).fill(0);
-      if(!exibicao24){
-        console.warn("[config_maquina] backend nao enviou producao_exibicao_24; usando np_por_hora_24 como fallback.");
-      }
-
-      const horaDiaAtual =
-        (typeof data.ultima_hora === "number")
-          ? (turnoIdxParaHoraDoDia(data.ultima_hora, inicioTurnoStr) ?? new Date().getHours())
-          : new Date().getHours();
-
-      const diaRef = data.ultimo_dia ?? (data.dia_ref ?? "sem_dia");
-      const refugo24 = Array.isArray(data.refugo_por_hora) ? data.refugo_por_hora : new Array(24).fill(0);
-
-      const tbody = document.querySelector("#tabela-horas tbody");
-      tbody.innerHTML = "";
-
-      for(let i = 0; i < 24; i++){
-        const tr = document.createElement("tr");
-
-        const dentroTurno = horaDentroDoTurno(i, inicioTurnoStr, fimTurnoStr);
-        if(dentroTurno){
-          tr.classList.add("turno-ativo");
-        }
-
-        const tdHora = document.createElement("td");
-        tdHora.textContent = HORAS_FIXAS_24[i];
-
-        const tdMeta = document.createElement("td");
-        tdMeta.textContent = meta24[i] ?? 0;
-
-        let baseVal = 0;
-
-        if (typeof horaDiaAtual === "number" && i > horaDiaAtual) {
-          baseVal = null;
-        } else {
-          const fonte = exibicao24 ? exibicao24 : np24;
-          const v = Number(fonte[i] ?? 0);
-          baseVal = (Number.isFinite(v) && v >= 0) ? v : 0;
-        }
-
-        const ref = toNonNegInt(refugo24[i] ?? 0);
-
-        const tdProduzidoHora = document.createElement("td");
-        if(baseVal === null){
-          tdProduzidoHora.textContent = "-";
-        }else{
-          tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - ref);
-        }
-
-        const tdRefugoHora = document.createElement("td");
-
-        const input = document.createElement("input");
-        input.type = "number";
-        input.min = "0";
-        input.step = "1";
-        input.className = "refugo-input";
-        input.value = ref;
-
-        const podeEditar = (typeof horaDiaAtual === "number") ? (i < horaDiaAtual) : false;
-        input.disabled = !podeEditar;
-
-        input.addEventListener("blur", async () => {
-          if(!podeEditar){
-            input.value = toNonNegInt(refugo24[i] ?? 0);
-            return;
-          }
-
-          const anterior = toNonNegInt(refugo24[i] ?? 0);
-          const novo = toNonNegInt(input.value);
-
-          if(novo === anterior){
-            input.value = novo;
-            return;
-          }
-
-          try{
-            await salvarRefugoAPI(machine_id, diaRef, i, novo);
-
-            refugo24[i] = novo;
-
-            if(baseVal === null){
-              tdProduzidoHora.textContent = "-";
-            }else{
-              tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - novo);
-            }
-
-            input.value = novo;
-          }catch(err){
-            alert(String(err && err.message ? err.message : err));
-
-            input.value = anterior;
-            if(baseVal === null){
-              tdProduzidoHora.textContent = "-";
-            }else{
-              tdProduzidoHora.textContent = Math.max(0, Math.floor(baseVal) - anterior);
-            }
-          }
-        });
-
-        tdRefugoHora.appendChild(input);
-
-        tr.appendChild(tdHora);
-        tr.appendChild(tdMeta);
-        tr.appendChild(tdProduzidoHora);
-        tr.appendChild(tdRefugoHora);
-
-        tbody.appendChild(tr);
-      }
-    });
-}
-
-carregarTabela();
+carregarOpStatus();
 </script>
-
-
-    </div>
-  </main>
 
 </body>
 </html>
