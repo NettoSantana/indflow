@@ -1,4 +1,4 @@
-﻿fix(producao): GET /config abre formulario config_maquina_for.html
+﻿fix(hub): botao Configuracao abre formulario via rota config-form
 
-- Ajusta render_template da pagina de configuracao
-- Mantem HUB separado do formulario
+- Altera link-config para /producao/config-form/<machine_id>
+- Mantem Dashboard -> HUB inalterado

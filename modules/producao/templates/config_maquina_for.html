@@ -1,124 +1,14 @@
 <!--
-Caminho: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-02 14:16 (America/Bahia)
-Motivo: Normalizar payload do /machine/status (machine_status/op_status) para preencher tela e OP ativa. Ajustar carregarOpUI para usar op_status quando presente.
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
+LAST_RECODE: 2026-02-21 12:22 (America/Bahia)
+MOTIVO: Padronizar layout usando templates/base.html (navbar nova). Remover navbar antiga desta pagina sem alterar logica/JS do formulario.
 -->
 
-<!--
-Arquivo: templates/base.html
-Alterado em: 2026-02-01 18:55 (America/Bahia)
-Por: ChatGPT
-Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas iguais ao PC.
--->
+{% extends "base.html" %}
 
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=1200, initial-scale=1.0">
-  <title>Configuração da Máquina</title>
-  <link rel="stylesheet" href="/static/style.css?v=2">
+{% block title %}Configuração da Máquina{% endblock %}
 
-  <style>
-    /* ===== FORCAR LAYOUT DESKTOP EM MOBILE ===== */
-    html, body{
-      min-width:1200px;
-      overflow-x:auto;
-    }
-
-    /* ===== NAVBAR INDUSTRIAL ===== */
-    .navbar{
-      width:100%;
-      height:76px;
-      background:#ffffff;
-      border-bottom:1px solid #e5e7eb;
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      padding:0 24px;
-      box-sizing:border-box;
-      position:sticky;
-      top:0;
-      z-index:10;
-    }
-
-    .nav-left{
-      display:flex;
-      align-items:center;
-      gap:14px;
-    }
-
-    .logo{
-      height:56px;
-      width:auto;
-    }
-
-    .system-name{
-      font-size:20px;
-      font-weight:600;
-      color:#0f172a;
-    }
-
-    .nav-links{
-      display:flex;
-      align-items:center;
-      gap:18px;
-    }
-
-    .nav-links a{
-      text-decoration:none;
-      font-size:15px;
-      color:#334155;
-      font-weight:500;
-    }
-
-    .nav-links a:hover{
-      color:#0f172a;
-    }
-
-    /* ===== AREA DE CONTEUDO ===== */
-    .content-area{
-      padding:24px;
-      width:100%;
-      box-sizing:border-box;
-    }
-
-    .container{
-      max-width:1200px;
-      margin:0 auto;
-    }
-  </style>
-
-</head>
-
-<body>
-
-  <!-- NAVBAR SUPERIOR -->
-  <nav class="navbar">
-    <div class="nav-left">
-      <img src="/static/img/logo.png" alt="NettSan Technology" class="logo">
-      <span class="system-name">IndFlow</span>
-    </div>
-
-    <div class="nav-links">
-      
-        <a href="/producao">Produção</a>
-        <a href="/manutencao">Manutenção</a>
-        <a href="/ativos">Ativos</a>
-        <a href="/devices/">Dispositivos</a>
-        <a href="/clientes">Clientes</a>
-        <a href="/utilidades">Utilidades</a>
-        <a href="/admin">Admin</a>
-        <a href="/admin/logout">Sair</a>
-      
-    </div>
-  </nav>
-
-  <!-- CONTEUDO DA PAGINA -->
-  <main class="content-area">
-    <div class="container">
-      
-
+{% block content %}
 <style>
   /* TABELA ZEBRADA */
   #tabela-horas tbody tr:nth-child(even) { background-color: #f3f4f6; }
@@ -243,7 +133,7 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
 }
 </style>
 
-<div class="container">
+<div>
 
   <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
     <h1 class="section-title" id="titulo-maquina">Configuração da Máquina</h1>
@@ -981,10 +871,4 @@ function carregarTabela(){
 
 carregarTabela();
 </script>
-
-
-    </div>
-  </main>
-
-</body>
-</html>
+{% endblock %}
