@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
-LAST_RECODE: 2026-02-21 19:45 (America/Bahia)
-MOTIVO: Corrigir travamento dos inputs de horario (type=time) evitando re-render e reload do servidor durante edicao.
+LAST_RECODE: 2026-02-21 20:15 (America/Bahia)
+MOTIVO: Corrigir salvamento de unidades e conversao (metro linear) garantindo compatibilidade no payload.
 -->
 
 {% extends "base.html" %}
@@ -99,8 +99,8 @@ MOTIVO: Corrigir travamento dos inputs de horario (type=time) evitando re-render
         </div>
       </div>
 
-      <label class="mt-20">Conversao (1 pcs = X metros):</label>
-      <input type="number" id="conv_m_por_pcs" class="input" step="0.001" min="0.001" placeholder="Ex: 0.85" required>
+      <label class="mt-20">Conversao (1 pcs = X metros) (use quando houver pcs e metros):</label>
+      <input type="number" id="conv_m_por_pcs" class="input" step="0.001" min="0.001" placeholder="Ex: 0.85">
 
       <button class="btn btn-primary mt-20" type="submit">Salvar Configuracao</button>
     </form>
@@ -573,8 +573,24 @@ document.getElementById("config-form").addEventListener("submit", function(e){
   e.preventDefault();
   garantirSemDuplicar();
 
-  const conv=Number(document.getElementById("conv_m_por_pcs").value);
-  if(!Number.isFinite(conv)||conv<=0){ alert("Conversao invalida. Use um numero maior que zero. Ex: 0.85"); return; }
+  const u1 = document.getElementById("unidade_1").value;
+  const u2 = document.getElementById("unidade_2").value;
+
+  // Conversao so faz sentido quando existe pcs + (m ou m2) em alguma das unidades.
+  const precisaConv = (
+    (u1 === "pcs" && (u2 === "m" || u2 === "m2")) ||
+    (u2 === "pcs" && (u1 === "m" || u1 === "m2"))
+  );
+
+  let conv = Number(document.getElementById("conv_m_por_pcs").value);
+  if(!Number.isFinite(conv) || conv <= 0){
+    if(precisaConv){
+      alert("Conversao invalida. Use um numero maior que zero. Ex: 0.85");
+      return;
+    }
+    // Se nao precisa de conversao, guarda 1 para manter compatibilidade.
+    conv = 1;
+  }
 
   const stopSec=Number(document.getElementById("no_count_stop_sec").value);
   if(!Number.isFinite(stopSec)||stopSec<5){ alert("Alerta de parada por inatividade invalido. Use um valor >= 5 segundos."); return; }
@@ -605,9 +621,12 @@ document.getElementById("config-form").addEventListener("submit", function(e){
       no_count_stop_sec: Math.floor(stopSec),
       ramp_percent: Number(document.getElementById("rampa").value||0)
     },
+    unidade_1: u1,
+    unidade_2: u2,
+    conv_m_por_pcs: conv,
     units: {
-      unidade_1: document.getElementById("unidade_1").value,
-      unidade_2: document.getElementById("unidade_2").value,
+      unidade_1: u1,
+      unidade_2: u2,
       conv_m_por_pcs: conv
     }
   };
