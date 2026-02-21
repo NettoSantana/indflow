@@ -1,4 +1,5 @@
-﻿fix(hub): botao Configuracao abre formulario via rota config-form
+﻿fix(ui): config-form padroniza layout herdando base.html
 
-- Altera link-config para /producao/config-form/<machine_id>
-- Mantem Dashboard -> HUB inalterado
+- Remove navbar antiga do config_maquina_for.html
+- Adota extends base.html para usar navbar nova do sistema
+- Mantem JS e comportamento do formulario
