@@ -1,8 +1,10 @@
-# PATH: modules/machine_routes.py
-# LAST_RECODE: 2026-02-21 00:00 America/Bahia
-# MOTIVO: Adicionar rota /maquina/<machine_id>/historico para redirecionar ao /producao/historico e eliminar 404 no HUB.
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
+# LAST_RECODE: 2026-02-21 17:00 America/Bahia
+# MOTIVO: Suportar configuracao v2 (multiplos turnos + pausas planejadas) no POST /machine/config, com persistencia JSON (SQLite) e compatibilidade.
 
 import os
+import json
+import sqlite3
 import hashlib
 import uuid
 import re
@@ -1012,9 +1014,399 @@ def admin_hard_reset():
         }
     )
 
+
+# -----------------------------
+# CONFIG V2 (SHIFTS + BREAKS)
+# Persistencia JSON (SQLite) + compatibilidade
+# -----------------------------
+
+_MACHINE_CFG_JSON_READY = False
+
+def _cfgv2_db_path() -> str:
+    p = (os.getenv("INDFLOW_DB_PATH") or "indflow.db").strip()
+    return p or "indflow.db"
+
+def _cfgv2_db_init():
+    global _MACHINE_CFG_JSON_READY
+    if _MACHINE_CFG_JSON_READY:
+        return
+    conn = sqlite3.connect(_cfgv2_db_path(), check_same_thread=False)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS machine_config (
+                machine_id TEXT PRIMARY KEY,
+                config_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+        _MACHINE_CFG_JSON_READY = True
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def _cfgv2_db_upsert(machine_id: str, cfg_v2: dict):
+    mid = _norm_machine_id(machine_id)
+    payload = json.dumps(cfg_v2, ensure_ascii=True, separators=(",", ":"))
+    updated_at = datetime.now(_get_tz()).isoformat(timespec="seconds")
+    conn = sqlite3.connect(_cfgv2_db_path(), check_same_thread=False)
+    try:
+        conn.execute(
+            """
+            INSERT INTO machine_config (machine_id, config_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(machine_id) DO UPDATE SET
+                config_json = excluded.config_json,
+                updated_at = excluded.updated_at
+            """,
+            (mid, payload, updated_at),
+        )
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+def _cfgv2_hhmm_to_min(hhmm: str) -> int:
+    s = str(hhmm or "").strip()
+    m = re.match(r"^(\d{1,2}):(\d{2})$", s)
+    if not m:
+        raise ValueError(f"Horario invalido: {s}")
+    hh = int(m.group(1))
+    mm = int(m.group(2))
+    if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+        raise ValueError(f"Horario invalido: {s}")
+    return hh * 60 + mm
+
+def _cfgv2_shift_duration(start_min: int, end_min: int) -> int:
+    if end_min <= start_min:
+        return (24 * 60 - start_min) + end_min
+    return end_min - start_min
+
+def _cfgv2_break_rel(shift_start: int, br_start: int, br_end: int) -> tuple[int, int]:
+    # Converte break para eixo do turno (0..dur)
+    b0 = br_start
+    b1 = br_end
+    if b0 < shift_start:
+        b0 += 24 * 60
+    if b1 < shift_start:
+        b1 += 24 * 60
+    if b1 <= b0:
+        b1 += 24 * 60
+    return (b0 - shift_start, b1 - shift_start)
+
+def _cfgv2_validate(raw: dict) -> dict:
+    cfg = {}
+
+    # active_days: 1..7
+    ad = raw.get("active_days")
+    if ad is None:
+        ad = [1, 2, 3, 4, 5, 6, 7]
+    if not isinstance(ad, list):
+        raise ValueError("active_days deve ser lista")
+    days = []
+    for d in ad:
+        try:
+            di = int(d)
+        except Exception:
+            continue
+        if 1 <= di <= 7 and di not in days:
+            days.append(di)
+    if not days:
+        days = [1, 2, 3, 4, 5, 6, 7]
+    cfg["active_days"] = days
+
+    # units
+    units = raw.get("units") if isinstance(raw.get("units"), dict) else {}
+    u1 = str(units.get("u1") or raw.get("unidade_1") or "pcs").strip() or "pcs"
+    u2 = str(units.get("u2") or raw.get("unidade_2") or "").strip()
+    conv_raw = units.get("conv_m_per_pcs")
+    if conv_raw is None:
+        conv_raw = raw.get("conv_m_per_pcs", raw.get("conv_m_por_pcs"))
+    try:
+        conv = float(conv_raw) if conv_raw is not None and str(conv_raw).strip() != "" else None
+    except Exception:
+        conv = None
+    if conv is not None and conv <= 0:
+        conv = None
+    cfg["units"] = {"u1": u1, "u2": (u2 or None), "conv_m_per_pcs": conv}
+
+    # oee
+    oee = raw.get("oee") if isinstance(raw.get("oee"), dict) else {}
+    ideal_raw = oee.get("ideal_sec_per_piece")
+    try:
+        ideal = float(ideal_raw) if ideal_raw is not None and str(ideal_raw).strip() != "" else None
+    except Exception:
+        ideal = None
+    if ideal is not None and ideal <= 0:
+        ideal = None
+
+    ncss_raw = oee.get("no_count_stop_sec", raw.get("no_count_stop_sec"))
+    try:
+        ncss = int(ncss_raw) if ncss_raw is not None and str(ncss_raw).strip() != "" else None
+    except Exception:
+        ncss = None
+    if ncss is not None and ncss < 5:
+        ncss = None
+
+    ramp_raw = oee.get("ramp_percent", raw.get("rampa", raw.get("rampa_percentual", 0)))
+    try:
+        ramp = int(ramp_raw or 0)
+    except Exception:
+        ramp = 0
+    if ramp < 0:
+        ramp = 0
+    if ramp > 100:
+        ramp = 100
+
+    cfg["oee"] = {"ideal_sec_per_piece": ideal, "no_count_stop_sec": ncss, "ramp_percent": ramp}
+
+    # shifts
+    shifts = raw.get("shifts")
+    if not isinstance(shifts, list) or not shifts:
+        raise ValueError("shifts obrigatorio (lista)")
+    out_shifts = []
+    for s in shifts:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name") or "").strip() or "A"
+        start = str(s.get("start") or s.get("inicio") or "").strip()
+        end = str(s.get("end") or s.get("fim") or "").strip()
+        if not start or not end:
+            raise ValueError("Turno sem start/end")
+        start_min = _cfgv2_hhmm_to_min(start)
+        end_min = _cfgv2_hhmm_to_min(end)
+        dur = _cfgv2_shift_duration(start_min, end_min)
+        if dur <= 0:
+            raise ValueError("Turno invalido")
+
+        try:
+            meta_pcs = int(s.get("meta_pcs", s.get("meta_turno", 0)) or 0)
+        except Exception:
+            meta_pcs = 0
+        if meta_pcs < 0:
+            meta_pcs = 0
+
+        breaks_raw = s.get("breaks") if isinstance(s.get("breaks"), list) else []
+        breaks_out = []
+        breaks_min = 0
+        for br in breaks_raw:
+            if not isinstance(br, dict):
+                continue
+            br_name = str(br.get("name") or "").strip() or "Pausa"
+            br_start = str(br.get("start") or "").strip()
+            br_end = str(br.get("end") or "").strip()
+            if not br_start or not br_end:
+                continue
+            b0 = _cfgv2_hhmm_to_min(br_start)
+            b1 = _cfgv2_hhmm_to_min(br_end)
+            rel0, rel1 = _cfgv2_break_rel(start_min, b0, b1)
+            if rel1 <= rel0:
+                continue
+            if rel0 < 0 or rel1 > dur:
+                raise ValueError("Pausa deve estar dentro do turno")
+            breaks_min += (rel1 - rel0)
+            breaks_out.append({"name": br_name, "start": br_start, "end": br_end})
+
+        planned = dur - breaks_min
+        if planned <= 0:
+            raise ValueError("Turno sem tempo planejado (pausas consomem tudo)")
+
+        out_shifts.append(
+            {
+                "name": name,
+                "start": start,
+                "end": end,
+                "meta_pcs": meta_pcs,
+                "breaks": breaks_out,
+                "calc": {"duration_min": dur, "breaks_min": breaks_min, "planned_min": planned},
+            }
+        )
+    cfg["shifts"] = out_shifts
+    return cfg
+
+def _cfgv2_normalize_payload(data: dict) -> dict:
+    if isinstance(data.get("shifts"), list) and data.get("shifts"):
+        return _cfgv2_validate(data)
+
+    # legado -> v2
+    try:
+        meta_turno = int(data.get("meta_turno", 0))
+    except Exception:
+        meta_turno = 0
+    inicio = str(data.get("inicio") or "").strip()
+    fim = str(data.get("fim") or "").strip()
+    if not inicio or not fim or meta_turno <= 0:
+        raise ValueError("Dados invalidos: meta_turno/inicio/fim")
+    try:
+        rampa = int(data.get("rampa", 0))
+    except Exception:
+        rampa = 0
+    try:
+        ncss = int(data.get("no_count_stop_sec", 0) or 0)
+    except Exception:
+        ncss = 0
+
+    u1 = str(data.get("unidade_1") or "pcs").strip() or "pcs"
+    u2 = str(data.get("unidade_2") or "").strip()
+    try:
+        conv = float(data.get("conv_m_por_pcs", 0) or 0)
+    except Exception:
+        conv = 0.0
+    if conv <= 0:
+        conv = None
+
+    cfg = {
+        "active_days": [1, 2, 3, 4, 5, 6, 7],
+        "shifts": [{"name": "A", "start": inicio, "end": fim, "meta_pcs": meta_turno, "breaks": []}],
+        "oee": {"ideal_sec_per_piece": None, "no_count_stop_sec": (ncss if ncss >= 5 else None), "ramp_percent": rampa},
+        "units": {"u1": u1, "u2": (u2 or None), "conv_m_per_pcs": conv},
+    }
+    return _cfgv2_validate(cfg)
+
+def _cfgv2_weekday(dt) -> int:
+    return int(dt.weekday()) + 1
+
+def _cfgv2_is_now_in_shift(dt_now, shift: dict) -> bool:
+    start_min = _cfgv2_hhmm_to_min(shift.get("start"))
+    end_min = _cfgv2_hhmm_to_min(shift.get("end"))
+    now_min = int(dt_now.hour) * 60 + int(dt_now.minute)
+    if end_min > start_min:
+        return start_min <= now_min < end_min
+    return (now_min >= start_min) or (now_min < end_min)
+
+def _cfgv2_pick_shift(cfg_v2: dict, dt_now):
+    shifts = cfg_v2.get("shifts") or []
+    for s in shifts:
+        try:
+            if _cfgv2_is_now_in_shift(dt_now, s):
+                return s
+        except Exception:
+            continue
+    return shifts[0] if shifts else None
+
+def _cfgv2_apply_to_memory(m: dict, cfg_v2: dict):
+    m["config_v2"] = cfg_v2
+    m["active_days"] = cfg_v2.get("active_days") or [1, 2, 3, 4, 5, 6, 7]
+    m["shifts"] = cfg_v2.get("shifts") or []
+
+    oee = cfg_v2.get("oee") or {}
+    m["ideal_sec_per_piece"] = oee.get("ideal_sec_per_piece")
+    if oee.get("no_count_stop_sec") is not None:
+        m["no_count_stop_sec"] = int(oee.get("no_count_stop_sec") or 0)
+    m["rampa_percentual"] = int(oee.get("ramp_percent") or 0)
+
+    units = cfg_v2.get("units") or {}
+    aplicar_unidades(m, units.get("u1"), units.get("u2"))
+    if units.get("conv_m_per_pcs") is not None:
+        try:
+            m["conv_m_por_pcs"] = float(units.get("conv_m_per_pcs"))
+        except Exception:
+            pass
+
+    dt_now = datetime.now(_get_tz())
+    m["is_active_day"] = (_cfgv2_weekday(dt_now) in (m.get("active_days") or []))
+
+    shift = _cfgv2_pick_shift(cfg_v2, dt_now)
+    m["active_shift"] = shift
+
+    # Campos legados: usa turno ativo (ou primeiro)
+    if not shift:
+        return
+
+    m["meta_turno"] = int(shift.get("meta_pcs", 0) or 0)
+    m["turno_inicio"] = shift.get("start")
+    m["turno_fim"] = shift.get("end")
+
+    # Horas (slots 1h) e meta_por_hora com pausa heuristica (>=30min de sobreposicao zera slot)
+    start_min = _cfgv2_hhmm_to_min(shift.get("start"))
+    end_min = _cfgv2_hhmm_to_min(shift.get("end"))
+    dur = _cfgv2_shift_duration(start_min, end_min)
+
+    break_intervals = []
+    for br in (shift.get("breaks") or []):
+        try:
+            b0 = _cfgv2_hhmm_to_min(br.get("start"))
+            b1 = _cfgv2_hhmm_to_min(br.get("end"))
+            rel0, rel1 = _cfgv2_break_rel(start_min, b0, b1)
+            break_intervals.append((rel0, rel1))
+        except Exception:
+            continue
+
+    horas_turno = []
+    slot_is_break = []
+    t = 0
+    while t < dur:
+        t2 = min(dur, t + 60)
+        abs0 = (start_min + t) % (24 * 60)
+        abs1 = (start_min + t2) % (24 * 60)
+        h0 = f"{abs0//60:02d}:{abs0%60:02d}"
+        h1 = f"{abs1//60:02d}:{abs1%60:02d}"
+        horas_turno.append(f"{h0} - {h1}")
+
+        overlap = 0
+        for b0, b1 in break_intervals:
+            lo = max(t, b0)
+            hi = min(t2, b1)
+            if hi > lo:
+                overlap = max(overlap, hi - lo)
+        slot_is_break.append(True if overlap >= 30 else False)
+
+        t = t2
+
+    prod_slots = [i for i, isb in enumerate(slot_is_break) if not isb]
+    metas = [0 for _ in horas_turno]
+
+    meta_turno = int(m.get("meta_turno", 0) or 0)
+    if meta_turno > 0 and prod_slots:
+        ramp = int(m.get("rampa_percentual", 0) or 0)
+        if ramp < 0:
+            ramp = 0
+        if ramp > 100:
+            ramp = 100
+
+        qtd_prod = len(prod_slots)
+        meta_base = meta_turno / qtd_prod
+        meta_primeira = round(meta_base * (ramp / 100))
+        if meta_primeira < 0:
+            meta_primeira = 0
+        if meta_primeira > meta_turno:
+            meta_primeira = meta_turno
+
+        restante = meta_turno - meta_primeira
+        horas_restantes = qtd_prod - 1
+
+        metas[prod_slots[0]] = meta_primeira
+        if horas_restantes > 0:
+            base = restante // horas_restantes
+            sobra = restante % horas_restantes
+            for i in range(horas_restantes):
+                metas[prod_slots[i + 1]] = int(base + (1 if i < sobra else 0))
+
+    for i, isb in enumerate(slot_is_break):
+        if isb:
+            metas[i] = 0
+
+    m["horas_turno"] = horas_turno
+    m["meta_por_hora"] = metas
+
+    # runtime
+    m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
+    try:
+        m["ultima_hora"] = calcular_ultima_hora_idx(m)
+    except Exception:
+        pass
+    m["producao_hora"] = 0
+    m["percentual_hora"] = 0
+
 @machine_bp.route("/machine/config", methods=["POST"])
 def configurar_maquina():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
@@ -1025,65 +1417,28 @@ def configurar_maquina():
         cliente_id = None
     m["cliente_id"] = cliente_id
 
-    meta_turno = int(data["meta_turno"])
-    rampa = int(data["rampa"])
-
-    m["meta_turno"] = meta_turno
-    m["turno_inicio"] = data["inicio"]
-    m["turno_fim"] = data["fim"]
-    m["rampa_percentual"] = rampa
-
+    # Payload: v2 (shifts/breaks) ou legado (inicio/fim/meta_turno)
     try:
-        ncss = int(data.get("no_count_stop_sec", 0) or 0)
-        if ncss >= 5:
-            m["no_count_stop_sec"] = ncss
+        cfg_v2 = _cfgv2_normalize_payload(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        return jsonify({"error": "Payload invalido"}), 400
+
+    # Persistencia JSON (opcao 1)
+    try:
+        _cfgv2_db_init()
+        _cfgv2_db_upsert(machine_id, cfg_v2)
     except Exception:
         pass
 
-    aplicar_unidades(m, data.get("unidade_1"), data.get("unidade_2"))
-    salvar_conversao(m, data)
+    # Memoria (compatibilidade com calculos atuais)
+    try:
+        _cfgv2_apply_to_memory(m, cfg_v2)
+    except Exception:
+        pass
 
-    inicio_dt = datetime.strptime(m["turno_inicio"], "%H:%M")
-    fim_dt = datetime.strptime(m["turno_fim"], "%H:%M")
-
-    if fim_dt <= inicio_dt:
-        fim_dt += timedelta(days=1)
-
-    horas = []
-    atual = inicio_dt
-    while atual < fim_dt:
-        proxima = atual + timedelta(hours=1)
-        horas.append(f"{atual.strftime('%H:%M')} - {proxima.strftime('%H:%M')}")
-        atual = proxima
-
-    m["horas_turno"] = horas
-
-    qtd_horas = len(horas)
-    metas = []
-    if qtd_horas > 0:
-        meta_base = meta_turno / qtd_horas
-
-        meta_primeira = round(meta_base * (rampa / 100))
-        restante = meta_turno - meta_primeira
-        horas_restantes = qtd_horas - 1
-
-        metas = [meta_primeira]
-
-        if horas_restantes > 0:
-            meta_restante_base = restante // horas_restantes
-            sobra = restante % horas_restantes
-
-            for i in range(horas_restantes):
-                valor = meta_restante_base + (1 if i < sobra else 0)
-                metas.append(valor)
-
-    m["meta_por_hora"] = metas
-
-    m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
-    m["ultima_hora"] = calcular_ultima_hora_idx(m)
-    m["producao_hora"] = 0
-    m["percentual_hora"] = 0
-
+    # Persistencia antiga (repo) - manter compatibilidade com modulos existentes
     try:
         upsert_machine_config(machine_id, m)
     except Exception:
@@ -1093,7 +1448,8 @@ def configurar_maquina():
         {
             "status": "configurado",
             "machine_id": machine_id,
-            "meta_por_hora": m["meta_por_hora"],
+            "config_v2": cfg_v2,
+            "meta_por_hora": m.get("meta_por_hora", []),
             "unidade_1": m.get("unidade_1"),
             "unidade_2": m.get("unidade_2"),
             "conv_m_por_pcs": m.get("conv_m_por_pcs"),

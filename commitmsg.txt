@@ -1,4 +1,6 @@
-﻿fix(ui): remove botoes Historico, Novo OP e Zerar Producao da tela de configuracao
+﻿feat(machine): suportar configuracao v2 (turnos + pausas planejadas) no POST /machine/config
 
-- Limpa header da pagina config_maquina_for
-- Mantem restante da logica intacta
+- Aceita payload v2 com shifts/breaks/active_days/oee/units
+- Converte formato legado (1 turno) para v2 automaticamente
+- Persiste config_json na tabela machine_config (SQLite)
+- Mantem compatibilidade atual atualizando memoria e chamando upsert_machine_config
