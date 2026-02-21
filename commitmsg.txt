@@ -1,5 +1,1 @@
-feat: adiciona histórico diário de produção com SQLite
-
-- grava produção no reset do dia
-- cria banco indflow.db
-- adiciona endpoint /producao/historico
+﻿recode: atualizar navbar do hub da maquina para menu atual (Dashboard/Indicadores/Configuracoes/Admin/Sair)

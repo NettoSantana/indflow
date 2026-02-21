@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\base.html
-LAST_RECODE: 2026-02-20 18:05 (America/Bahia)
-MOTIVO: Simplificar menu superior (Dashboard, Indicadores futuro, Configuracoes, Admin superadmin, Sair), tornar logo clicavel para Dashboard e aplicar visibilidade por role (session['role']).
+LAST_RECODE: 2026-02-21 09:35 (America/Bahia)
+MOTIVO: Padronizar navbar para o modelo atual (Dashboard, Indicadores, Configuracoes, Admin, Sair) e tornar logo clicavel para o Dashboard. Remover menu antigo definitivamente.
 -->
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -57,8 +57,6 @@ MOTIVO: Simplificar menu superior (Dashboard, Indicadores futuro, Configuracoes,
       gap:18px;
     }
 
-    .nav-disabled{display:inline-block;padding:10px 14px;border-radius:10px;color:#94a3b8;cursor:not-allowed;user-select:none;}
-
     .nav-links a{
       text-decoration:none;
       font-size:15px;
@@ -87,32 +85,28 @@ MOTIVO: Simplificar menu superior (Dashboard, Indicadores futuro, Configuracoes,
 
 <body>
 
-  <!-- NAVBAR SUPERIOR -->
+    <!-- NAVBAR SUPERIOR -->
   <nav class="navbar">
     <div class="nav-left">
-      <img src="/static/img/logo.png" alt="NettSan Technology" class="logo">
-      <span class="system-name">IndFlow</span>
+      <a href="/" style="display:flex; align-items:center; gap:14px; text-decoration:none;">
+        <img src="/static/img/logo.png" alt="NettSan Technology" class="logo">
+        <span class="system-name">IndFlow</span>
+      </a>
     </div>
 
-        <div class="nav-links">
+    <div class="nav-links">
       {% if session.get("user_id") %}
         <a href="/">Dashboard</a>
-        <span class="nav-disabled" title="Em breve">Indicadores</span>
-
-        {% set role = (session.get("role") or "")|lower %}
-        {% if role in ["admin", "superadmin"] %}
-          <a href="/admin/">Configuracoes</a>
-        {% endif %}
-        {% if role == "superadmin" %}
-          <a href="/clientes">Admin</a>
-        {% endif %}
-
+        <a href="/indicadores">Indicadores</a>
+        <a href="/configuracoes">Configuracoes</a>
+        <a href="/admin/">Admin</a>
         <a href="/admin/logout">Sair</a>
       {% else %}
         <a href="/admin/login">Login</a>
       {% endif %}
     </div>
   </nav>
+
 
   <!-- CONTEUDO DA PAGINA -->
   <main class="content-area">
