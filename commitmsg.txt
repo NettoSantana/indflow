@@ -1,1 +1,1 @@
-﻿recode: atualizar navbar do hub da maquina para menu atual (Dashboard/Indicadores/Configuracoes/Admin/Sair)
+﻿recode: padronizar navbar no base (Dashboard/Indicadores/Configuracoes/Admin/Sair) e logo clicavel

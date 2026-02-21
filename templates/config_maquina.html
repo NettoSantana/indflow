@@ -327,7 +327,7 @@ const machine_id = window.location.pathname.split("/").pop();
 document.getElementById("titulo-maquina").textContent = machine_id.toUpperCase();
 document.title = machine_id.toUpperCase();
 
-document.getElementById("link-historico").href = `/maquina/${encodeURIComponent(machine_id)}/historico`;
+document.getElementById("link-historico").href = `/producao/historico?machine_id=${encodeURIComponent(machine_id)}`;
 document.getElementById("link-chamados").href = `/maquina/${encodeURIComponent(machine_id)}/chamados`;
 document.getElementById("link-config").href = `/maquina/${encodeURIComponent(machine_id)}/configuracao`;
 
