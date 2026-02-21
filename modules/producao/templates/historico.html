@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-18 17:35 America/Bahia
-MOTIVO: Opcao 1: Remover fallback de estimativa (comprimento/conv) no modal de bobinas; bobina nova inicia zerada ate receber pcs_total real do backend.
+LAST_RECODE: 2026-02-21 10:26 America/Bahia
+MOTIVO: Historico: exibir OP pelo numero (OS) no label (OP | Lote | Operador | Status) e no titulo do modal.
 -->
 
 {#
@@ -595,11 +595,13 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   }
 
   function buildOpLabel(op){
+    const osNum = safeText(op && (op.os || op.os_num || op.ordem_servico)).trim();
     const lote = safeText(op && op.lote).trim();
     const operador = safeText(op && op.operador).trim();
     const status = safeText(op && op.status).trim();
 
     let parts = [];
+    if(osNum) parts.push("OP " + osNum);
     if(lote) parts.push("Lote " + lote);
     if(operador) parts.push("Operador " + operador);
     if(status) parts.push(status);
@@ -852,8 +854,18 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     currentOp = op || null;
 
     if(modalTitle){
+      const osNum = safeText(op && (op.os || op.os_num || op.ordem_servico)).trim();
       const lote = safeText(op && op.lote).trim();
-      modalTitle.textContent = lote ? ("OP - Lote " + lote) : "OP";
+
+      if(osNum && lote){
+        modalTitle.textContent = "OP " + osNum + " - Lote " + lote;
+      }else if(osNum){
+        modalTitle.textContent = "OP " + osNum;
+      }else if(lote){
+        modalTitle.textContent = "OP - Lote " + lote;
+      }else{
+        modalTitle.textContent = "OP";
+      }
     }
 
     if(opv_machine) opv_machine.value = anyText(op && op.machine_id ? op.machine_id : machineId);
