@@ -1,7 +1,7 @@
 {# 
 PATH: modules/clientes/templates/clientes_list.html
-LAST_RECODE: 2026-02-20 21:55 America/Bahia
-MOTIVO: Ajustar coluna Acoes para ter botoes Visualizar, Editar e Excluir no estilo compacto.
+LAST_RECODE: 2026-02-20 21:45 America/Bahia
+MOTIVO: Corrigir acao do botao Excluir para usar rota /clientes/<cid>/delete (evita 405).
 #}
 {% extends "base.html" %}
 {% block title %}Clientes — IndFlow{% endblock %}
@@ -69,8 +69,7 @@ MOTIVO: Ajustar coluna Acoes para ter botoes Visualizar, Editar e Excluir no est
           <td class="actions">
             <a class="btn-icon btn-view" href="/clientes/{{ r['id'] }}" title="Visualizar">V</a>
             <a class="btn-icon btn-edit" href="/clientes/{{ r['id'] }}/editar" title="Editar">E</a>
-            <form method="post" action="/clientes/delete" onsubmit="return confirm('Excluir este cliente definitivamente?');">
-              <input type="hidden" name="cliente_id" value="{{ r['id'] }}">
+            <form method="post" action="{{ url_for('clientes.delete_cliente', cid=r['id']) }}" onsubmit="return confirm('Excluir este cliente definitivamente?');">
               <button type="submit" class="btn-icon btn-del" title="Excluir">X</button>
             </form>
           </td>
