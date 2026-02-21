@@ -1,5 +1,4 @@
-﻿fix(ui): config-form padroniza layout herdando base.html
+﻿fix(ui): remove botoes Historico, Novo OP e Zerar Producao da tela de configuracao
 
-- Remove navbar antiga do config_maquina_for.html
-- Adota extends base.html para usar navbar nova do sistema
-- Mantem JS e comportamento do formulario
+- Limpa header da pagina config_maquina_for
+- Mantem restante da logica intacta

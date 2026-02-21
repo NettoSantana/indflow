@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-21 12:16 (America/Bahia)
-Motivo: Ajustar link do card Configuracao no HUB para abrir o formulario (rota /producao/config-form/<machine_id>) sem alterar Dashboard -> HUB.
+Ultimo recode: 2026-02-21 17:47 (America/Bahia)
+Motivo: Adicionar cards "Paradas" e "Graficos" no HUB da maquina (links /producao/paradas e /producao/graficos).
 -->
 
 <!--
@@ -284,6 +284,25 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
           </div>
         </div>
 
+
+<div class="machine-card">
+  <div class="machine-card-title">Paradas</div>
+  <p class="machine-card-desc">Consultar paradas, motivos e tempos por período.</p>
+  <div class="machine-card-actions">
+    <a id="link-paradas" href="#" class="btn btn-primary">Abrir</a>
+  </div>
+</div>
+
+<div class="machine-card">
+  <div class="machine-card-title">Graficos</div>
+  <p class="machine-card-desc">Visualizar graficos de produção, paradas e desempenho.</p>
+  <div class="machine-card-actions">
+    <a id="link-graficos" href="#" class="btn btn-primary">Abrir</a>
+  </div>
+</div>
+
+      
+
       </div>
 
       <div class="modal-backdrop" id="opModalBackdrop" style="display:none;">
@@ -330,6 +349,8 @@ document.title = machine_id.toUpperCase();
 document.getElementById("link-historico").href = `/producao/historico?machine_id=${encodeURIComponent(machine_id)}`;
 document.getElementById("link-chamados").href = `/maquina/${encodeURIComponent(machine_id)}/chamados`;
 document.getElementById("link-config").href = `/producao/config-form/${encodeURIComponent(machine_id)}`;
+document.getElementById("link-paradas").href = `/producao/paradas?machine_id=${encodeURIComponent(machine_id)}`;
+document.getElementById("link-graficos").href = `/producao/graficos?machine_id=${encodeURIComponent(machine_id)}`;
 
 let opAtiva = null;
 let opModalMode = "new";
