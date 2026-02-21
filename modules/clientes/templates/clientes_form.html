@@ -1,54 +1,233 @@
-{# 
+{#
 PATH: modules/clientes/templates/clientes_form.html
-LAST_RECODE: 2026-02-20 21:30 America/Bahia
-MOTIVO: Criar tela de cadastro de cliente separada da lista (fluxo Adicionar).
+LAST_RECODE: 2026-02-20 22:10 America/Bahia
+MOTIVO: Form completo estilo ERP (Dados gerais) para criar/editar/visualizar cliente e exibir API Key na criacao.
 #}
 {% extends "base.html" %}
-{% block title %}Adicionar Cliente — IndFlow{% endblock %}
+{% set m = (mode or "create") %}
+{% set is_view = (m == "view") %}
+{% set is_created = (m == "created") %}
+{% set is_edit = (m == "edit") %}
+{% set is_create = (m == "create") %}
+{% set ro = is_view or is_created %}
+
+{% block title %}
+  {% if is_edit %}Editar cliente — IndFlow{% elif is_view %}Visualizar cliente — IndFlow{% else %}Adicionar cliente — IndFlow{% endif %}
+{% endblock %}
 
 {% block content %}
 <style>
-  .wrap{max-width:900px;margin:0 auto;padding:24px;}
+  .wrap{max-width:1050px;margin:0 auto;padding:24px;}
   .card{background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;margin-bottom:16px;}
   .muted{color:#64748b;font-size:14px;line-height:1.35;}
-  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:end;}
+  .title{margin:0 0 6px 0;font-size:34px;letter-spacing:-0.02em;}
+  .section-title{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;margin:0;}
+  .section-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px;}
+  .col-12{grid-column:span 12;}
+  .col-6{grid-column:span 12;}
+  .col-4{grid-column:span 12;}
+  .col-3{grid-column:span 12;}
+  @media (min-width: 860px){
+    .col-6{grid-column:span 6;}
+    .col-4{grid-column:span 4;}
+    .col-3{grid-column:span 3;}
+  }
   label{display:block;font-size:13px;color:#334155;margin-bottom:6px;}
-  input{padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;min-width:320px;max-width:100%;}
+  input, select{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    background:#ffffff;
+    color:#0f172a;
+  }
+  input[disabled], select[disabled]{background:#f8fafc;color:#475569;}
   .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px;}
-  button{padding:10px 14px;border:0;border-radius:10px;background:#2563eb;color:#ffffff;font-weight:600;cursor:pointer;}
-  a.btn{display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;text-decoration:none;font-weight:600;}
+  button{
+    padding:10px 14px;border:0;border-radius:10px;background:#2563eb;color:#ffffff;font-weight:600;cursor:pointer;
+  }
+  button:disabled{background:#94a3b8;cursor:not-allowed;}
+  a.btn{
+    display:inline-block;padding:10px 14px;border-radius:10px;border:1px solid #e5e7eb;background:#ffffff;color:#0f172a;text-decoration:none;font-weight:600;
+  }
   .hint{margin-top:10px;padding:12px;border-radius:12px;background:#f8fafc;border:1px solid #e5e7eb;}
+  .api-box{margin-top:12px;padding:14px;border-radius:12px;background:#0b1220;border:1px solid #111827;color:#e5e7eb;}
+  .api-key{font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;font-size:14px;word-break:break-all;}
+  .hr{height:1px;background:#e5e7eb;margin:12px 0;}
 </style>
 
 <div class="wrap">
 
   <div class="card">
-    <h1 style="margin:0 0 6px 0;">Adicionar cliente</h1>
+    <h1 class="title">
+      {% if is_edit %}Editar cliente{% elif is_view %}Visualizar cliente{% else %}Adicionar cliente{% endif %}
+    </h1>
     <div class="muted">
-      Crie um cliente (tenant) e gere a API Key. A chave sera exibida apenas uma vez apos salvar.
+      {% if is_edit %}
+        Altere os dados do cliente. A API Key nao e regenerada aqui.
+      {% elif is_view %}
+        Dados do cliente em modo somente leitura.
+      {% else %}
+        Crie um cliente (tenant) e gere a API Key. A chave sera exibida apenas uma vez apos salvar.
+      {% endif %}
     </div>
+
+    {% if is_created and api_key %}
+      <div class="api-box">
+        <div style="font-weight:700;margin-bottom:6px;">API Key gerada (exibida uma unica vez)</div>
+        <div class="api-key">{{ api_key }}</div>
+        <div class="muted" style="margin-top:8px;color:#cbd5e1;">
+          Anote e guarde em local seguro. A chave nao fica salva em texto no banco.
+        </div>
+      </div>
+    {% endif %}
   </div>
 
   <div class="card">
-    <form method="post" action="{{ url_for('clientes.create_cliente') }}">
-      <div class="row">
-        <div style="flex:1 1 360px;">
-          <label>Nome do cliente</label>
-          <input name="nome" placeholder="Ex: Cliente A / Fabrica X" required>
+    {% if ro %}
+      <div class="section-bar">
+        <div class="section-title">Dados gerais</div>
+      </div>
+
+      <div class="grid">
+        <div class="col-3">
+          <label>Tipo de cliente</label>
+          <select disabled>
+            <option>{{ (cliente["tipo_cliente"] if cliente else "") or "Nao informado" }}</option>
+          </select>
+        </div>
+
+        <div class="col-3">
+          <label>Situacao</label>
+          <select disabled>
+            <option>{% if cliente and (cliente["status"] or "") == "active" %}Ativo{% else %}Inativo{% endif %}</option>
+          </select>
+        </div>
+
+        <div class="col-6">
+          <label>Nome</label>
+          <input disabled value="{{ (cliente["nome"] if cliente else "") }}">
+        </div>
+
+        <div class="col-6">
+          <label>E-mail</label>
+          <input disabled value="{{ (cliente["email"] if cliente else "") }}">
+        </div>
+
+        <div class="col-3">
+          <label>Telefone comercial</label>
+          <input disabled value="{{ (cliente["telefone_comercial"] if cliente else "") }}">
+        </div>
+
+        <div class="col-3">
+          <label>Telefone celular</label>
+          <input disabled value="{{ (cliente["telefone_celular"] if cliente else "") }}">
+        </div>
+
+        <div class="col-3">
+          <label>FAX</label>
+          <input disabled value="{{ (cliente["fax"] if cliente else "") }}">
+        </div>
+
+        <div class="col-3">
+          <label>Site</label>
+          <input disabled value="{{ (cliente["site"] if cliente else "") }}">
+        </div>
+
+        <div class="col-6">
+          <label>Vendedor / Responsavel</label>
+          <input disabled value="{{ (cliente["responsavel"] if cliente else "") }}">
         </div>
       </div>
 
       <div class="actions">
-        <button type="submit">Salvar e gerar API Key</button>
-        <a class="btn" href="{{ url_for('clientes.home') }}">Cancelar</a>
+        <a class="btn" href="{{ url_for('clientes.home') }}">Voltar</a>
+        {% if is_view and cliente %}
+          <a class="btn" href="{{ url_for('clientes.editar_cliente', cid=cliente['id']) }}">Editar</a>
+        {% endif %}
       </div>
 
-      <div class="hint">
-        <div class="muted">
-          Importante: a API Key nao fica salva em texto no banco. Anote quando o sistema exibir.
+    {% else %}
+      <form method="post" action="{{ action_url or url_for('clientes.create_cliente') }}">
+        <div class="section-bar">
+          <div class="section-title">Dados gerais</div>
         </div>
-      </div>
-    </form>
+
+        <div class="grid">
+          <div class="col-3">
+            <label>Tipo de cliente</label>
+            {% set tc = (cliente["tipo_cliente"] if cliente else "") %}
+            <select name="tipo_cliente">
+              <option value="" {% if not tc %}selected{% endif %}>Selecione</option>
+              <option value="PJ" {% if tc == "PJ" %}selected{% endif %}>Pessoa juridica</option>
+              <option value="PF" {% if tc == "PF" %}selected{% endif %}>Pessoa fisica</option>
+              <option value="OUTRO" {% if tc == "OUTRO" %}selected{% endif %}>Outro</option>
+              {% if tc and tc not in ["PJ","PF","OUTRO"] %}
+                <option value="{{ tc }}" selected>{{ tc }}</option>
+              {% endif %}
+            </select>
+          </div>
+
+          <div class="col-3">
+            <label>Situacao</label>
+            <select disabled>
+              <option>{% if cliente and (cliente["status"] or "") == "inactive" %}Inativo{% else %}Ativo{% endif %}</option>
+            </select>
+          </div>
+
+          <div class="col-6">
+            <label>Nome</label>
+            <input name="nome" value="{{ (cliente["nome"] if cliente else "") }}" placeholder="Ex: Cliente A / Fabrica X" required>
+          </div>
+
+          <div class="col-6">
+            <label>E-mail</label>
+            <input name="email" value="{{ (cliente["email"] if cliente else "") }}" placeholder="Ex: contato@cliente.com">
+          </div>
+
+          <div class="col-3">
+            <label>Telefone comercial</label>
+            <input name="telefone_comercial" value="{{ (cliente["telefone_comercial"] if cliente else "") }}" placeholder="Ex: (71) 99999-9999">
+          </div>
+
+          <div class="col-3">
+            <label>Telefone celular</label>
+            <input name="telefone_celular" value="{{ (cliente["telefone_celular"] if cliente else "") }}" placeholder="Ex: (71) 99999-9999">
+          </div>
+
+          <div class="col-3">
+            <label>FAX</label>
+            <input name="fax" value="{{ (cliente["fax"] if cliente else "") }}" placeholder="">
+          </div>
+
+          <div class="col-3">
+            <label>Site</label>
+            <input name="site" value="{{ (cliente["site"] if cliente else "") }}" placeholder="Ex: https://site.com">
+          </div>
+
+          <div class="col-6">
+            <label>Vendedor / Responsavel</label>
+            <input name="responsavel" value="{{ (cliente["responsavel"] if cliente else "") }}" placeholder="Ex: Nome do responsavel">
+          </div>
+        </div>
+
+        <div class="actions">
+          {% if is_edit %}
+            <button type="submit">Salvar</button>
+          {% else %}
+            <button type="submit">Salvar e gerar API Key</button>
+          {% endif %}
+          <a class="btn" href="{{ url_for('clientes.home') }}">Cancelar</a>
+        </div>
+
+        <div class="hint">
+          <div class="muted">
+            Importante: a API Key nao fica salva em texto no banco. Anote quando o sistema exibir.
+          </div>
+        </div>
+      </form>
+    {% endif %}
   </div>
 
 </div>
