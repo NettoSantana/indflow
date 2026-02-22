@@ -1,12 +1,12 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-21 17:00 America/Bahia
-MOTIVO: Historico: ao clicar no dia, abrir modal com tabela horaria e barra timeline RUN/STOP/NP por minuto.
+LAST_RECODE: 2026-02-21 22:30 America/Bahia
+MOTIVO: Historico: corrigir modal do dia (endpoint/fetch), evitar clique conflitando com OP, e corrigir markup quebrado.
 -->
 
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
+Ultimo recode: 2026-02-21 22:30 America/Bahia
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -119,6 +119,8 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   }
 
   .r{ text-align:right; }
+  .text-right{ text-align:right; }
+  .text-center{ text-align:center; }
 
   .loading td{
     padding:14px;
@@ -571,36 +573,8 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     <div class="op-modal-body">
       <div class="op-form-grid">
 
-        <
-<!-- ===============================
-     MODAL DIA (abre ao clicar na linha do DIA)
-     Cada linha (hora) tem duas metades:
-     - topo: meta / produzido / refugo
-     - baixo: barra timeline RUN/STOP/NP
-     =============================== -->
-<div id="day-modal-backdrop" class="day-modal-backdrop" aria-hidden="true">
-  <div class="day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title">
-    <div class="day-modal-header">
-      <div class="day-modal-title" id="day-modal-title">Detalhe do dia</div>
-      <button type="button" id="day-modal-close" class="day-modal-close">Fechar</button>
-    </div>
-    <div class="day-modal-body">
-      <table class="day-hour-table">
-        <thead>
-          <tr>
-            <th style="width:90px;">Hora</th>
-            <th>Detalhe</th>
-          </tr>
-        </thead>
-        <tbody id="day-hour-tbody">
-          <tr><td colspan="2">Carregando...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
 
-!-- Linha 1 (read-only / azul) -->
+<!-- Linha 1 (read-only / azul) -->
         <div class="op-field op-ro col-3">
           <label>Máquina</label>
           <input id="opv_machine" type="text" readonly>
@@ -667,6 +641,36 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     </div>
   </div>
 </div>
+
+
+<!-- ===============================
+     MODAL DIA (abre ao clicar na linha do DIA)
+     Cada linha (hora) tem duas metades:
+     - topo: meta / produzido / refugo
+     - baixo: barra timeline RUN/STOP/NP
+     =============================== -->
+<div id="day-modal-backdrop" class="day-modal-backdrop" aria-hidden="true">
+  <div class="day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title">
+    <div class="day-modal-header">
+      <div class="day-modal-title" id="day-modal-title">Detalhe do dia</div>
+      <button type="button" id="day-modal-close" class="day-modal-close">Fechar</button>
+    </div>
+    <div class="day-modal-body">
+      <table class="day-hour-table">
+        <thead>
+          <tr>
+            <th style="width:90px;">Hora</th>
+            <th>Detalhe</th>
+          </tr>
+        </thead>
+        <tbody id="day-hour-tbody">
+          <tr><td colspan="2">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
 
 <script>
 (function(){
@@ -1206,15 +1210,37 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   async function fetchDayDetail(isoDay){
     if(!machineId) throw new Error("machine_id vazio");
 
-    const base = "/producao/api/producao";
-    const url = `${base}/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`;
+    // Compatibilidade: tenta mais de um caminho (dependendo de como o blueprint foi montado)
+    const candidates = [
+      `/producao/api/producao/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`,
+      `/api/producao/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`,
+      `/producao/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`
+    ];
 
-    const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
-    if(!resp.ok){
-      throw new Error("Falha ao buscar detalhe do dia (HTTP " + resp.status + ")");
+    let lastErr = null;
+
+    for(const url of candidates){
+      try{
+        const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+        if(resp.ok){
+          return await resp.json();
+        }
+
+        // Se for 404, tenta o proximo candidato
+        if(resp.status === 404){
+          lastErr = new Error("Endpoint nao encontrado: " + url);
+          continue;
+        }
+
+        lastErr = new Error("Falha ao buscar detalhe do dia (HTTP " + resp.status + ")");
+      }catch(e){
+        lastErr = e;
+      }
     }
-    return await resp.json();
+
+    throw (lastErr || new Error("Falha ao buscar detalhe do dia"));
   }
+
 
   function renderDayDetail(isoDay, payload){
     if(!dayHourTbody) return;
@@ -1392,6 +1418,8 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   .k{ width:180px; font-weight:700; background:#f8fafc; }
   .v{ }
   .r{ text-align:right; }
+  .text-right{ text-align:right; }
+  .text-center{ text-align:center; }
   .c{ text-align:center; }
   .sub td{ background:#fafafa; border-top:none; }
   .empty{ text-align:center; color:#64748b; }
@@ -1591,8 +1619,20 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       trOp.appendChild(tdOp);
       tbody.appendChild(trOp);
 
-      trOp.addEventListener("click", function(){
+      trOp.addEventListener("click", function(e){
+        if(e){
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        // Se por algum motivo o modal do dia estiver aberto, fecha antes de abrir OP
+        if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
+          closeDayModal();
+        }
+
         const op2 = Object.assign({}, op || {});
+        op2.__dia_ref = getRowDateISO(r);
+        openModal(op2);
+      });
         op2.__dia_ref = getRowDateISO(r);
         openModal(op2);
       });
