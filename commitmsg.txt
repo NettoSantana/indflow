@@ -1,5 +1,5 @@
-﻿fix(calc): meta do dia no multi-turno (soma das metas dos turnos) para refletir no card
+﻿feat(historico): adicionar endpoint /api/producao/detalhe-dia para modal com tabela horaria e timeline RUN/STOP/NP
 
-- Quando existir config_v2 com shifts, meta_turno vira meta do dia (soma de meta_pcs)
-- Respeita active_days (dia inativo -> meta 0)
-- Mantem compatibilidade guardando meta do turno ativo em meta_turno_shift
+- Retorna hours[0..23] com meta, produzido, refugo e segments (RUN/STOP/NP) por hora
+- Usa oee.no_count_stop_sec do machine_config (fallback 120)
+- Marca NP quando meta da hora = 0
