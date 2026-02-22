@@ -1,4 +1,5 @@
-﻿fix(ui): corrige JS do historico que travava carregamento
+﻿fix(api): detalhe-dia usa machine_id efetivo (scoped) para evitar horas zeradas no modal
 
-- Remove trecho duplicado no appendOpsRows (op2 fora de escopo)
-- Historico volta a carregar e modal do dia funciona
+- Resolve effective_machine_id por dia via producao_diaria
+- Usa effective_machine_id nas queries de producao_evento e producao_horaria/refugo_horaria
+- Retorna effective_machine_id no JSON (debug) e fecha conexao quando aplicavel

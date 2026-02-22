@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-22 00:49 America/Bahia
-# MOTIVO: Adicionar endpoint /api/producao/detalhe-dia para modal do Historico com tabela horaria e timeline (RUN/STOP/NP) por hora.
+# LAST_RECODE: 2026-02-22 23:30 America/Bahia
+# MOTIVO: Corrigir /api/producao/detalhe-dia para usar machine_id efetivo (scoped) por dia e fechar conexao, evitando horas zeradas no modal.
 
 
 from __future__ import annotations
@@ -611,112 +611,128 @@ def api_producao_detalhe_dia():
     data_ref = _parse_date_any(date_str) or datetime.now(TZ_BAHIA).date()
 
     conn = _get_conn()
+    try:
+        # Resolve machine_id efetivo (scoped) para evitar "horas zeradas" quando o dia foi gravado como <cliente>::<maquina>.
+        eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref.isoformat())
 
-    # Carrega config v2 (se existir) para obter stop_sec e active_days (se existir)
-    cfg = _load_machine_config_json(conn, machine_id)
-    stop_sec = _safe_int(
-        ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
-        120,
-    )
-    active_days = cfg.get("active_days")
-    if isinstance(active_days, list) and active_days:
-        # Python weekday: Mon=0..Sun=6; nossa lista default e 1..7 (Seg=1)
-        wd = data_ref.weekday() + 1
-        if wd not in set(int(x) for x in active_days if str(x).isdigit()):
-            # Dia nao ativo: tudo NP
-            horas = []
-            for h in range(24):
-                hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
-                he = hs + timedelta(hours=1)
-                horas.append(
+        # Carrega config (tenta primeiro pelo machine_id recebido; se nao existir, tenta pelo efetivo).
+        cfg = _load_machine_config_json(conn, machine_id)
+        if (not cfg) and eff_mid and eff_mid != machine_id:
+            cfg = _load_machine_config_json(conn, eff_mid)
+
+        # stop_sec e dias ativos (se existir)
+        stop_sec = _safe_int(
+            ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
+            120,
+        )
+        active_days = cfg.get("active_days")
+
+        if isinstance(active_days, list) and active_days:
+            # Python weekday: Mon=0..Sun=6; nossa lista default e 1..7 (Seg=1)
+            wd = data_ref.weekday() + 1
+            if wd not in set(int(x) for x in active_days if str(x).isdigit()):
+                # Dia nao ativo: tudo NP
+                horas = []
+                for h in range(24):
+                    hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
+                    he = hs + timedelta(hours=1)
+                    horas.append(
+                        {
+                            "hour": h,
+                            "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
+                            "meta": 0,
+                            "produzido": 0,
+                            "refugo": 0,
+                            "segments": _build_segments_for_hour(hs, he, True, []),
+                        }
+                    )
+                return jsonify(
                     {
-                        "hour": h,
-                        "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
-                        "meta": 0,
-                        "produzido": 0,
-                        "refugo": 0,
-                        "segments": _build_segments_for_hour(hs, he, True, []),
+                        "ok": True,
+                        "machine_id": machine_id,
+                        "effective_machine_id": eff_mid,
+                        "date": data_ref.isoformat(),
+                        "stop_sec": stop_sec,
+                        "hours": horas,
                     }
                 )
-            return jsonify(
+
+        # Busca eventos do dia
+        event_times: list[datetime] = []
+        if _table_exists(conn, "producao_evento"):
+            ts_col = _resolve_ts_col(conn, "producao_evento")
+            if ts_col:
+                day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0, tzinfo=TZ_BAHIA)
+                day_end = day_start + timedelta(days=1)
+                try:
+                    sql = f"""
+                        SELECT {ts_col} as ts
+                        FROM producao_evento
+                        WHERE machine_id=?
+                          AND datetime({ts_col}) >= datetime(?)
+                          AND datetime({ts_col}) < datetime(?)
+                        ORDER BY datetime({ts_col}) ASC
+                    """
+                    rows = conn.execute(sql, (eff_mid, day_start.isoformat(), day_end.isoformat())).fetchall()
+                    for r in rows:
+                        try:
+                            t = r["ts"]
+                            if t:
+                                event_times.append(datetime.fromisoformat(str(t)).replace(tzinfo=TZ_BAHIA))
+                        except Exception:
+                            # tenta parse simples
+                            try:
+                                event_times.append(datetime.strptime(str(r["ts"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_BAHIA))
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+        run_intervals = _compute_run_intervals(event_times, stop_sec)
+
+        # Tabela horaria (meta/produzido/refugo)
+        hor = _fetch_horaria(conn, eff_mid, data_ref)
+
+        # Monta resposta hora a hora
+        horas = []
+        for h in range(24):
+            hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
+            he = hs + timedelta(hours=1)
+
+            meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
+            produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
+            refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
+
+            is_np = meta <= 0
+            segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
+
+            horas.append(
                 {
-                    "ok": True,
-                    "machine_id": machine_id,
-                    "date": data_ref.isoformat(),
-                    "stop_sec": stop_sec,
-                    "hours": horas,
+                    "hour": h,
+                    "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
+                    "meta": meta,
+                    "produzido": produzido,
+                    "refugo": refugo,
+                    "segments": segs,
                 }
             )
 
-    # Busca eventos do dia
-    event_times: list[datetime] = []
-    if _table_exists(conn, "producao_evento"):
-        ts_col = _resolve_ts_col(conn, "producao_evento")
-        if ts_col:
-            day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0, tzinfo=TZ_BAHIA)
-            day_end = day_start + timedelta(days=1)
-            try:
-                sql = f"""
-                    SELECT {ts_col} as ts
-                    FROM producao_evento
-                    WHERE machine_id=?
-                      AND datetime({ts_col}) >= datetime(?)
-                      AND datetime({ts_col}) < datetime(?)
-                    ORDER BY datetime({ts_col}) ASC
-                """
-                rows = conn.execute(sql, (machine_id, day_start.isoformat(), day_end.isoformat())).fetchall()
-                for r in rows:
-                    try:
-                        t = r["ts"]
-                        if t:
-                            event_times.append(datetime.fromisoformat(str(t)).replace(tzinfo=TZ_BAHIA))
-                    except Exception:
-                        # tenta parse simples
-                        try:
-                            event_times.append(datetime.strptime(str(r["ts"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_BAHIA))
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-    run_intervals = _compute_run_intervals(event_times, stop_sec)
-
-    # Tabela horaria (meta/produzido/refugo)
-    hor = _fetch_horaria(conn, machine_id, data_ref)
-
-    # Monta resposta hora a hora
-    horas = []
-    for h in range(24):
-        hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
-        he = hs + timedelta(hours=1)
-
-        meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
-        produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
-        refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
-
-        is_np = meta <= 0
-        segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
-
-        horas.append(
+        return jsonify(
             {
-                "hour": h,
-                "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
-                "meta": meta,
-                "produzido": produzido,
-                "refugo": refugo,
-                "segments": segs,
+                "ok": True,
+                "machine_id": machine_id,
+                "effective_machine_id": eff_mid,
+                "date": data_ref.isoformat(),
+                "stop_sec": stop_sec,
+                "hours": horas,
             }
         )
-
-    return jsonify(
-        {
-            "ok": True,
-            "machine_id": machine_id,
-            "date": data_ref.isoformat(),
-            "stop_sec": stop_sec,
-            "hours": horas,
-        }
-    )
+    finally:
+        if not callable(get_db):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 @historico_bp.route("/historico", methods=["GET"])
