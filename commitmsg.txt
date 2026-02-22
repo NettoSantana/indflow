@@ -1,5 +1,6 @@
-﻿feat(ui): modal de detalhe do dia no Historico com tabela 24h e barra timeline RUN/STOP/NP
+﻿fix(ui): corrigir modal do dia no historico (markup + fetch + clique OP)
 
-- Clique na linha do dia abre modal com horas do dia
-- Cada hora exibe meta/prod/ref e barra timeline por segmentos
-- Consome endpoint /producao/api/producao/detalhe-dia
+- Remove modal do dia que estava inserido dentro do modal de OP (markup quebrado)
+- Corrige comentario HTML e estrutura do DOM
+- Adiciona fallback de endpoints no fetch do detalhe do dia
+- Garante stopPropagation no clique da linha OP
