@@ -1,6 +1,4 @@
-﻿fix(ui): corrigir modal do dia no historico (markup + fetch + clique OP)
+﻿fix(ui): corrige JS do historico que travava carregamento
 
-- Remove modal do dia que estava inserido dentro do modal de OP (markup quebrado)
-- Corrige comentario HTML e estrutura do DOM
-- Adiciona fallback de endpoints no fetch do detalhe do dia
-- Garante stopPropagation no clique da linha OP
+- Remove trecho duplicado no appendOpsRows (op2 fora de escopo)
+- Historico volta a carregar e modal do dia funciona
