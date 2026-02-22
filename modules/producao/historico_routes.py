@@ -1,11 +1,12 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-20 07:37 America/Bahia
-# MOTIVO: BUG 5: Remover fallback por data_ref; OP no historico pertence somente ao dia operacional da abertura (inicio_iso) usando comparacao datetime() para evitar duplicacao na virada.
+# LAST_RECODE: 2026-02-22 00:49 America/Bahia
+# MOTIVO: Adicionar endpoint /api/producao/detalhe-dia para modal do Historico com tabela horaria e timeline (RUN/STOP/NP) por hora.
 
 
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -123,6 +124,234 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
     return mid
 
 
+
+
+def _parse_date_any(s: str | None) -> date | None:
+    if not s:
+        return None
+    s = s.strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except Exception:
+            pass
+    return None
+
+
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    try:
+        row = _fetch_one(
+            conn,
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        )
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _get_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table_name})")
+        cols = set()
+        for r in cur.fetchall():
+            try:
+                cols.add(str(r[1]))
+            except Exception:
+                pass
+        return cols
+    except Exception:
+        return set()
+
+
+def _resolve_ts_col(conn: sqlite3.Connection, table_name: str) -> str | None:
+    cols = _get_columns(conn, table_name)
+    for c in ("timestamp", "ts", "created_at", "created_iso", "time_iso"):
+        if c in cols:
+            return c
+    return None
+
+
+def _load_machine_config_json(conn: sqlite3.Connection, machine_id: str) -> dict:
+    if not _table_exists(conn, "machine_config"):
+        return {}
+    try:
+        row = _fetch_one(
+            conn,
+            "SELECT config_json FROM machine_config WHERE machine_id=?",
+            (machine_id,),
+        )
+        if not row:
+            return {}
+        raw = row["config_json"] if isinstance(row, sqlite3.Row) else row[0]
+        if not raw:
+            return {}
+        return json.loads(raw)
+    except Exception:
+        return {}
+
+
+def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    if not intervals:
+        return []
+    intervals = sorted(intervals, key=lambda x: x[0])
+    merged: list[tuple[datetime, datetime]] = []
+    cur_s, cur_e = intervals[0]
+    for s, e in intervals[1:]:
+        if s <= cur_e:
+            if e > cur_e:
+                cur_e = e
+        else:
+            merged.append((cur_s, cur_e))
+            cur_s, cur_e = s, e
+    merged.append((cur_s, cur_e))
+    return merged
+
+
+def _compute_run_intervals(event_times: list[datetime], stop_sec: int) -> list[tuple[datetime, datetime]]:
+    intervals: list[tuple[datetime, datetime]] = []
+    if stop_sec <= 0:
+        stop_sec = 120
+    delta = timedelta(seconds=stop_sec)
+    for t in event_times:
+        intervals.append((t, t + delta))
+    return _merge_intervals(intervals)
+
+
+def _intersect(a_s: datetime, a_e: datetime, b_s: datetime, b_e: datetime) -> tuple[datetime, datetime] | None:
+    s = max(a_s, b_s)
+    e = min(a_e, b_e)
+    if e <= s:
+        return None
+    return (s, e)
+
+
+def _build_segments_for_hour(
+    hour_start: datetime,
+    hour_end: datetime,
+    is_np: bool,
+    run_intervals: list[tuple[datetime, datetime]],
+) -> list[dict]:
+    if is_np:
+        return [
+            {
+                "start": hour_start.strftime("%H:%M:%S"),
+                "end": hour_end.strftime("%H:%M:%S"),
+                "state": "NP",
+            }
+        ]
+
+    intersections: list[tuple[datetime, datetime]] = []
+    for rs, re_ in run_intervals:
+        inter = _intersect(hour_start, hour_end, rs, re_)
+        if inter:
+            intersections.append(inter)
+    intersections = _merge_intervals(intersections)
+
+    segs: list[dict] = []
+    cursor = hour_start
+    for rs, re_ in intersections:
+        if rs > cursor:
+            segs.append(
+                {
+                    "start": cursor.strftime("%H:%M:%S"),
+                    "end": rs.strftime("%H:%M:%S"),
+                    "state": "STOP",
+                }
+            )
+        segs.append(
+            {
+                "start": rs.strftime("%H:%M:%S"),
+                "end": re_.strftime("%H:%M:%S"),
+                "state": "RUN",
+            }
+        )
+        cursor = re_
+    if cursor < hour_end:
+        segs.append(
+            {
+                "start": cursor.strftime("%H:%M:%S"),
+                "end": hour_end.strftime("%H:%M:%S"),
+                "state": "STOP",
+            }
+        )
+    return segs
+
+
+def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
+    out: dict[int, dict] = {h: {"meta": 0, "produzido": 0, "refugo": 0} for h in range(24)}
+
+    # producao_horaria: tenta meta + produzido
+    if _table_exists(conn, "producao_horaria"):
+        cols = _get_columns(conn, "producao_horaria")
+        data_col = _resolve_data_col(conn, "producao_horaria")
+        hora_col = "hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None)
+        prod_col = None
+        for c in ("produzido", "producao", "count", "qtd"):
+            if c in cols:
+                prod_col = c
+                break
+        meta_col = None
+        for c in ("meta_hora", "meta", "meta_pcs"):
+            if c in cols:
+                meta_col = c
+                break
+
+        if data_col and hora_col:
+            sel_cols = [hora_col]
+            if prod_col:
+                sel_cols.append(prod_col)
+            if meta_col:
+                sel_cols.append(meta_col)
+            sql = f"SELECT {', '.join(sel_cols)} FROM producao_horaria WHERE machine_id=? AND {data_col}=?"
+            try:
+                for r in conn.execute(sql, (machine_id, data_ref.isoformat())).fetchall():
+                    try:
+                        h = int(r[hora_col]) if isinstance(r, sqlite3.Row) else int(r[0])
+                    except Exception:
+                        continue
+                    if h < 0 or h > 23:
+                        continue
+                    if prod_col:
+                        try:
+                            out[h]["produzido"] = _safe_int(r[prod_col] if isinstance(r, sqlite3.Row) else r[sel_cols.index(prod_col)], 0)
+                        except Exception:
+                            pass
+                    if meta_col:
+                        try:
+                            out[h]["meta"] = _safe_int(r[meta_col] if isinstance(r, sqlite3.Row) else r[sel_cols.index(meta_col)], 0)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+    # refugo_horaria
+    if _table_exists(conn, "refugo_horaria"):
+        cols = _get_columns(conn, "refugo_horaria")
+        data_col = _resolve_data_col(conn, "refugo_horaria")
+        hora_col = "hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None)
+        ref_col = None
+        for c in ("refugo", "qtd", "valor"):
+            if c in cols:
+                ref_col = c
+                break
+        if data_col and hora_col and ref_col:
+            sql = f"SELECT {hora_col} as hora, {ref_col} as refugo FROM refugo_horaria WHERE machine_id=? AND {data_col}=?"
+            try:
+                for r in conn.execute(sql, (machine_id, data_ref.isoformat())).fetchall():
+                    try:
+                        h = int(r["hora"])
+                    except Exception:
+                        continue
+                    if h < 0 or h > 23:
+                        continue
+                    out[h]["refugo"] = _safe_int(r["refugo"], 0)
+            except Exception:
+                pass
+
+    return out
+
+
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
     col = _resolve_data_col(conn, "refugo_horaria")
     tentativas = [
@@ -195,8 +424,8 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
         except Exception:
             vals.append(0)
 
-    chosen = 0
-    chosen = 0
+    chosen_row = None
+
     uniq_all = sorted(set([v for v in vals if v is not None]))
     uniq_pos = [v for v in uniq_all if v > 0]
 
@@ -211,12 +440,15 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
         else:
             chosen = max_pos
 
+    # Preferir linha "maquina::op" quando existir
+    for r in rows:
         try:
             if int(r["produzido"] or 0) == chosen and "::" in str(r["machine_id"] or ""):
                 chosen_row = r
                 break
         except Exception:
             continue
+
     if not chosen_row:
         for r in rows:
             try:
@@ -225,6 +457,7 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
                     break
             except Exception:
                 continue
+
     if not chosen_row:
         chosen_row = rows[0]
 
@@ -363,6 +596,127 @@ def api_producao_historico():
                 conn.close()
             except Exception:
                 pass
+
+
+
+
+@historico_bp.route("/api/producao/detalhe-dia", methods=["GET"])
+def api_producao_detalhe_dia():
+    machine_id = (request.args.get("machine_id") or "").strip()
+    date_str = (request.args.get("date") or request.args.get("data") or "").strip()
+
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
+
+    data_ref = _parse_date_any(date_str) or datetime.now(TZ_BAHIA).date()
+
+    conn = _get_conn()
+
+    # Carrega config v2 (se existir) para obter stop_sec e active_days (se existir)
+    cfg = _load_machine_config_json(conn, machine_id)
+    stop_sec = _safe_int(
+        ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
+        120,
+    )
+    active_days = cfg.get("active_days")
+    if isinstance(active_days, list) and active_days:
+        # Python weekday: Mon=0..Sun=6; nossa lista default e 1..7 (Seg=1)
+        wd = data_ref.weekday() + 1
+        if wd not in set(int(x) for x in active_days if str(x).isdigit()):
+            # Dia nao ativo: tudo NP
+            horas = []
+            for h in range(24):
+                hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
+                he = hs + timedelta(hours=1)
+                horas.append(
+                    {
+                        "hour": h,
+                        "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
+                        "meta": 0,
+                        "produzido": 0,
+                        "refugo": 0,
+                        "segments": _build_segments_for_hour(hs, he, True, []),
+                    }
+                )
+            return jsonify(
+                {
+                    "ok": True,
+                    "machine_id": machine_id,
+                    "date": data_ref.isoformat(),
+                    "stop_sec": stop_sec,
+                    "hours": horas,
+                }
+            )
+
+    # Busca eventos do dia
+    event_times: list[datetime] = []
+    if _table_exists(conn, "producao_evento"):
+        ts_col = _resolve_ts_col(conn, "producao_evento")
+        if ts_col:
+            day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0, tzinfo=TZ_BAHIA)
+            day_end = day_start + timedelta(days=1)
+            try:
+                sql = f"""
+                    SELECT {ts_col} as ts
+                    FROM producao_evento
+                    WHERE machine_id=?
+                      AND datetime({ts_col}) >= datetime(?)
+                      AND datetime({ts_col}) < datetime(?)
+                    ORDER BY datetime({ts_col}) ASC
+                """
+                rows = conn.execute(sql, (machine_id, day_start.isoformat(), day_end.isoformat())).fetchall()
+                for r in rows:
+                    try:
+                        t = r["ts"]
+                        if t:
+                            event_times.append(datetime.fromisoformat(str(t)).replace(tzinfo=TZ_BAHIA))
+                    except Exception:
+                        # tenta parse simples
+                        try:
+                            event_times.append(datetime.strptime(str(r["ts"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_BAHIA))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+    run_intervals = _compute_run_intervals(event_times, stop_sec)
+
+    # Tabela horaria (meta/produzido/refugo)
+    hor = _fetch_horaria(conn, machine_id, data_ref)
+
+    # Monta resposta hora a hora
+    horas = []
+    for h in range(24):
+        hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
+        he = hs + timedelta(hours=1)
+
+        meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
+        produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
+        refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
+
+        is_np = meta <= 0
+        segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
+
+        horas.append(
+            {
+                "hour": h,
+                "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
+                "meta": meta,
+                "produzido": produzido,
+                "refugo": refugo,
+                "segments": segs,
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "machine_id": machine_id,
+            "date": data_ref.isoformat(),
+            "stop_sec": stop_sec,
+            "hours": horas,
+        }
+    )
 
 
 @historico_bp.route("/historico", methods=["GET"])
