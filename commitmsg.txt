@@ -1,4 +1,4 @@
-﻿fix(ui): corrige JS do historico que travava carregamento
+﻿fix(api): registrar rota detalhe-dia no blueprint de producao para modal do Historico
 
-- Remove trecho duplicado no appendOpsRows (op2 fora de escopo)
-- Historico volta a carregar e modal do dia funciona
+- Adiciona /detalhe-dia (URL relativa usada no front) e /api/producao/detalhe-dia (compatibilidade)
+- Delegacao para historico_routes.api_producao_detalhe_dia
