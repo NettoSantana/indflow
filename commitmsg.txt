@@ -1,4 +1,5 @@
-﻿fix(api): registrar rota detalhe-dia no blueprint de producao para modal do Historico
+﻿fix(api): detalhe-dia usa machine_id efetivo (scoped) para evitar horas zeradas no modal
 
-- Adiciona /detalhe-dia (URL relativa usada no front) e /api/producao/detalhe-dia (compatibilidade)
-- Delegacao para historico_routes.api_producao_detalhe_dia
+- Resolve effective_machine_id por dia via producao_diaria
+- Usa effective_machine_id nas queries de producao_evento e producao_horaria/refugo_horaria
+- Retorna effective_machine_id no JSON (debug) e fecha conexao quando aplicavel
