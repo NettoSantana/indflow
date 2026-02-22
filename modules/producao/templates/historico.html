@@ -1,7 +1,7 @@
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-21 10:26 America/Bahia
-MOTIVO: Historico: exibir OP pelo numero (OS) no label (OP | Lote | Operador | Status) e no titulo do modal.
+LAST_RECODE: 2026-02-21 17:00 America/Bahia
+MOTIVO: Historico: ao clicar no dia, abrir modal com tabela horaria e barra timeline RUN/STOP/NP por minuto.
 -->
 
 {#
@@ -398,6 +398,119 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     gap:12px;
   }
 
+
+  /* Modal Dia (detalhe do dia) */
+  .day-modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+    z-index:60;
+  }
+  .day-modal-backdrop.open{ display:flex; }
+
+  .day-modal{
+    width:min(1100px, 96vw);
+    max-height:86vh;
+    overflow:auto;
+    background:#ffffff;
+    border-radius:16px;
+    border:1px solid #e5e7eb;
+    box-shadow:0 18px 40px rgba(0,0,0,0.30);
+  }
+  .day-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#f8fafc;
+  }
+  .day-modal-title{
+    font-weight:900;
+    color:#0f172a;
+    font-size:15px;
+  }
+  .day-modal-close{
+    border:1px solid #cbd5e1;
+    background:#ffffff;
+    color:#0f172a;
+    border-radius:10px;
+    height:34px;
+    padding:0 12px;
+    font-weight:900;
+    cursor:pointer;
+  }
+  .day-modal-body{ padding:14px 16px 18px 16px; }
+
+  .day-hour-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .day-hour-table th{
+    background:#f1f5f9;
+    padding:10px 12px;
+    text-align:left;
+    font-weight:900;
+    color:#0f172a;
+    border-bottom:1px solid #e2e8f0;
+  }
+  .day-hour-table td{
+    padding:10px 12px;
+    border-bottom:1px solid #e2e8f0;
+    vertical-align:top;
+  }
+  .hour-cell{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .hour-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .hour-metrics{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    font-weight:800;
+    color:#0f172a;
+  }
+  .hour-metrics span{
+    display:inline-block;
+    padding:4px 8px;
+    border-radius:999px;
+    background:#f1f5f9;
+    border:1px solid #e2e8f0;
+  }
+
+  .tbar{
+    width:100%;
+    height:12px;
+    border-radius:999px;
+    background:#e5e7eb;
+    overflow:hidden;
+    display:flex;
+    border:1px solid #cbd5e1;
+  }
+  .tseg{ height:100%; }
+  .tseg.run{ background:#16a34a; }
+  .tseg.stop{ background:#dc2626; }
+  .tseg.np{ background:#94a3b8; }
+
+  /* Clique na linha do dia */
+  tr.day-row{ cursor:pointer; }
+  tr.day-row:hover td{ background:#f8fafc; }
+
 </style>
 
 <div class="page">
@@ -458,7 +571,36 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     <div class="op-modal-body">
       <div class="op-form-grid">
 
-        <!-- Linha 1 (read-only / azul) -->
+        <
+<!-- ===============================
+     MODAL DIA (abre ao clicar na linha do DIA)
+     Cada linha (hora) tem duas metades:
+     - topo: meta / produzido / refugo
+     - baixo: barra timeline RUN/STOP/NP
+     =============================== -->
+<div id="day-modal-backdrop" class="day-modal-backdrop" aria-hidden="true">
+  <div class="day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title">
+    <div class="day-modal-header">
+      <div class="day-modal-title" id="day-modal-title">Detalhe do dia</div>
+      <button type="button" id="day-modal-close" class="day-modal-close">Fechar</button>
+    </div>
+    <div class="day-modal-body">
+      <table class="day-hour-table">
+        <thead>
+          <tr>
+            <th style="width:90px;">Hora</th>
+            <th>Detalhe</th>
+          </tr>
+        </thead>
+        <tbody id="day-hour-tbody">
+          <tr><td colspan="2">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+!-- Linha 1 (read-only / azul) -->
         <div class="op-field op-ro col-3">
           <label>Máquina</label>
           <input id="opv_machine" type="text" readonly>
@@ -646,6 +788,13 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
+
+  /* Modal Dia */
+  const dayModalBackdrop = document.getElementById("day-modal-backdrop");
+  const dayModalClose = document.getElementById("day-modal-close");
+  const dayModalTitle = document.getElementById("day-modal-title");
+  const dayHourTbody = document.getElementById("day-hour-tbody");
+
 
   const opv_machine = document.getElementById("opv_machine");
   const opv_operador = document.getElementById("opv_operador");
@@ -961,6 +1110,204 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     }
   }
 
+
+  function closeDayModal(){
+    if(dayModalBackdrop){
+      dayModalBackdrop.classList.remove("open");
+      dayModalBackdrop.setAttribute("aria-hidden", "true");
+    }
+    if(dayHourTbody){
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Carregando...</td></tr>';
+    }
+  }
+
+  function parseTs(v){
+    if(v === null || v === undefined) return null;
+    if(typeof v === "number"){
+      // aceita ms ou s
+      if(v < 2000000000){ return new Date(v * 1000); }
+      return new Date(v);
+    }
+    if(typeof v === "string"){
+      const d = new Date(v);
+      if(!isNaN(d.getTime())) return d;
+    }
+    return null;
+  }
+
+  function clamp(n, a, b){
+    return Math.max(a, Math.min(b, n));
+  }
+
+  function buildHourBar(isoDay, hourIdx, segments){
+    const bar = document.createElement("div");
+    bar.className = "tbar";
+
+    const day = isoDay;
+    const hh = String(hourIdx).padStart(2, "0");
+    const hourStart = new Date(day + "T" + hh + ":00:00");
+    const hourEnd = new Date(day + "T" + hh + ":59:59");
+
+    // Se o dia for hoje e essa for a hora atual, limita ao "agora"
+    const now = new Date();
+    const isToday = (day === todayIsoLocal());
+    const isCurrentHour = isToday && (now.getHours() === hourIdx);
+    const capEnd = isCurrentHour ? now : hourEnd;
+
+    const list = Array.isArray(segments) ? segments : [];
+    if(list.length === 0){
+      // Sem segmentos: deixa vazio
+      return bar;
+    }
+
+    let lastPctEnd = 0;
+
+    list.forEach((seg) => {
+      const st = parseTs(seg.start_ts ?? seg.start ?? seg.inicio ?? seg.ts_start);
+      const en = parseTs(seg.end_ts ?? seg.end ?? seg.fim ?? seg.ts_end);
+
+      if(!st || !en) return;
+
+      const s = new Date(Math.max(st.getTime(), hourStart.getTime()));
+      const e = new Date(Math.min(en.getTime(), capEnd.getTime()));
+
+      if(e.getTime() <= s.getTime()) return;
+
+      const sMin = (s.getTime() - hourStart.getTime()) / 60000;
+      const eMin = (e.getTime() - hourStart.getTime()) / 60000;
+
+      const sp = clamp((sMin / 60) * 100, 0, 100);
+      const ep = clamp((eMin / 60) * 100, 0, 100);
+
+      if(ep <= sp) return;
+
+      // gap: deixa fundo (cinza claro) como vazio
+      if(sp > lastPctEnd){
+        lastPctEnd = sp;
+      }
+
+      const state = String(seg.state ?? seg.status ?? "").toUpperCase();
+      let cls = "np";
+      if(state === "RUN" || state === "PROD" || state === "PRODUZINDO"){ cls = "run"; }
+      else if(state === "STOP" || state === "PARADO" || state === "PAUSA"){ cls = "stop"; }
+      else if(state === "NP" || state === "NAO_PROGRAMADO"){ cls = "np"; }
+
+      const div = document.createElement("div");
+      div.className = "tseg " + cls;
+      div.style.width = (ep - sp).toFixed(3) + "%";
+      bar.appendChild(div);
+
+      lastPctEnd = ep;
+    });
+
+    return bar;
+  }
+
+  async function fetchDayDetail(isoDay){
+    if(!machineId) throw new Error("machine_id vazio");
+
+    const base = "/producao/api/producao";
+    const url = `${base}/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`;
+
+    const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+    if(!resp.ok){
+      throw new Error("Falha ao buscar detalhe do dia (HTTP " + resp.status + ")");
+    }
+    return await resp.json();
+  }
+
+  function renderDayDetail(isoDay, payload){
+    if(!dayHourTbody) return;
+
+    const hours = Array.isArray(payload && payload.hours) ? payload.hours : [];
+    const segmentsByHour = (payload && payload.segments_by_hour) ? payload.segments_by_hour : (payload && payload.segments) ? payload.segments : null;
+
+    // Se vier como lista de 24 itens: usa direto. Se vier como dict {0:[...],...}: trata.
+    function getSegs(h){
+      if(Array.isArray(segmentsByHour)){
+        return segmentsByHour[h] || [];
+      }
+      if(segmentsByHour && typeof segmentsByHour === "object"){
+        return segmentsByHour[String(h)] || segmentsByHour[h] || [];
+      }
+      return [];
+    }
+
+    dayHourTbody.innerHTML = "";
+
+    for(let h=0; h<24; h++){
+      const tr = document.createElement("tr");
+
+      const tdH = document.createElement("td");
+      tdH.textContent = String(h).padStart(2, "0") + ":00";
+      tr.appendChild(tdH);
+
+      const tdD = document.createElement("td");
+      const wrap = document.createElement("div");
+      wrap.className = "hour-cell";
+
+      const top = document.createElement("div");
+      top.className = "hour-top";
+
+      const metrics = document.createElement("div");
+      metrics.className = "hour-metrics";
+
+      const row = hours[h] || {};
+      const meta = Number(row.meta ?? row.meta_hora ?? 0) || 0;
+      const prod = Number(row.produzido ?? row.producao ?? 0) || 0;
+      const ref = Number(row.refugo ?? row.refugo_hora ?? 0) || 0;
+
+      const s1 = document.createElement("span");
+      s1.textContent = "Meta " + fmtNum(meta);
+      const s2 = document.createElement("span");
+      s2.textContent = "Prod " + fmtNum(prod);
+      const s3 = document.createElement("span");
+      s3.textContent = "Ref " + fmtNum(ref);
+
+      metrics.appendChild(s1);
+      metrics.appendChild(s2);
+      metrics.appendChild(s3);
+
+      top.appendChild(metrics);
+
+      wrap.appendChild(top);
+
+      const bar = buildHourBar(isoDay, h, getSegs(h));
+      wrap.appendChild(bar);
+
+      tdD.appendChild(wrap);
+      tr.appendChild(tdD);
+
+      dayHourTbody.appendChild(tr);
+    }
+  }
+
+  async function openDayModal(isoDay){
+    if(!isoDay) return;
+
+    if(dayModalTitle){
+      dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay);
+    }
+
+    if(dayModalBackdrop){
+      dayModalBackdrop.classList.add("open");
+      dayModalBackdrop.setAttribute("aria-hidden", "false");
+    }
+
+    if(dayHourTbody){
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Carregando...</td></tr>';
+    }
+
+    try{
+      const payload = await fetchDayDetail(isoDay);
+      renderDayDetail(isoDay, payload);
+    }catch(e){
+      if(dayHourTbody){
+        dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
+      }
+    }
+  }
+
   function escapeHtml(s){
     return String(s || "")
       .replaceAll("&", "&amp;")
@@ -1123,8 +1470,15 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
   }
 
   document.addEventListener("keydown", function(e){
-    if(e && e.key === "Escape" && modalBackdrop && modalBackdrop.style.display === "flex"){
-      closeModal();
+    if(e && e.key === "Escape"){
+      if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
+        closeDayModal();
+        return;
+      }
+      if(modalBackdrop && modalBackdrop.style.display === "flex"){
+        closeModal();
+        return;
+      }
     }
   });
 
@@ -1257,6 +1611,9 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     rows.forEach((r) => {
       const tr = document.createElement("tr");
 
+      tr.className = "day-row";
+      tr.dataset.dayIso = getRowDateISO(r);
+
       const tdData = document.createElement("td");
       tdData.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
 
@@ -1276,6 +1633,13 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
       tr.appendChild(tdProd);
       tr.appendChild(tdBoas);
       tr.appendChild(tdRef);
+
+      tr.addEventListener("click", function(ev){
+        // Evita conflitar com clique em linhas de OP (elas sao outras trs)
+        const iso = tr.dataset.dayIso || "";
+        if(!iso) return;
+        openDayModal(iso);
+      });
 
       tbody.appendChild(tr);
 
@@ -1333,6 +1697,20 @@ Ultimo recode: 2026-02-07 19:10 (America/Bahia), amarelo editavel).
     if(Number.isFinite(p)){
       row.percentual = p;
     }
+  }
+
+if(dayModalClose){
+    dayModalClose.addEventListener("click", function(){
+      closeDayModal();
+    });
+  }
+
+  if(dayModalBackdrop){
+    dayModalBackdrop.addEventListener("click", function(e){
+      if(e && e.target === dayModalBackdrop){
+        closeDayModal();
+      }
+    });
   }
 
   async function refreshLive(){

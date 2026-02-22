@@ -1,5 +1,5 @@
-﻿fix(calc): meta do dia no multi-turno (soma das metas dos turnos) para refletir no card
+﻿feat(ui): modal de detalhe do dia no Historico com tabela 24h e barra timeline RUN/STOP/NP
 
-- Quando existir config_v2 com shifts, meta_turno vira meta do dia (soma de meta_pcs)
-- Respeita active_days (dia inativo -> meta 0)
-- Mantem compatibilidade guardando meta do turno ativo em meta_turno_shift
+- Clique na linha do dia abre modal com horas do dia
+- Cada hora exibe meta/prod/ref e barra timeline por segmentos
+- Consome endpoint /producao/api/producao/detalhe-dia
