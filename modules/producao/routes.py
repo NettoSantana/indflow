@@ -1,6 +1,6 @@
-# PATH: indflow/modules/producao/routes.py
-# LAST_RECODE: 2026-02-21 07:20 America/Bahia
-# MOTIVO: Criar rota exclusiva do formulario de configuracao (config_maquina_for.html) sem alterar a rota atual (/config/<machine_id>) para evitar que o Dashboard pule o HUB.
+# PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
+# LAST_RECODE: 2026-02-21 22:59 America/Bahia
+# MOTIVO: Registrar rota de detalhe do dia (detalhe-dia) no blueprint de producao para o modal do Historico.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -1755,6 +1755,33 @@ def _incrementar_producao_diaria_por_op(machine_id: str, dia_iso: str, delta_pcs
 # =====================================================
 # API - SALVAR PRODUCAO DIARIA (JSON)
 # =====================================================
+# =====================================================
+# API - DETALHE DO DIA (JSON) - PARA MODAL DO HISTORICO
+# =====================================================
+@producao_bp.route("/detalhe-dia", methods=["GET"])
+@producao_bp.route("/api/producao/detalhe-dia", methods=["GET"])
+@login_required
+def api_detalhe_dia():
+    """Proxy do endpoint de detalhe do dia.
+
+    O front do historico.html chama por padrao uma URL relativa (detalhe-dia?...),
+    que resolve para /producao/detalhe-dia quando a pagina esta em /producao/historico.
+
+    Para manter compatibilidade, expomos tambem /api/producao/detalhe-dia no mesmo blueprint.
+
+    Implementacao: delega para modules.producao.historico_routes.api_producao_detalhe_dia,
+    que contem a logica de horas + segmentos RUN/STOP/NP.
+    """
+    try:
+        from modules.producao.historico_routes import api_producao_detalhe_dia
+    except Exception:
+        try:
+            from .historico_routes import api_producao_detalhe_dia
+        except Exception as e:
+            return jsonify({"ok": False, "error": f"cannot_import_historico_routes: {e}"}), 500
+
+    return api_producao_detalhe_dia()
+
 @producao_bp.route("/api/producao/salvar_diaria", methods=["POST"])
 @login_required
 def api_salvar_diaria():
