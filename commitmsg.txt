@@ -1,5 +1,5 @@
-﻿feat(historico): adicionar endpoint /api/producao/detalhe-dia para modal com tabela horaria e timeline RUN/STOP/NP
+﻿feat(ui): modal de detalhe do dia no Historico com tabela 24h e barra timeline RUN/STOP/NP
 
-- Retorna hours[0..23] com meta, produzido, refugo e segments (RUN/STOP/NP) por hora
-- Usa oee.no_count_stop_sec do machine_config (fallback 120)
-- Marca NP quando meta da hora = 0
+- Clique na linha do dia abre modal com horas do dia
+- Cada hora exibe meta/prod/ref e barra timeline por segmentos
+- Consome endpoint /producao/api/producao/detalhe-dia
