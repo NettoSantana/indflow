@@ -1,4 +1,9 @@
 <!--
+Caminho: indflow/modules/producao/templates/historico.html
+Último recode: 2026-02-22 01:37
+Motivo: corrigir JS que quebrava carregamento do histórico (op2 fora de escopo) após inclusão do modal de dia.
+-->
+<!--
 PATH: modules/producao/templates/historico.html
 LAST_RECODE: 2026-02-21 22:30 America/Bahia
 MOTIVO: Historico: corrigir modal do dia (endpoint/fetch), evitar clique conflitando com OP, e corrigir markup quebrado.
@@ -1630,9 +1635,6 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
         }
 
         const op2 = Object.assign({}, op || {});
-        op2.__dia_ref = getRowDateISO(r);
-        openModal(op2);
-      });
         op2.__dia_ref = getRowDateISO(r);
         openModal(op2);
       });
