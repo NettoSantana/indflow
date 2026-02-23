@@ -1,6 +1,4 @@
-﻿fix(historico): resolver machine_id efetivo no modal (compat maquina::op e cliente::maquina)
+﻿fix(historico): usar machine_id efetivo por eventos para preencher modal por hora
 
-- Ajusta _resolve_effective_machine_id para encontrar scoped id do dia em dois formatos:
-  1) %::<maquina>
-  2) <maquina>::%
-- Evita horas/meta/prod/ref zeradas no detalhe-dia quando o banco usa maquina::op
+- Resolve effective_machine_id pelo producao_evento no dia (prefere id escopado com mais eventos)
+- Evita modal detalhe-dia zerado quando producao_diaria usa id legado e eventos usam id escopado
