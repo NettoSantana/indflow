@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-22 23:30 America/Bahia
-# MOTIVO: Corrigir /api/producao/detalhe-dia para usar machine_id efetivo (scoped) por dia e fechar conexao, evitando horas zeradas no modal.
+# LAST_RECODE: 2026-02-22 20:39 America/Bahia
+# MOTIVO: Corrigir resolucao do machine_id efetivo para dias (suportar padrao maquina::op e cliente::maquina) evitando horas/meta zeradas no modal.
 
 
 from __future__ import annotations
@@ -95,9 +95,16 @@ def _resolve_data_col(conn: sqlite3.Connection, table: str) -> str:
 def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> str:
     """
     Regra: usar UMA unica fonte por dia.
-    - Se vier scoped (<cliente>::maquina), usa direto.
-    - Se nao, e existir scoped para o dia, usa SOMENTE scoped.
-    - Caso contrario, usa legacy.
+
+    - Se ja vier scoped (tem '::'), usa direto.
+    - Se vier legacy (sem '::'), tentamos achar um machine_id "efetivo" (scoped) na producao_diaria
+      para o mesmo dia, pegando o mais relevante por 'produzido'.
+
+    Compatibilidade:
+    - Padrao 1 (antigo): <cliente>::<maquina>
+    - Padrao 2 (novo): <maquina>::<op/ctx>
+
+    Se nao encontrar nada, cai no legacy.
     """
     mid = (machine_id or "").strip()
     if not mid:
@@ -106,21 +113,32 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
         return mid
 
     col = _resolve_data_col(conn, "producao_diaria")
+
     sql = f"""
         SELECT machine_id
           FROM producao_diaria
          WHERE {col} = ?
-           AND machine_id LIKE ?
+           AND (
+                machine_id LIKE ?
+             OR machine_id LIKE ?
+           )
          ORDER BY produzido DESC
          LIMIT 1
     """
-    like = f"%::{mid.lower()}"
+
+    # Tenta casar pelos 2 formatos:
+    # 1) <cliente>::<maquina> -> termina com ::mid
+    # 2) <maquina>::<op/ctx>  -> comeca com mid::
+    like_suffix = f"%::%s" % mid
+    like_prefix = f"%s::%%" % mid
+
     try:
-        row = _fetch_one(conn, sql, (data_ref, like))
+        row = _fetch_one(conn, sql, (data_ref, like_suffix, like_prefix))
         if row and row["machine_id"]:
             return str(row["machine_id"])
     except Exception:
         pass
+
     return mid
 
 
