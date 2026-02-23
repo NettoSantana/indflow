@@ -6,8 +6,8 @@ MOTIVO: Historico: barra de status por hora (verde=produzindo, vermelho=parada, 
 
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
-Último recode: 2026-02-22 01:37
-Motivo: corrigir JS que quebrava carregamento do histórico (op2 fora de escopo) após inclusão do modal de dia.
+Último recode: 2026-02-23 22:14
+Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atualização periódica para refletir produção/parada em tempo real.
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -828,6 +828,9 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   const dayModalTitle = document.getElementById("day-modal-title");
   const dayHourTbody = document.getElementById("day-hour-tbody");
 
+  let dayModalTimer = null;
+  let dayModalCurrentDay = null;
+
 
   const opv_machine = document.getElementById("opv_machine");
   const opv_operador = document.getElementById("opv_operador");
@@ -1145,13 +1148,13 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
 
   function closeDayModal(){
-    if(dayModalBackdrop){
-      dayModalBackdrop.classList.remove("open");
-      dayModalBackdrop.setAttribute("aria-hidden", "true");
+    dayModalBackdrop.style.display = "none";
+
+    if(dayModalTimer){
+      clearInterval(dayModalTimer);
+      dayModalTimer = null;
     }
-    if(dayHourTbody){
-      dayHourTbody.innerHTML = '<tr><td colspan="2">Carregando...</td></tr>';
-    }
+    dayModalCurrentDay = null;
   }
 
   function parseTs(v){
@@ -1181,57 +1184,63 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const hourStart = new Date(day + "T" + hh + ":00:00");
     const hourEnd = new Date(day + "T" + hh + ":59:59");
 
-    // Se o dia for hoje e essa for a hora atual, limita ao "agora"
     const now = new Date();
     const isToday = (day === todayIsoLocal());
     const isCurrentHour = isToday && (now.getHours() === hourIdx);
-    const capEnd = isCurrentHour ? now : hourEnd;
+    const capEnd = (isCurrentHour && now < hourEnd) ? now : hourEnd;
 
-    const list = Array.isArray(segments) ? segments : [];
-    if(list.length === 0){
-      // Sem segmentos: deixa vazio
-      return bar;
+    const totalMs = Math.max(1, capEnd.getTime() - hourStart.getTime());
+
+    function parseInDay(dayIso, value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === "string" && /^\d{2}:\d{2}(:\d{2})?$/.test(value)){
+        const t = value.length === 5 ? (value + ":00") : value;
+        return new Date(dayIso + "T" + t);
+      }
+      return parseTs(value);
     }
 
     let lastPctEnd = 0;
 
-    list.forEach((seg) => {
-      const st = parseTs(seg.start_ts ?? seg.start ?? seg.inicio ?? seg.ts_start);
-      const en = parseTs(seg.end_ts ?? seg.end ?? seg.fim ?? seg.ts_end);
+    (Array.isArray(segments) ? segments : []).forEach(seg=>{
+      const state = (seg && (seg.state || seg.status || seg.color)) ? String(seg.state || seg.status || seg.color) : "NP";
+      const startStr = seg && (seg.start || seg.started_at || seg.ts_start) ? (seg.start || seg.started_at || seg.ts_start) : null;
+      const endStr = seg && (seg.end || seg.ended_at || seg.ts_end) ? (seg.end || seg.ended_at || seg.ts_end) : null;
 
-      if(!st || !en) return;
+      const startTs = parseInDay(day, startStr) || hourStart;
+      const endTsRaw = parseInDay(day, endStr);
+      const endTs = endTsRaw || capEnd;
 
-      const s = new Date(Math.max(st.getTime(), hourStart.getTime()));
-      const e = new Date(Math.min(en.getTime(), capEnd.getTime()));
+      const st = startTs < hourStart ? hourStart : startTs;
+      const en = endTs > capEnd ? capEnd : endTs;
 
-      if(e.getTime() <= s.getTime()) return;
+      if(en <= st) return;
 
-      const sMin = (s.getTime() - hourStart.getTime()) / 60000;
-      const eMin = (e.getTime() - hourStart.getTime()) / 60000;
+      const sp = ((st.getTime() - hourStart.getTime()) / totalMs) * 100;
+      const ep = ((en.getTime() - hourStart.getTime()) / totalMs) * 100;
 
-      const sp = clamp((sMin / 60) * 100, 0, 100);
-      const ep = clamp((eMin / 60) * 100, 0, 100);
+      const startPct = Math.max(lastPctEnd, sp);
+      const endPct = Math.max(startPct, ep);
 
-      if(ep <= sp) return;
-
-      // gap: deixa fundo (cinza claro) como vazio
-      if(sp > lastPctEnd){
-        lastPctEnd = sp;
-      }
-
-      const state = String(seg.state ?? seg.status ?? "").toUpperCase();
       let cls = "np";
-      if(state === "RUN" || state === "PROD" || state === "PRODUZINDO"){ cls = "run"; }
-      else if(state === "STOP" || state === "PARADO" || state === "PAUSA"){ cls = "stop"; }
-      else if(state === "NP" || state === "NAO_PROGRAMADO"){ cls = "np"; }
+      if(state === "RUN" || state === "PROD" || state === "PRODUZINDO" || state === "GREEN"){ cls = "run"; }
+      else if(state === "STOP" || state === "PARADO" || state === "PAUSA" || state === "RED"){ cls = "stop"; }
+      else if(state === "NP" || state === "NAO_PROGRAMADO" || state === "CINZA" || state === "GRAY" || state === "GREY"){ cls = "np"; }
 
       const div = document.createElement("div");
       div.className = "tseg " + cls;
-      div.style.width = (ep - sp).toFixed(3) + "%";
+      div.style.width = (endPct - startPct).toFixed(3) + "%";
       bar.appendChild(div);
 
-      lastPctEnd = ep;
+      lastPctEnd = endPct;
     });
+
+    if(!bar.children.length){
+      const div = document.createElement("div");
+      div.className = "tseg np";
+      div.style.width = "100%";
+      bar.appendChild(div);
+    }
 
     return bar;
   }
@@ -1324,96 +1333,92 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   }
 
 
-  function renderDayDetail(isoDay, payload){
-    if(!dayHourTbody) return;
+  function renderDayDetail(payload){
+    const isoDay = payload && payload.date ? String(payload.date) : "";
+    const effectiveId = payload && payload.effective_machine_id ? String(payload.effective_machine_id) : "";
+    const machineId = payload && payload.machine_id ? String(payload.machine_id) : "";
 
-    const hours = Array.isArray(payload && payload.hours) ? payload.hours : [];
-    const segmentsByHour = (payload && payload.segments_by_hour) ? payload.segments_by_hour : (payload && payload.segments) ? payload.segments : null;
+    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay) + (effectiveId && effectiveId !== machineId ? (" (id efetivo: " + effectiveId + ")") : "");
 
-    // Se vier como lista de 24 itens: usa direto. Se vier como dict {0:[...],...}: trata.
-    function getSegs(h){
-      if(Array.isArray(segmentsByHour)){
-        return segmentsByHour[h] || [];
-      }
-      if(segmentsByHour && typeof segmentsByHour === "object"){
-        return segmentsByHour[String(h)] || segmentsByHour[h] || [];
-      }
-      return [];
-    }
-
+    const hours = (payload && Array.isArray(payload.hours)) ? payload.hours : [];
     dayHourTbody.innerHTML = "";
 
-    for(let h=0; h<24; h++){
+    if(!hours.length){
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Sem dados.</td></tr>';
+      return;
+    }
+
+    hours.forEach(h=>{
+      const hourIdx = Number(h.hour ?? h.hora ?? h.hora_idx ?? 0);
       const tr = document.createElement("tr");
 
       const tdH = document.createElement("td");
-      tdH.textContent = String(h).padStart(2, "0") + ":00";
+      tdH.textContent = String(hourIdx).padStart(2,"0") + ":00";
       tr.appendChild(tdH);
 
       const tdD = document.createElement("td");
+
       const wrap = document.createElement("div");
-      wrap.className = "hour-cell";
+      wrap.className = "hwrap";
 
-      const top = document.createElement("div");
-      top.className = "hour-top";
+      const meta = Number(h.meta ?? 0) || 0;
+      const prod = Number(h.produzido ?? 0) || 0;
+      const ref = Number(h.refugo ?? 0) || 0;
 
-      const metrics = document.createElement("div");
-      metrics.className = "hour-metrics";
+      const pills = document.createElement("div");
+      pills.className = "pills";
+      pills.innerHTML =
+        '<span class="pill">Meta ' + fmtInt(meta) + '</span>' +
+        '<span class="pill">Prod ' + fmtInt(prod) + '</span>' +
+        '<span class="pill">Ref ' + fmtInt(ref) + '</span>';
+      wrap.appendChild(pills);
 
-      const row = hours[h] || {};
-      const meta = Number(row.meta ?? row.meta_hora ?? 0) || 0;
-      const prod = Number(row.produzido ?? row.producao ?? 0) || 0;
-      const ref = Number(row.refugo ?? row.refugo_hora ?? 0) || 0;
-
-      const s1 = document.createElement("span");
-      s1.textContent = "Meta " + fmtNum(meta);
-      const s2 = document.createElement("span");
-      s2.textContent = "Prod " + fmtNum(prod);
-      const s3 = document.createElement("span");
-      s3.textContent = "Ref " + fmtNum(ref);
-
-      metrics.appendChild(s1);
-      metrics.appendChild(s2);
-      metrics.appendChild(s3);
-
-      top.appendChild(metrics);
-
-      wrap.appendChild(top);
-
-      const bar = buildLiveProgressBar(isoDay, h, row);
-      wrap.appendChild(bar);
+      const segs = Array.isArray(h.segments) ? h.segments : [];
+      if(segs.length){
+        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs));
+      }else{
+        wrap.appendChild(buildLiveProgressBar(isoDay, hourIdx, h));
+      }
 
       tdD.appendChild(wrap);
       tr.appendChild(tdD);
 
       dayHourTbody.appendChild(tr);
+    });
+  }
+  async function refreshDayModal(preserveScroll){
+    if(!dayModalCurrentDay) return;
+
+    const bodyEl = dayModalBackdrop.querySelector(".day-modal-body");
+    const prevScroll = bodyEl ? bodyEl.scrollTop : 0;
+
+    try{
+      const payload = await fetchDayDetail(dayModalCurrentDay);
+      renderDayDetail(payload);
+    }catch(err){
+      console.error(err);
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
+    }
+
+    if(preserveScroll && bodyEl){
+      bodyEl.scrollTop = prevScroll;
     }
   }
 
-  async function openDayModal(isoDay){
-    if(!isoDay) return;
 
-    if(dayModalTitle){
-      dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay);
-    }
+  async function openDayModal(dateIso){
+    dayModalCurrentDay = String(dateIso || "");
+    if(!dayModalCurrentDay) return;
 
-    if(dayModalBackdrop){
-      dayModalBackdrop.classList.add("open");
-      dayModalBackdrop.setAttribute("aria-hidden", "false");
-    }
+    dayModalBackdrop.style.display = "block";
 
-    if(dayHourTbody){
-      dayHourTbody.innerHTML = '<tr><td colspan="2">Carregando...</td></tr>';
-    }
+    await refreshDayModal(false);
 
-    try{
-      const payload = await fetchDayDetail(isoDay);
-      renderDayDetail(isoDay, payload);
-    }catch(e){
-      if(dayHourTbody){
-        dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
-      }
+    if(dayModalTimer){
+      clearInterval(dayModalTimer);
+      dayModalTimer = null;
     }
+    dayModalTimer = setInterval(()=>{ refreshDayModal(true); }, 5000);
   }
 
   function escapeHtml(s){
