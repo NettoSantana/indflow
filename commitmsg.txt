@@ -1,4 +1,7 @@
-﻿fix(historico): corrigir barras do modal por hora (nao preencher 100% na hora atual)
+﻿fix(historico): modal por hora como semaforo (verde=produzindo, vermelho=parado, cinza=fora do horario)
 
-- Timeline RUN/STOP/NP agora normaliza por 1h completa (19:30 = 50% do horario, nao 100%)
-- Barra simples agora reflete Prod/Meta (nao tempo decorrido)
+- Barra por hora agora eh estado (nao progresso/meta)
+- Verde quando houve producao na hora (Prod>0 ou segmento RUN)
+- Vermelho quando meta>0 e nao houve producao
+- Cinza quando meta=0 (fora do horario)
+- Remove pill de Meta para evitar confusao
