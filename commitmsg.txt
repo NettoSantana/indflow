@@ -1,5 +1,7 @@
-﻿fix(historico): gerar segmentos RUN/STOP via machine_state_event no detalhe-dia
+﻿fix(historico): usar segmentos RUN/STOP/NP na barra e atualizar modal em tempo real
 
-- Converte machine_state_event (transicoes RUN/STOP/NP) em intervalos RUN por dia
-- Mantem rastro real das cores (verde/vermelho/cinza) no historico sem depender de meta/calculo
-- Fallback seguro: se nao existir tabela/eventos, mantem comportamento anterior (STOP/NP)
+Modal detalhe-dia passa a renderizar barra por segmentos (verde/vermelho/cinza) quando backend envia hours[].segments
+
+Atualiza automaticamente a cada 5s enquanto o modal estiver aberto para refletir parada/produção do momento
+
+Mantém fallback antigo quando não houver segments
