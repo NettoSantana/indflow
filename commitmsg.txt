@@ -1,5 +1,5 @@
-﻿fix(historico): pintar barras por estado atual com rastro (RUN/STOP/NP)
+﻿fix(historico): corrigir modal detalhe-dia e rastro por estado via /machine/status
 
-- Modal do dia agora mostra apenas estado: PRODUZINDO (verde), PARADO (vermelho), FORA DO HORARIO (cinza)
-- Rastro de estado persistido em localStorage e desenhado como segmentos por hora
-- Horas futuras sempre cinza; nao reconstroi passado, apenas registra a partir de agora
+- Corrige funcoes faltantes (buildSegmentsForHour/stateToCss/getStatusTsMs) que causavam 'Falha ao carregar detalhe do dia'
+- Rastro por segmentos usa timestamp do status (quando disponivel) em vez de Date.now()
+- Mantem horas futuras sempre cinza
