@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 21:05 America/Bahia
-# MOTIVO: Corrigir 500 do detalhe-dia (remover dependencia de qtd_boas em producao_evento) e adicionar endpoint manual de backfill para producao_horaria.
+# LAST_RECODE: 2026-02-23 20:10 America/Bahia
+# MOTIVO: Remover dependencia de producao_evento no detalhe-dia e padronizar para producao_horaria/backfill.
 
 from __future__ import annotations
 
@@ -699,39 +699,9 @@ def api_producao_detalhe_dia():
                             "hours": horas,
                         }
                     )
-
-            # Busca eventos do dia
-            event_times: list[datetime] = []
-            if _table_exists(conn, "producao_evento"):
-                ts_col = _resolve_ts_col(conn, "producao_evento")
-                if ts_col:
-                    day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0, tzinfo=TZ_BAHIA)
-                    day_end = day_start + timedelta(days=1)
-                    try:
-                        sql = f"""
-                            SELECT {ts_col} as ts
-                            FROM producao_evento
-                            WHERE machine_id=?
-                              AND datetime({ts_col}) >= datetime(?)
-                              AND datetime({ts_col}) < datetime(?)
-                            ORDER BY datetime({ts_col}) ASC
-                        """
-                        rows = conn.execute(sql, (eff_mid, day_start.isoformat(), day_end.isoformat())).fetchall()
-                        for r in rows:
-                            try:
-                                t = r["ts"]
-                                if t:
-                                    event_times.append(datetime.fromisoformat(str(t)).replace(tzinfo=TZ_BAHIA))
-                            except Exception:
-                                # tenta parse simples
-                                try:
-                                    event_times.append(datetime.strptime(str(r["ts"]), "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ_BAHIA))
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-
-            run_intervals = _compute_run_intervals(event_times, stop_sec)
+            # Eventos por timestamp (producao_evento) desativados nesta versao.
+            # Segmentos de RUN/STOP ficam vazios; meta/produzido/refugo vem de producao_horaria.
+            run_intervals = []
 
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria(conn, eff_mid, data_ref)

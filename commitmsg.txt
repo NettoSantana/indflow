@@ -1,4 +1,5 @@
-﻿fix(historico): usar machine_id efetivo por eventos para preencher modal por hora
+﻿fix(producao): detalhe-dia padronizado para producao_horaria (sem producao_evento)
 
-- Resolve effective_machine_id pelo producao_evento no dia (prefere id escopado com mais eventos)
-- Evita modal detalhe-dia zerado quando producao_diaria usa id legado e eventos usam id escopado
+- Remove dependencia de producao_evento no /producao/api/producao/detalhe-dia
+- Meta/produzido/refugo vem apenas de producao_horaria
+- Mantem endpoint de backfill manual para preencher producao_horaria via producao_diaria
