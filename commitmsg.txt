@@ -1,5 +1,4 @@
-﻿fix(api): detalhe-dia usa machine_id efetivo (scoped) para evitar horas zeradas no modal
+﻿fix(historico): usar machine_id efetivo por eventos para preencher modal por hora
 
-- Resolve effective_machine_id por dia via producao_diaria
-- Usa effective_machine_id nas queries de producao_evento e producao_horaria/refugo_horaria
-- Retorna effective_machine_id no JSON (debug) e fecha conexao quando aplicavel
+- Resolve effective_machine_id pelo producao_evento no dia (prefere id escopado com mais eventos)
+- Evita modal detalhe-dia zerado quando producao_diaria usa id legado e eventos usam id escopado
