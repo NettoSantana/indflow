@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 20:10 America/Bahia
-# MOTIVO: Remover dependencia de producao_evento no detalhe-dia e padronizar para producao_horaria/backfill.
+# LAST_RECODE: 2026-02-23 21:00 America/Bahia
+# MOTIVO: Detalhe-dia agora usa machine_state_event para gerar segmentos RUN/STOP e manter rastro de cores (verde/vermelho/cinza) no historico.
 
 from __future__ import annotations
 
@@ -318,6 +318,108 @@ def _build_segments_for_hour(
             }
         )
     return segs
+
+
+
+def _fetch_run_intervals_from_state_events(
+    conn: sqlite3.Connection,
+    effective_machine_id: str,
+    data_ref: date,
+) -> list[tuple[datetime, datetime]]:
+    """
+    Converte machine_state_event (transicoes RUN/STOP/NP) em intervalos RUN para o dia.
+
+    - Usa o ultimo estado antes de 00:00 para definir estado inicial do dia.
+    - Para dia atual, corta intervalo aberto em "agora" para nao preencher futuro.
+    - Se a tabela nao existir, retorna [].
+    """
+    try:
+        if not _table_exists(conn, "machine_state_event"):
+            return []
+    except Exception:
+        return []
+
+    day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0, tzinfo=TZ_BAHIA)
+    day_end = day_start + timedelta(days=1)
+
+    # "agora" somente se for o dia atual, para nao inventar futuro
+    now_dt = datetime.now(TZ_BAHIA)
+    if day_start.date() == now_dt.date():
+        hard_end = min(day_end, now_dt)
+    else:
+        hard_end = day_end
+
+    day_start_ms = int(day_start.timestamp() * 1000)
+
+    # Estado inicial: ultimo evento antes do dia
+    state0 = None
+    try:
+        r0 = conn.execute(
+            "SELECT state, ts_ms FROM machine_state_event "
+            "WHERE effective_machine_id=? AND ts_ms < ? "
+            "ORDER BY ts_ms DESC LIMIT 1",
+            (effective_machine_id, day_start_ms),
+        ).fetchone()
+        if r0:
+            state0 = str(r0[0] or "").upper()
+    except Exception:
+        state0 = None
+
+    # Eventos do dia
+    evs: list[tuple[int, str]] = []
+    try:
+        for r in conn.execute(
+            "SELECT ts_ms, state FROM machine_state_event "
+            "WHERE effective_machine_id=? AND data_ref=? "
+            "ORDER BY ts_ms ASC",
+            (effective_machine_id, data_ref.isoformat()),
+        ).fetchall():
+            try:
+                ts_ms = int(r[0])
+            except Exception:
+                continue
+            st = str(r[1] or "").upper()
+            if st not in ("RUN", "STOP", "NP"):
+                continue
+            evs.append((ts_ms, st))
+    except Exception:
+        return []
+
+    # Monta intervalos RUN
+    intervals: list[tuple[datetime, datetime]] = []
+    cur_state = state0 if state0 in ("RUN", "STOP", "NP") else "STOP"
+    cur_t = day_start
+
+    def _push_run(a: datetime, b: datetime) -> None:
+        if b <= a:
+            return
+        # corta em hard_end
+        aa = max(a, day_start)
+        bb = min(b, hard_end)
+        if bb > aa:
+            intervals.append((aa, bb))
+
+    for ts_ms, st in evs:
+        try:
+            t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA)
+        except Exception:
+            continue
+        if t < day_start:
+            continue
+        if t > hard_end:
+            break
+
+        if cur_state == "RUN":
+            _push_run(cur_t, t)
+
+        cur_state = st
+        cur_t = t
+
+    if cur_state == "RUN":
+        _push_run(cur_t, hard_end)
+
+    return _merge_intervals(intervals)
+
 
 def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
     out: dict[int, dict] = {h: {"meta": 0, "produzido": 0, "refugo": 0} for h in range(24)}
@@ -699,9 +801,9 @@ def api_producao_detalhe_dia():
                             "hours": horas,
                         }
                     )
-            # Eventos por timestamp (producao_evento) desativados nesta versao.
-            # Segmentos de RUN/STOP ficam vazios; meta/produzido/refugo vem de producao_horaria.
-            run_intervals = []
+            # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
+            # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
+            run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
 
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria(conn, eff_mid, data_ref)
