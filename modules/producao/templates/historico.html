@@ -1,27 +1,116 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 20:25 America/Bahia
-MOTIVO: Implementar "rastro do estado" (verde=PRODUZINDO, vermelho=PARADO, cinza=futuro/sem dados) baseado somente em /machine/status, com persistencia em localStorage e continuidade entre dias (nao zera 00:00).
+LAST_RECODE: 2026-02-23 20:45 America/Bahia
+MOTIVO: Corrigir modal "Detalhe do dia" para desenhar rastro AO VIVO por estado (PRODUZINDO/PARADO) via /machine/status, com segmentos e persistencia local; horas futuras sempre cinza; remover dependencias faltantes que causavam "Falha ao carregar detalhe do dia".
 -->
 
-<!--
-Caminho: indflow/modules/producao/templates/historico.html
-Último recode: 2026-02-23 22:14
-Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atualização periódica para refletir produção/parada em tempo real.
--->
-<!--
-PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-21 22:30 America/Bahia
-MOTIVO: Historico: corrigir modal do dia (endpoint/fetch), evitar clique conflitando com OP, e corrigir markup quebrado.
--->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1200, initial-scale=1.0">
+  <title>Histórico — IndFlow</title>
+  <link rel="stylesheet" href="/static/style.css?v=2">
 
-{#
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-21 22:30 America/Bahia
-#}
-{% extends "base.html" %}
-{% block title %}Histórico — IndFlow{% endblock %}
-{% block content %}
+  <style>
+    /* ===== FORCAR LAYOUT DESKTOP EM MOBILE ===== */
+    html, body{
+      min-width:1200px;
+      overflow-x:auto;
+    }
+
+    /* ===== NAVBAR INDUSTRIAL ===== */
+    .navbar{
+      width:100%;
+      height:76px;
+      background:#ffffff;
+      border-bottom:1px solid #e5e7eb;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:0 24px;
+      box-sizing:border-box;
+      position:sticky;
+      top:0;
+      z-index:10;
+    }
+
+    .nav-left{
+      display:flex;
+      align-items:center;
+      gap:14px;
+    }
+
+    .logo{
+      height:56px;
+      width:auto;
+    }
+
+    .system-name{
+      font-size:20px;
+      font-weight:600;
+      color:#0f172a;
+    }
+
+    .nav-links{
+      display:flex;
+      align-items:center;
+      gap:18px;
+    }
+
+    .nav-links a{
+      text-decoration:none;
+      font-size:15px;
+      color:#334155;
+      font-weight:500;
+    }
+
+    .nav-links a:hover{
+      color:#0f172a;
+    }
+
+    /* ===== AREA DE CONTEUDO ===== */
+    .content-area{
+      padding:24px;
+      width:100%;
+      box-sizing:border-box;
+    }
+
+    .container{
+      max-width:1200px;
+      margin:0 auto;
+    }
+  </style>
+
+</head>
+
+<body>
+
+    <!-- NAVBAR SUPERIOR -->
+  <nav class="navbar">
+    <div class="nav-left">
+      <a href="/" style="display:flex; align-items:center; gap:14px; text-decoration:none;">
+        <img src="/static/img/logo.png" alt="NettSan Technology" class="logo">
+        <span class="system-name">IndFlow</span>
+      </a>
+    </div>
+
+    <div class="nav-links">
+      
+        <a href="/">Dashboard</a>
+        <a href="/indicadores">Indicadores</a>
+        <a href="/configuracoes">Configuracoes</a>
+        <a href="/admin/">Admin</a>
+        <a href="/admin/logout">Sair</a>
+      
+    </div>
+  </nav>
+
+
+  <!-- CONTEUDO DA PAGINA -->
+  <main class="content-area">
+    <div class="container">
+      
 
 <style>
   /* Referência: producao_home.html */
@@ -522,6 +611,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   /* Barra simples (progresso da hora) */
   .pbar{
+    position:relative;
     width:100%;
     height:12px;
     border-radius:999px;
@@ -530,6 +620,9 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     border:1px solid #cbd5e1;
   }
   .pfill{
+    position:absolute;
+    left:0;
+    top:0;
     height:100%;
     width:0%;
     border-radius:999px;
@@ -773,6 +866,81 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
       if(s.includes("PARAD")) return "STOP";
     }
 
+  function getStatusTsMs(st){
+    if(!st || typeof st !== "object") return Date.now();
+    const cands = [st._last_esp_ts_ms_seen, st._last_count_ts_ms, st._last_ts_ms_seen, st.last_ts_ms, st.ts_ms];
+    for(const v of cands){
+      const n = Number(v);
+      if(Number.isFinite(n) && n > 0) return n;
+    }
+    return Date.now();
+  }
+
+  function stateToCss(code){
+    if(code === "RUN") return "run";
+    if(code === "STOP") return "stop";
+    return "np";
+  }
+
+  function buildSegmentsForHour(isoDay, hourIdx, effectiveEndMs){
+    const hourStartMs = toHourStartMsLocal(isoDay, hourIdx);
+    const hourEndMs = hourStartMs + (60 * 60 * 1000);
+    const endMs = Math.min(Number(effectiveEndMs || hourEndMs), hourEndMs);
+
+    if(!Number.isFinite(hourStartMs) || !Number.isFinite(endMs) || endMs <= hourStartMs){
+      return [];
+    }
+
+    // initial state: last event before hour start
+    let curState = null;
+    for(let i=stateTrail.length-1;i>=0;i--){
+      const ev = stateTrail[i];
+      if(ev && Number.isFinite(ev.ts_ms) && ev.ts_ms < hourStartMs){
+        curState = ev.state;
+        break;
+      }
+    }
+
+    let curStart = hourStartMs;
+    const segs = [];
+
+    // events within hour window
+    for(const ev of stateTrail){
+      if(!ev || !Number.isFinite(ev.ts_ms)) continue;
+
+      if(ev.ts_ms < hourStartMs) continue;
+      if(ev.ts_ms > endMs) break;
+
+      if(curState === null){
+        // no known state until first event: start at first event time
+        curState = ev.state;
+        curStart = ev.ts_ms;
+        continue;
+      }
+
+      if(ev.ts_ms <= curStart) {
+        curState = ev.state;
+        curStart = ev.ts_ms;
+        continue;
+      }
+
+      // close current segment
+      segs.push({ state: curState, start_ms: curStart, end_ms: ev.ts_ms });
+
+      // start next
+      curState = ev.state;
+      curStart = ev.ts_ms;
+    }
+
+    // tail
+    if(curState !== null && curStart < endMs){
+      segs.push({ state: curState, start_ms: curStart, end_ms: endMs });
+    }
+
+    return segs;
+  }
+
+
     if(st.run === 1 || st.run === true) return "RUN";
     if(st.run === 0 || st.run === false) return "STOP";
 
@@ -791,17 +959,29 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   function appendTrailState(state, tsMs){
     if(!state) return;
 
-    const ts = Number.isFinite(Number(tsMs)) ? Number(tsMs) : Date.now();
+    const tsNow = Number.isFinite(Number(tsMs)) ? Number(tsMs) : Date.now();
+
+    // Primeiro ponto: ancora no inicio da hora atual para pintar o "agora" sem depender do passado.
+    if(stateTrail.length === 0){
+      const d = new Date(tsNow);
+      d.setMinutes(0,0,0);
+      const hourStart = d.getTime();
+      stateTrail.push({ ts_ms: hourStart, state: state });
+      lastTrailState = state;
+      lastTrailTsMs = hourStart;
+      saveTrail();
+      return;
+    }
 
     if(lastTrailState === state){
       return;
     }
 
-    stateTrail.push({ ts_ms: ts, state: state });
+    stateTrail.push({ ts_ms: tsNow, state: state });
     stateTrail.sort((a,b) => a.ts_ms - b.ts_ms);
 
     lastTrailState = state;
-    lastTrailTsMs = ts;
+    lastTrailTsMs = tsNow;
 
     saveTrail();
   }
@@ -824,6 +1004,39 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const h = Number(hourIdx);
     if(!Number.isFinite(h)) return false;
     return h > now.getHours();
+  }
+
+  function isHourInTurno(hourIdx){
+    // Se nao tiver status carregado, assume turno inteiro.
+    if(!lastMachineStatus) return true;
+
+    const ini = String(lastMachineStatus.turno_inicio || "00:00");
+    const fim = String(lastMachineStatus.turno_fim || "23:59");
+
+    function hhmmToMin(hhmm){
+      const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(String(hhmm));
+      if(!m) return null;
+      const hh = Math.max(0, Math.min(23, parseInt(m[1],10)));
+      const mm = Math.max(0, Math.min(59, parseInt(m[2],10)));
+      return hh*60 + mm;
+    }
+
+    const iniMin = hhmmToMin(ini);
+    const fimMin = hhmmToMin(fim);
+    if(iniMin === null || fimMin === null) return true;
+
+    const h = Number(hourIdx);
+    if(!Number.isFinite(h)) return true;
+    const startMin = h*60;
+    const endMin = startMin + 60;
+
+    // Turno normal (ex: 07:00-19:00)
+    if(iniMin <= fimMin){
+      return endMin > iniMin && startMin <= fimMin;
+    }
+
+    // Turno virando o dia (ex: 19:00-07:00)
+    return (endMin > iniMin) || (startMin <= fimMin);
   }
 
   function toDayStartMsLocal(isoDay){
@@ -885,9 +1098,17 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return { startMs, endMs, segs };
   }
 
-  function buildTrailBar(isoDay, hourIdx){
+  function buildTrailBar(isoDay, hourIdx, forceNP){
     const bar = document.createElement("div");
     bar.className = "pbar";
+
+    if(forceNP){
+      const fill = document.createElement("div");
+      fill.className = "pfill np";
+      fill.style.width = "100%";
+      bar.appendChild(fill);
+      return bar;
+    }
 
     // future hours always grey
     if(isFutureHour(isoDay, hourIdx)){
@@ -895,43 +1116,52 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
       fill.className = "pfill np";
       fill.style.width = "100%";
       bar.appendChild(fill);
-      return { bar, lastState: null };
+      return bar;
     }
 
-    const info = segmentsForHour(isoDay, hourIdx);
-    const totalMs = Math.max(1, info.endMs - info.startMs);
+    const hourStartMs = toHourStartMsLocal(isoDay, hourIdx);
+    const hourEndMs = hourStartMs + (60*60*1000);
+    const nowMs = Date.now();
+    const effectiveEnd = Math.min(hourEndMs, nowMs);
 
-    let lastState = null;
-    if(!info.segs.length){
+    const segments = buildSegmentsForHour(isoDay, hourIdx, effectiveEnd);
+
+    // Se nao houver nenhum dado para a hora, mostra cinza (sem inventar passado)
+    if(!segments || segments.length === 0){
       const fill = document.createElement("div");
       fill.className = "pfill np";
       fill.style.width = "100%";
       bar.appendChild(fill);
-      return { bar, lastState: null };
+      return bar;
     }
 
-    for(const seg of info.segs){
-      const left = ((seg.start_ms - info.startMs) / totalMs) * 100;
-      const width = ((seg.end_ms - seg.start_ms) / totalMs) * 100;
+    // background base
+    const base = document.createElement("div");
+    base.className = "pfill np";
+    base.style.zIndex = "0";
+    base.style.width = "100%";
+    bar.appendChild(base);
+
+    const total = Math.max(1, effectiveEnd - hourStartMs);
+
+    segments.forEach(seg => {
+      const segStart = Math.max(hourStartMs, seg.start_ms);
+      const segEnd = Math.max(segStart, Math.min(effectiveEnd, seg.end_ms));
+      if(segEnd <= segStart) return;
+
+      const leftPct = ((segStart - hourStartMs) / total) * 100;
+      const widthPct = ((segEnd - segStart) / total) * 100;
 
       const fill = document.createElement("div");
-      fill.className = "pfill";
-      fill.style.position = "absolute";
-      fill.style.left = left.toFixed(4) + "%";
-      fill.style.width = Math.max(0, width).toFixed(4) + "%";
-
-      if(seg.state === "RUN") fill.classList.add("run");
-      else if(seg.state === "STOP") fill.classList.add("stop");
-      else fill.classList.add("np");
+      fill.className = "pfill " + stateToCss(seg.state);
+      fill.style.zIndex = "1";
+      fill.style.left = leftPct.toFixed(4) + "%";
+      fill.style.width = widthPct.toFixed(4) + "%";
 
       bar.appendChild(fill);
-      lastState = seg.state;
-    }
+    });
 
-    // make bar relative for absolute segments
-    bar.style.position = "relative";
-
-    return { bar, lastState };
+    return bar;
   }
 
 
@@ -1532,58 +1762,77 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   }
 
 
-  function renderDayDetail(payload){
-    const isoDay = payload && payload.date ? String(payload.date) : "";
-    const effectiveId = payload && payload.effective_machine_id ? String(payload.effective_machine_id) : "";
-    const machineId = payload && payload.machine_id ? String(payload.machine_id) : "";
+  function renderDayDetail(isoDay){
+    const dayIso = String(isoDay || "");
+    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(dayIso);
 
-    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay) + (effectiveId && effectiveId !== machineId ? (" (id efetivo: " + effectiveId + ")") : "");
-
-    const hours = (payload && Array.isArray(payload.hours)) ? payload.hours : [];
     dayHourTbody.innerHTML = "";
 
-    if(!hours.length){
-      dayHourTbody.innerHTML = '<tr><td colspan="2">Sem dados.</td></tr>';
-      return;
-    }
-
-    hours.forEach(h=>{
-      const hourIdx = Number(h.hour ?? h.hora ?? h.hora_idx ?? 0);
+    for(let h=0; h<24; h++){
       const tr = document.createElement("tr");
 
       const tdH = document.createElement("td");
-      tdH.textContent = String(hourIdx).padStart(2,"0") + ":00";
+      tdH.className = "hour-col";
+      tdH.textContent = String(h).padStart(2,"0") + ":00";
       tr.appendChild(tdH);
 
       const tdD = document.createElement("td");
+      tdD.className = "detail-col";
 
-      const wrap = document.createElement("div");
-      wrap.className = "hwrap";
+      const future = isFutureHour(dayIso, h);
+      const inTurno = isHourInTurno(h);
 
-      const meta = Number(h.meta ?? 0) || 0;
-      const prod = Number(h.produzido ?? 0) || 0;
-      const ref = Number(h.refugo ?? 0) || 0;
+      // Estado base da hora: olha o ultimo estado conhecido dentro da hora (rastro).
+      const lastState = getLastStateForHour(dayIso, h);
 
-      const pills = document.createElement("div");
-      pills.className = "pills";
-      pills.innerHTML =
-        '<span class="pill">Meta ' + fmtInt(meta) + '</span>' +
-        '<span class="pill">Prod ' + fmtInt(prod) + '</span>' +
-        '<span class="pill">Ref ' + fmtInt(ref) + '</span>';
-      wrap.appendChild(pills);
-
-      const segs = Array.isArray(h.segments) ? h.segments : [];
-      if(segs.length){
-        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs));
-      }else{
-        wrap.appendChild(buildLiveProgressBar(isoDay, hourIdx, h));
+      let label = "SEM DADOS";
+      if(future || !inTurno){
+        label = "FORA DO HORARIO";
+      }else if(lastState === "RUN"){
+        label = "PRODUZINDO";
+      }else if(lastState === "STOP"){
+        label = "PARADO";
       }
 
-      tdD.appendChild(wrap);
-      tr.appendChild(tdD);
+      const title = document.createElement("div");
+      title.className = "hour-title";
+      title.textContent = label;
+      tdD.appendChild(title);
 
+      const bar = buildTrailBar(dayIso, h, (future || !inTurno));
+      tdD.appendChild(bar);
+
+      tr.appendChild(tdD);
       dayHourTbody.appendChild(tr);
-    });
+    }
+  }
+
+  function getLastStateForHour(isoDay, hourIdx){
+    const hourStartMs = toHourStartMsLocal(isoDay, hourIdx);
+    const hourEndMs = hourStartMs + (60*60*1000);
+    const nowMs = Date.now();
+    const effectiveEnd = Math.min(hourEndMs, nowMs);
+
+    let last = null;
+
+    // 1) ultimo estado antes do inicio da hora
+    for(let i=stateTrail.length-1;i>=0;i--){
+      const ev = stateTrail[i];
+      if(ev.ts_ms < hourStartMs){
+        last = ev.state;
+        break;
+      }
+    }
+
+    // 2) estados dentro da hora ate o fim efetivo
+    for(let i=0;i<stateTrail.length;i++){
+      const ev = stateTrail[i];
+      if(ev.ts_ms < hourStartMs) continue;
+      if(ev.ts_ms > effectiveEnd) break;
+      last = ev.state;
+    }
+
+    return last;
   }
   async function refreshDayModal(preserveScroll){
     if(!dayModalCurrentDay) return;
@@ -1592,8 +1841,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const prevScroll = bodyEl ? bodyEl.scrollTop : 0;
 
     try{
-      const payload = await fetchDayDetail(dayModalCurrentDay);
-      renderDayDetail(payload);
+      renderDayDetail(dayModalCurrentDay);
     }catch(err){
       console.error(err);
       dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
@@ -2045,8 +2293,24 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+
+      // Atualiza rastro somente com o estado atual (presente).
+      // Usa timestamp do ultimo evento visto, quando existir; senao usa agora.
+      const tsMs =
+        (status && Number.isFinite(Number(status._last_count_ts_ms)) ? Number(status._last_count_ts_ms) : null) ??
+        (status && Number.isFinite(Number(status._last_esp_ts_ms_seen)) ? Number(status._last_esp_ts_ms_seen) : null) ??
+        Date.now();
+
+      const st = normalizeStateFromStatus(status);
+      appendTrailState(st, tsMs);
+
       applyLiveOverride(status);
       applyFilterAndRender();
+
+      // Se o modal do dia estiver aberto, re-renderiza para refletir o estado atual.
+      if(dayModalEl && dayModalEl.style && dayModalEl.style.display === 'block'){
+        refreshDayModal(true);
+      }
     }catch(e){
       // silencioso: historico continua com cache
     }
@@ -2135,6 +2399,7 @@ if(dayModalClose){
   }
 
   function init(){
+    loadTrail();
     fetchHistorico();
 
     if(liveTimer){
@@ -2142,6 +2407,8 @@ if(dayModalClose){
       liveTimer = null;
     }
 
+    // Atualiza imediatamente e depois a cada 5s
+    refreshLive();
     liveTimer = setInterval(refreshLive, 5000);
   }
 
@@ -2153,4 +2420,9 @@ if(dayModalClose){
 })();
 </script>
 
-{% endblock %}
+
+    </div>
+  </main>
+
+</body>
+</html>
