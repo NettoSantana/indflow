@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 10:00 America/Bahia
-# MOTIVO: Corrigir /api/producao/detalhe-dia (500) e zerados: resolver coluna de timestamp (schemas diferentes), remover timezone dos parâmetros SQL e parsear timestamps (Z/offset).
+# LAST_RECODE: 2026-02-23 21:00 America/Bahia
+# MOTIVO: Corrigir erro 500 em /producao/api/producao/detalhe-dia (ValueError no LIKE) ajustando padrões LIKE para machine_id scoped/legacy.
 
 from __future__ import annotations
 
@@ -148,8 +148,8 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
     # Tenta casar pelos 2 formatos:
     # 1) <cliente>::<maquina> -> termina com ::mid
     # 2) <maquina>::<op/ctx>  -> comeca com mid::
-    like_suffix = f"%::%s" % mid
-    like_prefix = f"%s::%%" % mid
+    like_suffix = f"%::{mid}"
+    like_prefix = f"{mid}::%"
 
     try:
         row = _fetch_one(conn, sql, (data_ref, like_suffix, like_prefix))
