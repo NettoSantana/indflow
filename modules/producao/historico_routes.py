@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-22 20:39 America/Bahia
-# MOTIVO: Corrigir resolucao do machine_id efetivo para dias (suportar padrao maquina::op e cliente::maquina) evitando horas/meta zeradas no modal.
+# LAST_RECODE: 2026-02-23 13:17 America/Bahia
+# MOTIVO: Corrigir resolucao do machine_id efetivo usando producao_evento (preferir id escopado com eventos no dia) para evitar horas/meta zeradas no modal do historico.
 
 
 from __future__ import annotations
@@ -92,57 +92,80 @@ def _resolve_data_col(conn: sqlite3.Connection, table: str) -> str:
     return "data_ref"
 
 
-def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> str:
+def _resolve_effective_machine_id(conn, machine_id: str, date_str: str) -> str:
     """
-    Regra: usar UMA unica fonte por dia.
+    Resolve o machine_id efetivo para consulta de eventos (producao_evento).
 
-    - Se ja vier scoped (tem '::'), usa direto.
-    - Se vier legacy (sem '::'), tentamos achar um machine_id "efetivo" (scoped) na producao_diaria
-      para o mesmo dia, pegando o mais relevante por 'produzido'.
+    Motivo:
+    - Alguns ambientes gravam produção diária (producao_diaria) em machine_id "legado" (ex.: maquina005),
+      porém os eventos (producao_evento) podem estar gravados em um machine_id "escopado" (ex.: maquina005::op0000).
+    - Se consultarmos os eventos usando o id legado, o detalhe por hora fica todo zerado.
 
-    Compatibilidade:
-    - Padrao 1 (antigo): <cliente>::<maquina>
-    - Padrao 2 (novo): <maquina>::<op/ctx>
-
-    Se nao encontrar nada, cai no legacy.
+    Estratégia (simples e robusta):
+    1) Se existir um id "escopado" com eventos no dia, usar ele.
+    2) Caso contrário, usar o id original recebido.
     """
-    mid = (machine_id or "").strip()
-    if not mid:
-        return mid
-    if "::" in mid:
-        return mid
+    if not machine_id:
+        return machine_id
 
-    col = _resolve_data_col(conn, "producao_diaria")
-
-    sql = f"""
-        SELECT machine_id
-          FROM producao_diaria
-         WHERE {col} = ?
-           AND (
-                machine_id LIKE ?
-             OR machine_id LIKE ?
-           )
-         ORDER BY produzido DESC
-         LIMIT 1
-    """
-
-    # Tenta casar pelos 2 formatos:
-    # 1) <cliente>::<maquina> -> termina com ::mid
-    # 2) <maquina>::<op/ctx>  -> comeca com mid::
-    like_suffix = f"%::%s" % mid
-    like_prefix = f"%s::%%" % mid
-
+    # Dia (início inclusivo, fim exclusivo)
     try:
-        row = _fetch_one(conn, sql, (data_ref, like_suffix, like_prefix))
-        if row and row["machine_id"]:
-            return str(row["machine_id"])
+        day = datetime.strptime(date_str, "%Y-%m-%d").date()
     except Exception:
-        pass
+        return machine_id
 
-    return mid
+    day_start = datetime.combine(day, datetime.min.time())
+    day_end = day_start + timedelta(days=1)
 
+    # Helpers de colunas (compat)
+    ts_col = _resolve_ts_col(conn, "producao_evento")
+    data_col = _resolve_data_col(conn, "producao_evento")  # pode ser None
 
+    cur = conn.cursor()
 
+    # 1) Tenta encontrar um machine_id escopado com mais eventos no dia.
+    #    Preferimos "prefix::%" mas também aceitamos "%::prefix" (caso de legado invertido).
+    candidates = []
+    patterns = [f"{machine_id}::%", f"%::{machine_id}"]
+    for like_pattern in patterns:
+        if ts_col:
+            q = f"""
+                SELECT machine_id, COUNT(*) as c
+                FROM producao_evento
+                WHERE machine_id LIKE ?
+                  AND {ts_col} >= ?
+                  AND {ts_col} < ?
+                GROUP BY machine_id
+                ORDER BY c DESC
+                LIMIT 1
+            """
+            row = cur.execute(q, (like_pattern, day_start.isoformat(), day_end.isoformat())).fetchone()
+        elif data_col:
+            # fallback (menos preciso) se só tiver coluna data
+            q = f"""
+                SELECT machine_id, COUNT(*) as c
+                FROM producao_evento
+                WHERE machine_id LIKE ?
+                  AND {data_col} = ?
+                GROUP BY machine_id
+                ORDER BY c DESC
+                LIMIT 1
+            """
+            row = cur.execute(q, (like_pattern, date_str)).fetchone()
+        else:
+            row = None
+
+        if row and row[0]:
+            candidates.append((row[0], int(row[1] or 0)))
+
+    if candidates:
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        best_mid = candidates[0][0]
+        if best_mid:
+            return best_mid
+
+    # 2) Se não achou escopado com eventos, mantém o original.
+    return machine_id
 
 def _parse_date_any(s: str | None) -> date | None:
     if not s:

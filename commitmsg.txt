@@ -1,5 +1,6 @@
-﻿fix(api): detalhe-dia usa machine_id efetivo (scoped) para evitar horas zeradas no modal
+﻿fix(historico): resolver machine_id efetivo no modal (compat maquina::op e cliente::maquina)
 
-- Resolve effective_machine_id por dia via producao_diaria
-- Usa effective_machine_id nas queries de producao_evento e producao_horaria/refugo_horaria
-- Retorna effective_machine_id no JSON (debug) e fecha conexao quando aplicavel
+- Ajusta _resolve_effective_machine_id para encontrar scoped id do dia em dois formatos:
+  1) %::<maquina>
+  2) <maquina>::%
+- Evita horas/meta/prod/ref zeradas no detalhe-dia quando o banco usa maquina::op
