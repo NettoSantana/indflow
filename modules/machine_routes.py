@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-21 17:00 America/Bahia
-# MOTIVO: Suportar configuracao v2 (multiplos turnos + pausas planejadas) no POST /machine/config, com persistencia JSON (SQLite) e compatibilidade.
+# LAST_RECODE: 2026-02-23 18:26 America/Bahia
+# MOTIVO: Persistir eventos de estado (RUN/STOP/NP) no /machine/status para manter historico de cores (verde/vermelho/cinza) e suportar timeline.
 
 import os
 import json
@@ -59,6 +59,106 @@ def _safe_int(v, default=0):
         return int(v)
     except Exception:
         return default
+
+
+def _ensure_machine_state_event_schema(conn: sqlite3.Connection) -> None:
+    """
+    Garante tabela de eventos de estado da maquina (timeline).
+
+    Salva apenas transicoes (quando muda de RUN/STOP/NP).
+    """
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS machine_state_event ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "machine_id TEXT NOT NULL, "
+        "effective_machine_id TEXT NOT NULL, "
+        "cliente_id TEXT, "
+        "ts_ms INTEGER NOT NULL, "
+        "ts_iso TEXT NOT NULL, "
+        "data_ref TEXT NOT NULL, "
+        "hora_idx INTEGER NOT NULL, "
+        "state TEXT NOT NULL"
+        ")"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mse_mid_day ON machine_state_event (effective_machine_id, data_ref, ts_ms)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mse_mid_ts ON machine_state_event (effective_machine_id, ts_ms)"
+    )
+
+
+def _get_last_machine_state(conn: sqlite3.Connection, effective_machine_id: str) -> dict | None:
+    try:
+        row = conn.execute(
+            "SELECT state, ts_ms, data_ref, hora_idx FROM machine_state_event "
+            "WHERE effective_machine_id=? ORDER BY ts_ms DESC LIMIT 1",
+            (effective_machine_id,),
+        ).fetchone()
+        if not row:
+            return None
+        return {"state": row[0], "ts_ms": row[1], "data_ref": row[2], "hora_idx": row[3]}
+    except Exception:
+        return None
+
+
+def _record_machine_state_transition(
+    raw_machine_id: str,
+    effective_machine_id: str,
+    cliente_id: str | None,
+    state: str,
+    agora: datetime,
+    data_ref: str,
+    hora_idx: int,
+) -> None:
+    """
+    Persiste a transicao de estado (RUN/STOP/NP) se mudou em relacao ao ultimo evento.
+    """
+    st = (state or "").strip().upper()
+    if st not in ("RUN", "STOP", "NP"):
+        return
+
+    ts_ms = int(agora.timestamp() * 1000)
+    ts_iso = agora.isoformat()
+
+    conn = get_db()
+    try:
+        _ensure_machine_state_event_schema(conn)
+        last = _get_last_machine_state(conn, effective_machine_id)
+        if last and str(last.get("state") or "").upper() == st:
+            return
+        conn.execute(
+            "INSERT INTO machine_state_event (machine_id, effective_machine_id, cliente_id, ts_ms, ts_iso, data_ref, hora_idx, state) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (raw_machine_id, effective_machine_id, cliente_id, ts_ms, ts_iso, data_ref, int(hora_idx), st),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _infer_state_for_timeline(m: dict, hora_atual: int | None) -> str:
+    """
+    Decide estado apenas para a barra (sem meta):
+      - NP: fora de programacao (np_por_hora_24[h] > 0)
+      - RUN: status_ui == PRODUZINDO
+      - STOP: caso contrario
+    """
+    try:
+        if isinstance(hora_atual, int) and 0 <= hora_atual < 24:
+            np24 = m.get("np_por_hora_24") or [0] * 24
+            if isinstance(np24, list) and len(np24) == 24 and _safe_int(np24[hora_atual], 0) > 0:
+                return "NP"
+    except Exception:
+        pass
+
+    try:
+        if (m.get("status_ui") or "").strip().upper() == "PRODUZINDO":
+            return "RUN"
+    except Exception:
+        pass
+
+    return "STOP"
 
 def _calc_produzido_from_ops(ops: list) -> int:
     """
@@ -2628,6 +2728,16 @@ def machine_status():
         m["percentual_hora"] = 0
         m["fora_turno"] = True
         m["producao_hora_liquida"] = np_prod
+        try:
+            agora_evt = now_bahia()
+            hora_evt = int(agora_evt.hour)
+            data_ref_evt = dia_operacional_ref_str(agora_evt)
+            cid_evt = (m.get("cliente_id") or None)
+            raw_mid = _norm_machine_id(machine_id)
+            eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
+            _record_machine_state_transition(raw_mid, eff_mid, cid_evt, "NP", agora_evt, data_ref_evt, hora_evt)
+        except Exception:
+            pass
         return jsonify(m)
 
     try:
@@ -2645,6 +2755,17 @@ def machine_status():
     else:
         m["producao_hora_liquida"] = ph
 
+    try:
+        agora_evt = now_bahia()
+        hora_evt = int(agora_evt.hour)
+        data_ref_evt = dia_operacional_ref_str(agora_evt)
+        cid_evt = (m.get("cliente_id") or None)
+        raw_mid = _norm_machine_id(machine_id)
+        eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
+        st_evt = _infer_state_for_timeline(m, hora_evt)
+        _record_machine_state_transition(raw_mid, eff_mid, cid_evt, st_evt, agora_evt, data_ref_evt, hora_evt)
+    except Exception:
+        pass
     return jsonify(m)
 
 
