@@ -1,6 +1,5 @@
-﻿feat(machine): persistir rastro de estado (RUN/STOP/NP) no /machine/status
+﻿fix(historico): gerar segmentos RUN/STOP via machine_state_event no detalhe-dia
 
-- Cria tabela machine_state_event (SQLite) e indices
-- Salva transicoes de estado para formar timeline de cores (verde/vermelho/cinza)
-- Estado NP baseado em np_por_hora_24 (fora de programacao)
-- Sem uso de meta/calculos para essa barra
+- Converte machine_state_event (transicoes RUN/STOP/NP) em intervalos RUN por dia
+- Mantem rastro real das cores (verde/vermelho/cinza) no historico sem depender de meta/calculo
+- Fallback seguro: se nao existir tabela/eventos, mantem comportamento anterior (STOP/NP)
