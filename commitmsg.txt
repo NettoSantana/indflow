@@ -1,6 +1,5 @@
-﻿fix(historico): modal por hora mostrar somente estado (verde/verm/cinza) usando /machine/status
+﻿fix(historico): rastro ao vivo do estado (verde/vermelho) via /machine/status com persistencia
 
-- Modal por hora agora exibe apenas PRODUZINDO / PARADO / FORA DO HORARIO
-- Hora atual usa estado ao vivo do /machine/status (mesmo do card do Dashboard)
-- Horas passadas usam segments quando existir
-- Remove dependencia de producao/meta para cor
+- Desenha segmentos por hora somente com run/status_ui (sem meta/producao/segments)
+- Registra mudancas de estado em localStorage (continua entre dias, nao zera 00:00)
+- Horas futuras sempre cinza
