@@ -1,4 +1,4 @@
-﻿fix(historico): usar machine_id efetivo por eventos para preencher modal por hora
+﻿fix(historico): corrigir barras do modal por hora (nao preencher 100% na hora atual)
 
-- Resolve effective_machine_id pelo producao_evento no dia (prefere id escopado com mais eventos)
-- Evita modal detalhe-dia zerado quando producao_diaria usa id legado e eventos usam id escopado
+- Timeline RUN/STOP/NP agora normaliza por 1h completa (19:30 = 50% do horario, nao 100%)
+- Barra simples agora reflete Prod/Meta (nao tempo decorrido)
