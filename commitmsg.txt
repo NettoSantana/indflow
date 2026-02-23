@@ -1,5 +1,5 @@
-﻿fix(historico): rastro ao vivo do estado (verde/vermelho) via /machine/status com persistencia
+﻿fix(historico): pintar barras por estado atual com rastro (RUN/STOP/NP)
 
-- Desenha segmentos por hora somente com run/status_ui (sem meta/producao/segments)
-- Registra mudancas de estado em localStorage (continua entre dias, nao zera 00:00)
-- Horas futuras sempre cinza
+- Modal do dia agora mostra apenas estado: PRODUZINDO (verde), PARADO (vermelho), FORA DO HORARIO (cinza)
+- Rastro de estado persistido em localStorage e desenhado como segmentos por hora
+- Horas futuras sempre cinza; nao reconstroi passado, apenas registra a partir de agora
