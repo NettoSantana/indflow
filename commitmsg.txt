@@ -1,5 +1,5 @@
-﻿fix(producao): corrigir detalhe-dia e adicionar backfill manual de producao_horaria
+﻿fix(producao): detalhe-dia padronizado para producao_horaria (sem producao_evento)
 
-- Detalhe-dia nao depende de qtd_boas/qtd_refugo em producao_evento (evita 500 no MAIN)
-- Detalhe-dia usa producao_horaria para meta/produzido/refugo
-- Adiciona POST /producao/api/producao/backfill-horaria para preencher producao_horaria a partir de producao_diaria
+- Remove dependencia de producao_evento no /producao/api/producao/detalhe-dia
+- Meta/produzido/refugo vem apenas de producao_horaria
+- Mantem endpoint de backfill manual para preencher producao_horaria via producao_diaria
