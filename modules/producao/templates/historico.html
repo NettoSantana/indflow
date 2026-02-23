@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 19:30 America/Bahia
-MOTIVO: Corrigir erro no modal de detalhe do dia: fmtInt nao definido (JS quebrava e mostrava "Falha ao carregar detalhe do dia.").
+LAST_RECODE: 2026-02-23 19:40 America/Bahia
+MOTIVO: Corrigir barras do modal por hora: timeline RUN/STOP/NP nao pode preencher 100% na hora atual; e barra simples deve refletir progresso Prod/Meta (nao tempo decorrido).
 -->
 
 <!--
@@ -1193,7 +1193,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const isCurrentHour = isToday && (now.getHours() === hourIdx);
     const capEnd = (isCurrentHour && now < hourEnd) ? now : hourEnd;
 
-    const totalMs = Math.max(1, capEnd.getTime() - hourStart.getTime());
+    const totalMs = Math.max(1, hourEnd.getTime() - hourStart.getTime());
 
     function parseInDay(dayIso, value){
       if(value === null || value === undefined) return null;
@@ -1262,7 +1262,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     let cls = "stop";
     if(meta <= 0){
       cls = "np";
-    }else if(prod > 0){
+    }else if(prod >= meta){
       cls = "run";
     }else{
       cls = "stop";
@@ -1275,25 +1275,10 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
     let pct = 0;
 
-    if(day === today){
-      const curH = now.getHours();
-      if(hourIdx < curH){
-        pct = 100;
-      }else if(hourIdx === curH){
-        const minutes = now.getMinutes() + (now.getSeconds() / 60);
-        pct = clamp((minutes / 60) * 100, 0, 100);
-      }else{
-        pct = 0;
-      }
+    if(meta > 0){
+      pct = clamp((prod / meta) * 100, 0, 100);
     }else{
-      // dias passados: cheio. dias futuros: vazio.
-      const dDay = new Date(day + "T00:00:00");
-      const dToday = new Date(today + "T00:00:00");
-      if(!isNaN(dDay.getTime()) && !isNaN(dToday.getTime()) && dDay.getTime() < dToday.getTime()){
-        pct = 100;
-      }else{
-        pct = 0;
-      }
+      pct = 0;
     }
 
     fill.style.width = pct.toFixed(3) + "%";
