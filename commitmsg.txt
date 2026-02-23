@@ -1,7 +1,6 @@
-﻿fix(historico): modal por hora como semaforo (verde=produzindo, vermelho=parado, cinza=fora do horario)
+﻿fix(historico): modal por hora mostrar somente estado (verde/verm/cinza) usando /machine/status
 
-- Barra por hora agora eh estado (nao progresso/meta)
-- Verde quando houve producao na hora (Prod>0 ou segmento RUN)
-- Vermelho quando meta>0 e nao houve producao
-- Cinza quando meta=0 (fora do horario)
-- Remove pill de Meta para evitar confusao
+- Modal por hora agora exibe apenas PRODUZINDO / PARADO / FORA DO HORARIO
+- Hora atual usa estado ao vivo do /machine/status (mesmo do card do Dashboard)
+- Horas passadas usam segments quando existir
+- Remove dependencia de producao/meta para cor
