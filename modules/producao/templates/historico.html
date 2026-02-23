@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 19:40 America/Bahia
-MOTIVO: Corrigir barras do modal por hora: timeline RUN/STOP/NP nao pode preencher 100% na hora atual; e barra simples deve refletir progresso Prod/Meta (nao tempo decorrido).
+LAST_RECODE: 2026-02-23 20:05 America/Bahia
+MOTIVO: Modal por hora mostrar somente ESTADO (verde=PRODUZINDO, vermelho=PARADO, cinza=FORA DO HORARIO). Para hora atual, usa o estado ao vivo do /machine/status (mesmo estado exibido no card do Dashboard). Para horas passadas, usa segments quando existir.
 -->
 
 <!--
@@ -1175,11 +1175,121 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return null;
   }
 
+  
   function clamp(n, a, b){
     return Math.max(a, Math.min(b, n));
   }
 
-  function buildHourBar(isoDay, hourIdx, segments){
+  function normalizeLiveStateFromStatus(st){
+    if(!st || typeof st !== "object") return "";
+
+    // tenta chaves comuns
+    const cands = [
+      st.estado,
+      st.state,
+      st.status,
+      st.machine_state,
+      st.modo,
+      st.situacao,
+      st.label
+    ];
+
+    for(const v of cands){
+      if(v === null || v === undefined) continue;
+      const s = String(v).toUpperCase().trim();
+      if(!s) continue;
+      if(s.includes("PRODUZ") || s === "RUN" || s === "ON" || s === "RUNNING") return "RUN";
+      if(s.includes("PARAD") || s === "STOP" || s === "OFF" || s === "STOPPED") return "STOP";
+    }
+
+    // tenta flags booleanas
+    const flagsTrue = [st.produzindo, st.producing, st.is_producing, st.is_running, st.running];
+    for(const f of flagsTrue){
+      if(f === true) return "RUN";
+    }
+
+    const flagsFalse = [st.parado, st.stopped, st.is_stopped];
+    for(const f of flagsFalse){
+      if(f === true) return "STOP";
+    }
+
+    return "";
+  }
+
+  function hourHasRunSegment(segs){
+    if(!Array.isArray(segs) || !segs.length) return false;
+    for(const seg of segs){
+      const raw = seg && (seg.state || seg.status || seg.color);
+      const s = String(raw || "").toUpperCase().trim();
+      if(s.includes("PRODUZ") || s === "RUN" || s === "PROD" || s === "GREEN") return true;
+    }
+    return false;
+  }
+
+  function hourHasStopSegment(segs){
+    if(!Array.isArray(segs) || !segs.length) return false;
+    for(const seg of segs){
+      const raw = seg && (seg.state || seg.status || seg.color);
+      const s = String(raw || "").toUpperCase().trim();
+      if(s.includes("PARAD") || s === "STOP" || s === "RED") return true;
+    }
+    return false;
+  }
+
+  function computeHourState(isoDay, hourIdx, h){
+    const meta = Number(h && (h.meta ?? h.meta_hora ?? 0)) || 0;
+    const segs = Array.isArray(h && h.segments) ? h.segments : [];
+
+    // fora do horario
+    if(meta <= 0) return "np";
+
+    const today = todayIsoLocal();
+    const now = new Date();
+
+    // hora atual do dia atual: usa estado ao vivo (mesmo do card)
+    if(String(isoDay) === today && now.getHours() === Number(hourIdx)){
+      const live = normalizeLiveStateFromStatus(lastMachineStatus);
+      if(live === "RUN") return "run";
+      if(live === "STOP") return "stop";
+      // fallback: se nao reconheceu, usa segmentos
+    }
+
+    // horas passadas: usa segmentos se existirem
+    if(segs.length){
+      if(hourHasRunSegment(segs)) return "run";
+      if(hourHasStopSegment(segs)) return "stop";
+      return "stop";
+    }
+
+    // sem segmentos: sem criterio confiavel -> trata como parado dentro do horario
+    return "stop";
+  }
+
+  function stateLabel(state){
+    if(state === "run") return "PRODUZINDO";
+    if(state === "stop") return "PARADO";
+    return "FORA DO HORARIO";
+  }
+
+  function buildStateBar(state){
+    const bar = document.createElement("div");
+    bar.className = "pbar";
+
+    const fill = document.createElement("div");
+    fill.className = "pfill";
+
+    let cls = "np";
+    if(state === "run") cls = "run";
+    else if(state === "stop") cls = "stop";
+    else cls = "np";
+
+    fill.classList.add(cls);
+    fill.style.width = "100%";
+
+    bar.appendChild(fill);
+    return bar;
+  }
+function buildHourBar(isoDay, hourIdx, segments){
     const bar = document.createElement("div");
     bar.className = "tbar";
 
@@ -1350,24 +1460,14 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
       const wrap = document.createElement("div");
       wrap.className = "hwrap";
 
-      const meta = Number(h.meta ?? 0) || 0;
-      const prod = Number(h.produzido ?? 0) || 0;
-      const ref = Number(h.refugo ?? 0) || 0;
+      const state = computeHourState(isoDay, hourIdx, h);
 
       const pills = document.createElement("div");
       pills.className = "pills";
-      pills.innerHTML =
-        '<span class="pill">Meta ' + fmtInt(meta) + '</span>' +
-        '<span class="pill">Prod ' + fmtInt(prod) + '</span>' +
-        '<span class="pill">Ref ' + fmtInt(ref) + '</span>';
+      pills.innerHTML = '<span class="pill">' + stateLabel(state) + '</span>';
       wrap.appendChild(pills);
 
-      const segs = Array.isArray(h.segments) ? h.segments : [];
-      if(segs.length){
-        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs));
-      }else{
-        wrap.appendChild(buildLiveProgressBar(isoDay, hourIdx, h));
-      }
+      wrap.appendChild(buildStateBar(state));
 
       tdD.appendChild(wrap);
       tr.appendChild(tdD);
@@ -1762,6 +1862,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   let cache = null;
   let liveTimer = null;
+  let lastMachineStatus = null;
 
   async function fetchStatus(){
     if(!machineId) return null;
@@ -1830,6 +1931,7 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+      lastMachineStatus = status;
       applyLiveOverride(status);
       applyFilterAndRender();
     }catch(e){
