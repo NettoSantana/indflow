@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 17:10 America/Bahia
-# MOTIVO: Diagnostico do 500 no endpoint /api/producao/detalhe-dia (retornar erro em JSON e logar traceback).
+# LAST_RECODE: 2026-02-23 21:05 America/Bahia
+# MOTIVO: Corrigir 500 do detalhe-dia (remover dependencia de qtd_boas em producao_evento) e adicionar endpoint manual de backfill para producao_horaria.
 
 from __future__ import annotations
 
