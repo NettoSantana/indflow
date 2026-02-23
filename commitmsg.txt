@@ -1,7 +1,4 @@
-﻿fix(historico): usar segmentos RUN/STOP/NP na barra e atualizar modal em tempo real
+﻿fix(historico): usar machine_id efetivo por eventos para preencher modal por hora
 
-Modal detalhe-dia passa a renderizar barra por segmentos (verde/vermelho/cinza) quando backend envia hours[].segments
-
-Atualiza automaticamente a cada 5s enquanto o modal estiver aberto para refletir parada/produção do momento
-
-Mantém fallback antigo quando não houver segments
+- Resolve effective_machine_id pelo producao_evento no dia (prefere id escopado com mais eventos)
+- Evita modal detalhe-dia zerado quando producao_diaria usa id legado e eventos usam id escopado
