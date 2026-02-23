@@ -1,7 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 13:17 America/Bahia
-# MOTIVO: Corrigir resolucao do machine_id efetivo usando producao_evento (preferir id escopado com eventos no dia) para evitar horas/meta zeradas no modal do historico.
-
+# LAST_RECODE: 2026-02-23 10:00 America/Bahia
+# MOTIVO: Corrigir /api/producao/detalhe-dia (500) e zerados: resolver coluna de timestamp (schemas diferentes), remover timezone dos parâmetros SQL e parsear timestamps (Z/offset).
 
 from __future__ import annotations
 
@@ -24,8 +23,36 @@ try:
 except Exception:
     get_machine = None
 
-
 TZ_BAHIA = ZoneInfo("America/Bahia")
+
+def _to_sql_dt(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+def _parse_ts_any(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except Exception:
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                dt = datetime.strptime(s, fmt)
+                break
+            except Exception:
+                dt = None
+        if dt is None:
+            return None
+    if getattr(dt, "tzinfo", None) is not None:
+        try:
+            dt = dt.astimezone(TZ_BAHIA).replace(tzinfo=None)
+        except Exception:
+            dt = dt.replace(tzinfo=None)
+    return dt
 
 historico_bp = Blueprint(
     "historico_bp",
@@ -33,12 +60,10 @@ historico_bp = Blueprint(
     template_folder="templates",
 )
 
-
 def _sqlite_connect(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
-
 
 def _get_conn() -> sqlite3.Connection:
     if callable(get_db):
@@ -46,7 +71,6 @@ def _get_conn() -> sqlite3.Connection:
 
     db_path = os.environ.get("INDFLOW_DB_PATH") or os.environ.get("DB_PATH") or "/data/indflow.db"
     return _sqlite_connect(db_path)
-
 
 def _safe_int(v, default: int = 0) -> int:
     try:
@@ -56,11 +80,9 @@ def _safe_int(v, default: int = 0) -> int:
     except Exception:
         return default
 
-
 def _fetch_one(conn: sqlite3.Connection, sql: str, params: tuple):
     cur = conn.execute(sql, params)
     return cur.fetchone()
-
 
 def _fetch_scalar(conn: sqlite3.Connection, sql: str, params: tuple, default=0):
     row = _fetch_one(conn, sql, params)
@@ -72,7 +94,6 @@ def _fetch_scalar(conn: sqlite3.Connection, sql: str, params: tuple, default=0):
         return default
     return default if val is None else val
 
-
 def _has_coluna(conn: sqlite3.Connection, table: str, col: str) -> bool:
     try:
         rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -83,7 +104,6 @@ def _has_coluna(conn: sqlite3.Connection, table: str, col: str) -> bool:
         return False
     return False
 
-
 def _resolve_data_col(conn: sqlite3.Connection, table: str) -> str:
     if _has_coluna(conn, table, "data_ref"):
         return "data_ref"
@@ -91,81 +111,54 @@ def _resolve_data_col(conn: sqlite3.Connection, table: str) -> str:
         return "data"
     return "data_ref"
 
-
-def _resolve_effective_machine_id(conn, machine_id: str, date_str: str) -> str:
+def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> str:
     """
-    Resolve o machine_id efetivo para consulta de eventos (producao_evento).
+    Regra: usar UMA unica fonte por dia.
 
-    Motivo:
-    - Alguns ambientes gravam produção diária (producao_diaria) em machine_id "legado" (ex.: maquina005),
-      porém os eventos (producao_evento) podem estar gravados em um machine_id "escopado" (ex.: maquina005::op0000).
-    - Se consultarmos os eventos usando o id legado, o detalhe por hora fica todo zerado.
+    - Se ja vier scoped (tem '::'), usa direto.
+    - Se vier legacy (sem '::'), tentamos achar um machine_id "efetivo" (scoped) na producao_diaria
+      para o mesmo dia, pegando o mais relevante por 'produzido'.
 
-    Estratégia (simples e robusta):
-    1) Se existir um id "escopado" com eventos no dia, usar ele.
-    2) Caso contrário, usar o id original recebido.
+    Compatibilidade:
+    - Padrao 1 (antigo): <cliente>::<maquina>
+    - Padrao 2 (novo): <maquina>::<op/ctx>
+
+    Se nao encontrar nada, cai no legacy.
     """
-    if not machine_id:
-        return machine_id
+    mid = (machine_id or "").strip()
+    if not mid:
+        return mid
+    if "::" in mid:
+        return mid
 
-    # Dia (início inclusivo, fim exclusivo)
+    col = _resolve_data_col(conn, "producao_diaria")
+
+    sql = f"""
+        SELECT machine_id
+          FROM producao_diaria
+         WHERE {col} = ?
+           AND (
+                machine_id LIKE ?
+             OR machine_id LIKE ?
+           )
+         ORDER BY produzido DESC
+         LIMIT 1
+    """
+
+    # Tenta casar pelos 2 formatos:
+    # 1) <cliente>::<maquina> -> termina com ::mid
+    # 2) <maquina>::<op/ctx>  -> comeca com mid::
+    like_suffix = f"%::%s" % mid
+    like_prefix = f"%s::%%" % mid
+
     try:
-        day = datetime.strptime(date_str, "%Y-%m-%d").date()
+        row = _fetch_one(conn, sql, (data_ref, like_suffix, like_prefix))
+        if row and row["machine_id"]:
+            return str(row["machine_id"])
     except Exception:
-        return machine_id
+        pass
 
-    day_start = datetime.combine(day, datetime.min.time())
-    day_end = day_start + timedelta(days=1)
-
-    # Helpers de colunas (compat)
-    ts_col = _resolve_ts_col(conn, "producao_evento")
-    data_col = _resolve_data_col(conn, "producao_evento")  # pode ser None
-
-    cur = conn.cursor()
-
-    # 1) Tenta encontrar um machine_id escopado com mais eventos no dia.
-    #    Preferimos "prefix::%" mas também aceitamos "%::prefix" (caso de legado invertido).
-    candidates = []
-    patterns = [f"{machine_id}::%", f"%::{machine_id}"]
-    for like_pattern in patterns:
-        if ts_col:
-            q = f"""
-                SELECT machine_id, COUNT(*) as c
-                FROM producao_evento
-                WHERE machine_id LIKE ?
-                  AND {ts_col} >= ?
-                  AND {ts_col} < ?
-                GROUP BY machine_id
-                ORDER BY c DESC
-                LIMIT 1
-            """
-            row = cur.execute(q, (like_pattern, day_start.isoformat(), day_end.isoformat())).fetchone()
-        elif data_col:
-            # fallback (menos preciso) se só tiver coluna data
-            q = f"""
-                SELECT machine_id, COUNT(*) as c
-                FROM producao_evento
-                WHERE machine_id LIKE ?
-                  AND {data_col} = ?
-                GROUP BY machine_id
-                ORDER BY c DESC
-                LIMIT 1
-            """
-            row = cur.execute(q, (like_pattern, date_str)).fetchone()
-        else:
-            row = None
-
-        if row and row[0]:
-            candidates.append((row[0], int(row[1] or 0)))
-
-    if candidates:
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        best_mid = candidates[0][0]
-        if best_mid:
-            return best_mid
-
-    # 2) Se não achou escopado com eventos, mantém o original.
-    return machine_id
+    return mid
 
 def _parse_date_any(s: str | None) -> date | None:
     if not s:
@@ -178,7 +171,6 @@ def _parse_date_any(s: str | None) -> date | None:
             pass
     return None
 
-
 def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     try:
         row = _fetch_one(
@@ -189,7 +181,6 @@ def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
         return bool(row)
     except Exception:
         return False
-
 
 def _get_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     try:
@@ -204,15 +195,28 @@ def _get_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     except Exception:
         return set()
 
-
 def _resolve_ts_col(conn: sqlite3.Connection, table_name: str) -> str | None:
+    """Descobre coluna de timestamp (schema pode variar)."""
     cols = _get_columns(conn, table_name)
-    for c in ("timestamp", "ts", "created_at", "created_iso", "time_iso"):
+    preferred = (
+        "timestamp",
+        "ts",
+        "created_at",
+        "data_hora",
+        "datahora",
+        "datetime",
+        "dt",
+        "data_ref",
+        "data",
+    )
+    for c in preferred:
         if c in cols:
             return c
+    for c in cols:
+        lc = c.lower()
+        if "time" in lc or "data" in lc or "date" in lc:
+            return c
     return None
-
-
 def _load_machine_config_json(conn: sqlite3.Connection, machine_id: str) -> dict:
     if not _table_exists(conn, "machine_config"):
         return {}
@@ -231,7 +235,6 @@ def _load_machine_config_json(conn: sqlite3.Connection, machine_id: str) -> dict
     except Exception:
         return {}
 
-
 def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
     if not intervals:
         return []
@@ -248,7 +251,6 @@ def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[d
     merged.append((cur_s, cur_e))
     return merged
 
-
 def _compute_run_intervals(event_times: list[datetime], stop_sec: int) -> list[tuple[datetime, datetime]]:
     intervals: list[tuple[datetime, datetime]] = []
     if stop_sec <= 0:
@@ -258,14 +260,12 @@ def _compute_run_intervals(event_times: list[datetime], stop_sec: int) -> list[t
         intervals.append((t, t + delta))
     return _merge_intervals(intervals)
 
-
 def _intersect(a_s: datetime, a_e: datetime, b_s: datetime, b_e: datetime) -> tuple[datetime, datetime] | None:
     s = max(a_s, b_s)
     e = min(a_e, b_e)
     if e <= s:
         return None
     return (s, e)
-
 
 def _build_segments_for_hour(
     hour_start: datetime,
@@ -317,7 +317,6 @@ def _build_segments_for_hour(
             }
         )
     return segs
-
 
 def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
     out: dict[int, dict] = {h: {"meta": 0, "produzido": 0, "refugo": 0} for h in range(24)}
@@ -392,7 +391,6 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
 
     return out
 
-
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
     col = _resolve_data_col(conn, "refugo_horaria")
     tentativas = [
@@ -406,7 +404,6 @@ def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
         except Exception:
             continue
     return 0
-
 
 def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
     col = _resolve_data_col(conn, "producao_diaria")
@@ -584,13 +581,11 @@ def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> li
 
     return itens
 
-
 if callable(init_db):
     try:
         init_db()
     except Exception:
         pass
-
 
 @historico_bp.route("/api/producao/historico", methods=["GET"])
 def api_producao_historico():
@@ -638,9 +633,6 @@ def api_producao_historico():
             except Exception:
                 pass
 
-
-
-
 @historico_bp.route("/api/producao/detalhe-dia", methods=["GET"])
 def api_producao_detalhe_dia():
     machine_id = (request.args.get("machine_id") or "").strip()
@@ -675,7 +667,7 @@ def api_producao_detalhe_dia():
                 # Dia nao ativo: tudo NP
                 horas = []
                 for h in range(24):
-                    hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
+                    hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
                     he = hs + timedelta(hours=1)
                     horas.append(
                         {
@@ -737,7 +729,7 @@ def api_producao_detalhe_dia():
         # Monta resposta hora a hora
         horas = []
         for h in range(24):
-            hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
+            hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
             he = hs + timedelta(hours=1)
 
             meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
@@ -774,7 +766,6 @@ def api_producao_detalhe_dia():
                 conn.close()
             except Exception:
                 pass
-
 
 @historico_bp.route("/historico", methods=["GET"])
 def historico_page():
