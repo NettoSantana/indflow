@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 21:00 America/Bahia
-MOTIVO: Historico: barra de status por hora (verde=produzindo, vermelho=parada, cinza=nao programado) crescendo conforme o tempo.
+LAST_RECODE: 2026-02-23 19:30 America/Bahia
+MOTIVO: Corrigir erro no modal de detalhe do dia: fmtInt nao definido (JS quebrava e mostrava "Falha ao carregar detalhe do dia.").
 -->
 
 <!--
@@ -762,6 +762,10 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const x = Number(n);
     if(!Number.isFinite(x)) return "0";
     return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
+  }
+
+  function fmtInt(n){
+    return fmtNum(n);
   }
 
   function safeText(v){
