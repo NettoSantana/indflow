@@ -1,4 +1,10 @@
 <!--
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-02-23 21:00 America/Bahia
+MOTIVO: Historico: barra de status por hora (verde=produzindo, vermelho=parada, cinza=nao programado) crescendo conforme o tempo.
+-->
+
+<!--
 Caminho: indflow/modules/producao/templates/historico.html
 Último recode: 2026-02-22 01:37
 Motivo: corrigir JS que quebrava carregamento do histórico (op2 fora de escopo) após inclusão do modal de dia.
@@ -513,6 +519,24 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   .tseg.run{ background:#16a34a; }
   .tseg.stop{ background:#dc2626; }
   .tseg.np{ background:#94a3b8; }
+
+  /* Barra simples (progresso da hora) */
+  .pbar{
+    width:100%;
+    height:12px;
+    border-radius:999px;
+    background:#e5e7eb;
+    overflow:hidden;
+    border:1px solid #cbd5e1;
+  }
+  .pfill{
+    height:100%;
+    width:0%;
+    border-radius:999px;
+  }
+  .pfill.run{ background:#16a34a; }
+  .pfill.stop{ background:#dc2626; }
+  .pfill.np{ background:#94a3b8; }
 
   /* Clique na linha do dia */
   tr.day-row{ cursor:pointer; }
@@ -1212,6 +1236,59 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return bar;
   }
 
+  function buildLiveProgressBar(isoDay, hourIdx, row){
+    const bar = document.createElement("div");
+    bar.className = "pbar";
+
+    const fill = document.createElement("div");
+    fill.className = "pfill";
+
+    const meta = Number(row && (row.meta ?? row.meta_hora ?? 0)) || 0;
+    const prod = Number(row && (row.produzido ?? row.producao ?? 0)) || 0;
+
+    let cls = "stop";
+    if(meta <= 0){
+      cls = "np";
+    }else if(prod > 0){
+      cls = "run";
+    }else{
+      cls = "stop";
+    }
+    fill.classList.add(cls);
+
+    const day = String(isoDay || "").trim();
+    const now = new Date();
+    const today = todayIsoLocal();
+
+    let pct = 0;
+
+    if(day === today){
+      const curH = now.getHours();
+      if(hourIdx < curH){
+        pct = 100;
+      }else if(hourIdx === curH){
+        const minutes = now.getMinutes() + (now.getSeconds() / 60);
+        pct = clamp((minutes / 60) * 100, 0, 100);
+      }else{
+        pct = 0;
+      }
+    }else{
+      // dias passados: cheio. dias futuros: vazio.
+      const dDay = new Date(day + "T00:00:00");
+      const dToday = new Date(today + "T00:00:00");
+      if(!isNaN(dDay.getTime()) && !isNaN(dToday.getTime()) && dDay.getTime() < dToday.getTime()){
+        pct = 100;
+      }else{
+        pct = 0;
+      }
+    }
+
+    fill.style.width = pct.toFixed(3) + "%";
+    bar.appendChild(fill);
+    return bar;
+  }
+
+
   async function fetchDayDetail(isoDay){
     if(!machineId) throw new Error("machine_id vazio");
 
@@ -1303,7 +1380,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
       wrap.appendChild(top);
 
-      const bar = buildHourBar(isoDay, h, getSegs(h));
+      const bar = buildLiveProgressBar(isoDay, h, row);
       wrap.appendChild(bar);
 
       tdD.appendChild(wrap);
