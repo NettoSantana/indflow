@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 21:00 America/Bahia
-# MOTIVO: Corrigir erro 500 em /producao/api/producao/detalhe-dia (ValueError no LIKE) ajustando padrões LIKE para machine_id scoped/legacy.
+# LAST_RECODE: 2026-02-23 16:25 America/Bahia
+# MOTIVO: Adicionar endpoint manual de backfill da producao_horaria a partir de producao_diaria e ajustar leitura da coluna hora_idx na producao_horaria.
 
 from __future__ import annotations
 
@@ -325,7 +325,11 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
     if _table_exists(conn, "producao_horaria"):
         cols = _get_columns(conn, "producao_horaria")
         data_col = _resolve_data_col(conn, "producao_horaria")
-        hora_col = "hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None)
+        hora_col = (
+            "hora_idx" if "hora_idx" in cols else (
+                "hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None)
+            )
+        )
         prod_col = None
         for c in ("produzido", "producao", "count", "qtd"):
             if c in cols:
@@ -369,7 +373,11 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
     if _table_exists(conn, "refugo_horaria"):
         cols = _get_columns(conn, "refugo_horaria")
         data_col = _resolve_data_col(conn, "refugo_horaria")
-        hora_col = "hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None)
+        hora_col = (
+            "hora_idx" if "hora_idx" in cols else (
+                "hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None)
+            )
+        )
         ref_col = None
         for c in ("refugo", "qtd", "valor"):
             if c in cols:
@@ -758,6 +766,292 @@ def api_producao_detalhe_dia():
                 "date": data_ref.isoformat(),
                 "stop_sec": stop_sec,
                 "hours": horas,
+            }
+        )
+    finally:
+        if not callable(get_db):
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+
+def _distribute_int_total(total: int, weights: list[int] | None = None, n: int = 24) -> list[int]:
+    if n <= 0:
+        return []
+    total = _safe_int(total, 0)
+    if total <= 0:
+        return [0] * n
+
+    if not weights or len(weights) != n:
+        base = total // n
+        rem = total - (base * n)
+        out = [base] * n
+        for i in range(rem):
+            out[i] += 1
+        return out
+
+    w = [max(_safe_int(x, 0), 0) for x in weights]
+    s = sum(w)
+    if s <= 0:
+        return _distribute_int_total(total, None, n)
+
+    raw = [(total * wi) / s for wi in w]
+    out = [int(x) for x in raw]
+    diff = total - sum(out)
+    if diff > 0:
+        # distribui o restante nas maiores frações
+        fracs = sorted([(raw[i] - out[i], i) for i in range(n)], reverse=True)
+        for k in range(diff):
+            out[fracs[k % n][1]] += 1
+    elif diff < 0:
+        # remove excedente nas menores frações, sem ficar negativo
+        fracs = sorted([(raw[i] - out[i], i) for i in range(n)])
+        k = 0
+        to_remove = -diff
+        while to_remove > 0 and k < len(fracs):
+            i = fracs[k][1]
+            if out[i] > 0:
+                out[i] -= 1
+                to_remove -= 1
+            else:
+                k += 1
+    return out
+
+
+def _backfill_horaria_for_day(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
+    """
+    Gera 24 linhas em producao_horaria a partir de producao_diaria, quando nao existir horaria no dia.
+
+    - Usa _diaria_do_dia() para escolher a linha do dia e obter o machine_id efetivo gravado no diario.
+    - Distribui meta e produzido nas 24 horas (estimativa), apenas para destravar o detalhe-dia.
+    """
+    if not _table_exists(conn, "producao_horaria"):
+        return {"ok": False, "error": "tabela producao_horaria nao existe"}
+
+    diaria = _diaria_do_dia(conn, machine_id, data_ref)
+    produzido_dia = _safe_int(diaria.get("produzido"), 0)
+    meta_dia = _safe_int(diaria.get("meta"), 0)
+    target_mid = (diaria.get("_mid") or machine_id or "").strip()
+
+    if produzido_dia <= 0:
+        return {"ok": True, "skipped": True, "reason": "produzido_dia_zero", "machine_id": target_mid, "date": data_ref}
+
+    cols = _get_columns(conn, "producao_horaria")
+    data_col = _resolve_data_col(conn, "producao_horaria")
+    hour_col = "hora_idx" if "hora_idx" in cols else ("hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None))
+    if not hour_col or not data_col:
+        return {"ok": False, "error": "schema producao_horaria sem colunas de hora/data"}
+
+    # ja existe horaria?
+    try:
+        existing = _fetch_scalar(
+            conn,
+            f"SELECT COUNT(1) FROM producao_horaria WHERE machine_id=? AND {data_col}=?",
+            (target_mid, data_ref),
+            default=0,
+        )
+        if _safe_int(existing, 0) > 0:
+            return {"ok": True, "skipped": True, "reason": "ja_existe_horaria", "machine_id": target_mid, "date": data_ref}
+    except Exception:
+        pass
+
+    # meta por hora (uniforme)
+    meta_h = _distribute_int_total(meta_dia, None, 24) if meta_dia > 0 else [0] * 24
+
+    # produzido por hora (proporcional à meta quando houver)
+    if sum(meta_h) > 0:
+        prod_h = _distribute_int_total(produzido_dia, meta_h, 24)
+    else:
+        prod_h = _distribute_int_total(produzido_dia, None, 24)
+
+    now_sql = _to_sql_dt(datetime.now(TZ_BAHIA).replace(tzinfo=None))
+
+    # monta INSERT dinamico por colunas existentes
+    insert_cols = ["machine_id", data_col, hour_col]
+    if "baseline_esp" in cols:
+        insert_cols.append("baseline_esp")
+    if "esp_last" in cols:
+        insert_cols.append("esp_last")
+    if "produzido" in cols:
+        insert_cols.append("produzido")
+    if "meta" in cols:
+        insert_cols.append("meta")
+    if "percentual" in cols:
+        insert_cols.append("percentual")
+    if "updated_at" in cols:
+        insert_cols.append("updated_at")
+    if "cliente_id" in cols:
+        insert_cols.append("cliente_id")
+
+    placeholders = ",".join(["?"] * len(insert_cols))
+    sql = f"INSERT INTO producao_horaria ({', '.join(insert_cols)}) VALUES ({placeholders})"
+
+    inserted = 0
+    for h in range(24):
+        meta = _safe_int(meta_h[h], 0)
+        prod = _safe_int(prod_h[h], 0)
+        pct = 0
+        if meta > 0:
+            try:
+                pct = int(round((prod / meta) * 100))
+            except Exception:
+                pct = 0
+
+        vals = []
+        for c in insert_cols:
+            if c == "machine_id":
+                vals.append(target_mid)
+            elif c == data_col:
+                vals.append(data_ref)
+            elif c == hour_col:
+                vals.append(h)
+            elif c == "baseline_esp":
+                vals.append(0)
+            elif c == "esp_last":
+                vals.append(0)
+            elif c == "produzido":
+                vals.append(prod)
+            elif c == "meta":
+                vals.append(meta)
+            elif c == "percentual":
+                vals.append(pct)
+            elif c == "updated_at":
+                vals.append(now_sql)
+            elif c == "cliente_id":
+                vals.append(None)
+            else:
+                vals.append(None)
+
+        try:
+            conn.execute(sql, tuple(vals))
+            inserted += 1
+        except Exception:
+            # se der erro em uma hora, aborta o dia (roll back externo)
+            raise
+
+    return {"ok": True, "inserted_hours": inserted, "machine_id": target_mid, "date": data_ref, "produzido_dia": produzido_dia, "meta_dia": meta_dia}
+
+
+@historico_bp.route("/api/producao/backfill-horaria", methods=["POST"])
+def api_producao_backfill_horaria():
+    """
+    Endpoint manual para preencher producao_horaria usando producao_diaria.
+    Uso:
+      POST /producao/api/producao/backfill-horaria?machine_id=maquina005&days=60
+      POST /producao/api/producao/backfill-horaria?machine_id=maquina005&all=1
+      POST /producao/api/producao/backfill-horaria?machine_id=maquina005&date_from=2026-02-01&date_to=2026-02-23
+    """
+    machine_id = (request.args.get("machine_id") or "").strip()
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
+
+    all_flag = (request.args.get("all") or "").strip() == "1"
+    days = _safe_int(request.args.get("days"), 60)
+    days = max(1, min(days, 366))
+
+    d_from = _parse_date_any((request.args.get("date_from") or "").strip())
+    d_to = _parse_date_any((request.args.get("date_to") or "").strip())
+
+    hoje = datetime.now(TZ_BAHIA).date()
+
+    if d_to is None:
+        d_to = hoje
+    if d_from is None:
+        if all_flag:
+            # tenta achar o primeiro dia com produzido > 0 no diario (para este machine_id)
+            conn0 = _get_conn()
+            try:
+                if not _table_exists(conn0, "producao_diaria"):
+                    return jsonify({"ok": False, "error": "tabela producao_diaria nao existe"}), 400
+                col = _resolve_data_col(conn0, "producao_diaria")
+                mid_raw = (machine_id or "").strip()
+                mid_uns = mid_raw.split("::", 1)[1] if "::" in mid_raw else mid_raw
+                like_suffix = f"%::{mid_uns}"
+                like_prefix = f"{mid_uns}::%"
+
+                row = _fetch_one(
+                    conn0,
+                    f"""
+                    SELECT MIN({col}) as dmin
+                      FROM producao_diaria
+                     WHERE COALESCE(produzido,0) > 0
+                       AND (
+                            machine_id = ?
+                         OR machine_id LIKE ?
+                         OR machine_id LIKE ?
+                       )
+                    """,
+                    (mid_raw, like_suffix, like_prefix),
+                )
+                dmin = _parse_date_any(str(row["dmin"]) if row and row["dmin"] else None)
+                d_from = dmin or (hoje - timedelta(days=days - 1))
+            finally:
+                if not callable(get_db):
+                    try:
+                        conn0.close()
+                    except Exception:
+                        pass
+        else:
+            d_from = hoje - timedelta(days=days - 1)
+
+    if d_from > d_to:
+        d_from, d_to = d_to, d_from
+
+    conn = _get_conn()
+    try:
+        if not _table_exists(conn, "producao_diaria"):
+            return jsonify({"ok": False, "error": "tabela producao_diaria nao existe"}), 400
+        if not _table_exists(conn, "producao_horaria"):
+            return jsonify({"ok": False, "error": "tabela producao_horaria nao existe"}), 400
+
+        total_days = 0
+        backfilled_days = 0
+        inserted_rows = 0
+        detalhes: list[dict] = []
+
+        d = d_from
+        try:
+            conn.execute("BEGIN")
+        except Exception:
+            pass
+
+        while d <= d_to:
+            total_days += 1
+            data_ref = d.isoformat()
+            try:
+                res = _backfill_horaria_for_day(conn, machine_id, data_ref)
+                detalhes.append(res)
+                if res.get("ok") and (not res.get("skipped")):
+                    backfilled_days += 1
+                    inserted_rows += _safe_int(res.get("inserted_hours"), 0)
+            except Exception as e:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                return jsonify({"ok": False, "error": "falha no backfill", "date": data_ref, "details": str(e)}), 500
+            d = d + timedelta(days=1)
+
+        try:
+            conn.execute("COMMIT")
+        except Exception:
+            try:
+                conn.commit()
+            except Exception:
+                pass
+
+        return jsonify(
+            {
+                "ok": True,
+                "machine_id": machine_id,
+                "date_from": d_from.isoformat(),
+                "date_to": d_to.isoformat(),
+                "days_considered": total_days,
+                "days_backfilled": backfilled_days,
+                "rows_inserted": inserted_rows,
+                "details": detalhes,
             }
         )
     finally:
