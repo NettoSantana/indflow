@@ -1,5 +1,6 @@
-﻿fix(producao): detalhe-dia padronizado para producao_horaria (sem producao_evento)
+﻿feat(historico): adicionar barra de status (verde/vermelho/cinza) com progresso por hora
 
-- Remove dependencia de producao_evento no /producao/api/producao/detalhe-dia
-- Meta/produzido/refugo vem apenas de producao_horaria
-- Mantem endpoint de backfill manual para preencher producao_horaria via producao_diaria
+- Barra por hora cresce conforme tempo (na hora atual do dia atual)
+- Cinza: hora nao programada (meta <= 0)
+- Verde: produziu algo (produzido > 0)
+- Vermelho: programada sem producao (produzido == 0)
