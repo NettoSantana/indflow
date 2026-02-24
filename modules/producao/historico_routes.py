@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 20:51 America/Bahia
-# MOTIVO: Detalhe-dia: tempos e paradas cumulativos derivados exclusivamente de segments (RUN/STOP/NP).
+# LAST_RECODE: 2026-02-24 21:00 America/Bahia
+# MOTIVO: Detalhe-dia: tempos e paradas por estado atual (streak) derivados do ultimo segmento (RUN/STOP/NP).
 
 
 from __future__ import annotations
@@ -163,37 +163,37 @@ def _apply_current_stop_to_segments(
 
 
 def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
-    # Regra unica (mesma da barra):
-    # - RUN soma em tempo_produzindo_sec
-    # - STOP soma em tempo_parado_sec
-    # - NP nao soma
+    # Regra unica (mesma da barra) para EXIBICAO "estado atual" (streak), cumulativa dentro do estado:
+    # - Se o ultimo segmento da hora for RUN: Tempo Prod = duracao desse ultimo RUN; Tempo Parado = 0; Paradas = 0
+    # - Se o ultimo segmento da hora for STOP: Tempo Parado = duracao desse ultimo STOP; Tempo Prod = 0; Paradas = 1
+    # - Se o ultimo segmento for NP: tudo 0
     #
-    # Paradas (cumulativas na hora):
-    # - Conta 1 parada a cada inicio de segmento STOP com duracao > 0,
-    #   inclusive se a hora ja comecar em STOP (sem exigir RUN->STOP).
-    tempo_produzindo_sec = 0
-    tempo_parado_sec = 0
-    qtd_paradas = 0
+    # Observacao: "Paradas" aqui e um indicador do estado atual (0 produzindo, 1 parado),
+    # nao e quantidade de paradas ocorridas no horario.
+    if not segs:
+        return 0, 0, 0
 
-    last_state = None
-    for s in segs or []:
-        st = s.get("state")
+    # Pega o ultimo segmento com duracao > 0 (se existir). Caso contrario, usa o ultimo mesmo.
+    last = None
+    for s in reversed(segs):
         a = _hhmmss_to_sec(s.get("start", "00:00:00"))
         b = _hhmmss_to_sec(s.get("end", "00:00:00"))
-        dur = max(0, b - a)
+        if b > a:
+            last = s
+            break
+    if last is None:
+        last = segs[-1]
 
-        if st == "RUN":
-            tempo_produzindo_sec += dur
+    st = (last.get("state") or "").upper()
+    a = _hhmmss_to_sec(last.get("start", "00:00:00"))
+    b = _hhmmss_to_sec(last.get("end", "00:00:00"))
+    dur = max(0, b - a)
 
-        elif st == "STOP":
-            tempo_parado_sec += dur
-            # Parada = inicio de STOP com duracao
-            if dur > 0 and last_state != "STOP":
-                qtd_paradas += 1
-
-        last_state = st
-
-    return tempo_produzindo_sec, tempo_parado_sec, qtd_paradas
+    if st == "RUN":
+        return dur, 0, 0
+    if st == "STOP":
+        return 0, dur, 1
+    return 0, 0, 0
 
 def _safe_int(v, default: int = 0) -> int:
     try:

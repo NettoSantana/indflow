@@ -1,6 +1,7 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 21:00 America/Bahia
-# MOTIVO: Detalhe-dia agora usa machine_state_event para gerar segmentos RUN/STOP e manter rastro de cores (verde/vermelho/cinza) no historico.
+# LAST_RECODE: 2026-02-24 20:51 America/Bahia
+# MOTIVO: Detalhe-dia: tempos e paradas cumulativos derivados exclusivamente de segments (RUN/STOP/NP).
+
 
 from __future__ import annotations
 
@@ -72,6 +73,127 @@ def _get_conn() -> sqlite3.Connection:
 
     db_path = os.environ.get("INDFLOW_DB_PATH") or os.environ.get("DB_PATH") or "/data/indflow.db"
     return _sqlite_connect(db_path)
+
+
+def _hhmmss_to_sec(s: str) -> int:
+    try:
+        parts = (s or "").split(":")
+        if len(parts) != 3:
+            return 0
+        h = int(parts[0])
+        m = int(parts[1])
+        sec = int(parts[2])
+        return h * 3600 + m * 60 + sec
+    except Exception:
+        return 0
+
+
+def _sec_to_hhmmss(total_sec: int) -> str:
+    try:
+        total_sec = int(total_sec)
+    except Exception:
+        total_sec = 0
+    if total_sec < 0:
+        total_sec = 0
+    h = total_sec // 3600
+    m = (total_sec % 3600) // 60
+    s = total_sec % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+def _dt_naive_to_day_sec(dt: datetime) -> int:
+    try:
+        return (dt.hour * 3600) + (dt.minute * 60) + int(dt.second)
+    except Exception:
+        return 0
+
+def _ms_to_naive_bahia(ms: int) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
+    except Exception:
+        return None
+
+def _apply_current_stop_to_segments(
+    segs: list[dict],
+    stop_start_naive: datetime,
+    hour_start: datetime,
+    hour_end_calc: datetime,
+) -> list[dict]:
+    """
+    Forca STOP no intervalo [max(stop_start, hour_start), hour_end_calc] na hora atual.
+
+    - Preserva partes anteriores a stop_start.
+    - Trunca o segmento que cruza stop_start.
+    - Substitui todo o restante por um unico STOP ate hour_end_calc.
+    """
+    if not segs:
+        return segs
+    if hour_end_calc <= hour_start:
+        return segs
+
+    stop_sec = _dt_naive_to_day_sec(stop_start_naive)
+    hs_sec = _dt_naive_to_day_sec(hour_start)
+    he_sec = _dt_naive_to_day_sec(hour_end_calc)
+
+    if stop_sec < hs_sec:
+        stop_sec = hs_sec
+    if stop_sec > he_sec:
+        stop_sec = he_sec
+
+    new_segs: list[dict] = []
+    for s in segs:
+        st = s.get("state")
+        a = _hhmmss_to_sec(s.get("start", "00:00:00"))
+        b = _hhmmss_to_sec(s.get("end", "00:00:00"))
+        if b <= stop_sec:
+            new_segs.append({"start": _sec_to_hhmmss(a), "end": _sec_to_hhmmss(b), "state": st})
+            continue
+        if a < stop_sec:
+            # Mantem parte ate stop_sec
+            new_segs.append({"start": _sec_to_hhmmss(a), "end": _sec_to_hhmmss(stop_sec), "state": st})
+        # descarta partes depois de stop_sec (serao substituidas por STOP)
+
+    if he_sec > stop_sec:
+        # Evita duplicar STOP se ultimo ja for STOP e encostar
+        if new_segs and new_segs[-1].get("state") == "STOP" and _hhmmss_to_sec(new_segs[-1].get("end", "00:00:00")) == stop_sec:
+            new_segs[-1]["end"] = _sec_to_hhmmss(he_sec)
+        else:
+            new_segs.append({"start": _sec_to_hhmmss(stop_sec), "end": _sec_to_hhmmss(he_sec), "state": "STOP"})
+
+    return new_segs
+
+
+def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
+    # Regra unica (mesma da barra):
+    # - RUN soma em tempo_produzindo_sec
+    # - STOP soma em tempo_parado_sec
+    # - NP nao soma
+    #
+    # Paradas (cumulativas na hora):
+    # - Conta 1 parada a cada inicio de segmento STOP com duracao > 0,
+    #   inclusive se a hora ja comecar em STOP (sem exigir RUN->STOP).
+    tempo_produzindo_sec = 0
+    tempo_parado_sec = 0
+    qtd_paradas = 0
+
+    last_state = None
+    for s in segs or []:
+        st = s.get("state")
+        a = _hhmmss_to_sec(s.get("start", "00:00:00"))
+        b = _hhmmss_to_sec(s.get("end", "00:00:00"))
+        dur = max(0, b - a)
+
+        if st == "RUN":
+            tempo_produzindo_sec += dur
+
+        elif st == "STOP":
+            tempo_parado_sec += dur
+            # Parada = inicio de STOP com duracao
+            if dur > 0 and last_state != "STOP":
+                qtd_paradas += 1
+
+        last_state = st
+
+    return tempo_produzindo_sec, tempo_parado_sec, qtd_paradas
 
 def _safe_int(v, default: int = 0) -> int:
     try:
@@ -754,6 +876,15 @@ def api_producao_detalhe_dia():
 
     data_ref = _parse_date_any(date_str) or datetime.now(TZ_BAHIA).date()
 
+
+    # Hora atual (naive, TZ_BAHIA) para cortar a hora em andamento e nao preencher futuro
+    now_naive = None
+    try:
+        now_dt = datetime.now(TZ_BAHIA)
+        if data_ref == now_dt.date():
+            now_naive = now_dt.replace(tzinfo=None)
+    except Exception:
+        now_naive = None
     conn = _get_conn()
     try:
         try:
@@ -770,38 +901,34 @@ def api_producao_detalhe_dia():
                 ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
                 120,
             )
-            active_days = cfg.get("active_days")
 
-            if isinstance(active_days, list) and active_days:
-                # Python weekday: Mon=0..Sun=6; nossa lista default e 1..7 (Seg=1)
-                wd = data_ref.weekday() + 1
-                if wd not in set(int(x) for x in active_days if str(x).isdigit()):
-                    # Dia nao ativo: tudo NP
-                    horas = []
-                    for h in range(24):
-                        hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
-                        he = hs + timedelta(hours=1)
-                        horas.append(
-                            {
-                                "hour": h,
-                                "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
-                                "meta": 0,
-                                "produzido": 0,
-                                "refugo": 0,
-                                "segments": _build_segments_for_hour(hs, he, True, []),
-                            }
-                        )
-                    return jsonify(
-                        {
-                            "ok": True,
-                            "machine_id": machine_id,
-                            "effective_machine_id": eff_mid,
-                            "date": data_ref.isoformat(),
-                            "stop_sec": stop_sec,
-                            "hours": horas,
-                        }
-                    )
-            # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
+            stop_start_naive = None
+            if now_naive is not None and callable(get_machine):
+                try:
+                    st = get_machine(eff_mid) or get_machine(machine_id)
+                    if isinstance(st, dict):
+                        stopped_ms = st.get("stopped_since_ms") or st.get("stopped_since")
+                        status_ui = str(st.get("status_ui") or "").strip().upper()
+                        run_flag = st.get("run")
+                        is_stopped = False
+                        if status_ui in ("PARADA", "PARADO", "STOP", "STOPPED"):
+                            is_stopped = True
+                        else:
+                            try:
+                                if run_flag is not None and int(run_flag) == 0:
+                                    is_stopped = True
+                            except Exception:
+                                is_stopped = False
+                        if is_stopped and stopped_ms is not None:
+                            try:
+                                stop_start_naive = _ms_to_naive_bahia(int(stopped_ms))
+                            except Exception:
+                                stop_start_naive = None
+                except Exception:
+                    stop_start_naive = None
+
+
+# Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
 
@@ -814,12 +941,73 @@ def api_producao_detalhe_dia():
                 hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
                 he = hs + timedelta(hours=1)
 
+                # Para o dia atual: corta a hora em andamento no "agora" e nao preenche futuro.
+                he_calc = he
+                if now_naive is not None:
+                    if now_naive <= hs:
+                        he_calc = hs
+                    elif now_naive < he:
+                        he_calc = now_naive
+
+
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
 
                 is_np = meta <= 0
-                segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
+
+                # Se he_calc == hs (hora futura no dia atual), nao inventar 60 min.
+                if he_calc == hs:
+                    zstate = "NP" if is_np else "STOP"
+                    segs = [{
+                        "start": hs.strftime("%H:%M:%S"),
+                        "end": hs.strftime("%H:%M:%S"),
+                        "state": zstate,
+                    }]
+                    tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = 0, 0, 0
+                    horas.append(
+                        {
+                            "hour": h,
+                            "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
+                            "meta": meta,
+                            "produzido": produzido,
+                            "refugo": refugo,
+                            "segments": segs,
+                            "tempo_produzindo_sec": tempo_produzindo_sec,
+                            "tempo_parado_sec": tempo_parado_sec,
+                            "qtd_paradas": qtd_paradas,
+                        }
+                    )
+                    continue
+
+
+                # Fallback: se nao houver rastro em machine_state_event para o dia,
+                # nao marque a hora inteira como STOP quando houve producao.
+                # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN a hora inteira; senao => STOP.
+                if (not is_np) and (not run_intervals):
+                    if produzido > 0:
+                        segs = [{
+                            "start": hs.strftime("%H:%M:%S"),
+                            "end": he_calc.strftime("%H:%M:%S"),
+                            "state": "RUN",
+                        }]
+                    else:
+                        segs = [{
+                            "start": hs.strftime("%H:%M:%S"),
+                            "end": he_calc.strftime("%H:%M:%S"),
+                            "state": "STOP",
+                        }]
+                else:
+                    segs = _build_segments_for_hour(hs, he_calc, is_np, run_intervals)
+
+                if (not is_np) and now_naive is not None and stop_start_naive is not None:
+                    try:
+                        if hs <= now_naive < he and stop_start_naive <= he_calc:
+                            segs = _apply_current_stop_to_segments(segs, stop_start_naive, hs, he_calc)
+                    except Exception:
+                        pass
+
+                tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
 
                 horas.append(
                     {
@@ -829,6 +1017,9 @@ def api_producao_detalhe_dia():
                         "produzido": produzido,
                         "refugo": refugo,
                         "segments": segs,
+                        "tempo_produzindo_sec": tempo_produzindo_sec,
+                        "tempo_parado_sec": tempo_parado_sec,
+                        "qtd_paradas": qtd_paradas,
                     }
                 )
 
