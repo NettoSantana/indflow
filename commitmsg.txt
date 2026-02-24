@@ -1,5 +1,6 @@
-﻿feat(historico): mostrar informacoes por hora (meta, produzido, tempos e paradas) a partir do JSON
+﻿style(historico): remover textos de estado do layout e melhorar espacamento por hora
 
-- adiciona helpers pickFirstNumber e fmtMinutes
-- exibe acima da barra por hora: Meta, Prod, Tempo Prod, Tempo Parado, Paradas (quando existirem no JSON)
-- nao calcula nada no frontend; apenas renderiza os campos recebidos
+- remove labels PRODUZINDO/PARADO/FORA DO HORARIO
+- mantem rastro apenas visual por cor
+- aumenta espacamento entre informacoes e barra
+- melhora padding das pills
