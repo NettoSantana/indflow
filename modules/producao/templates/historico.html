@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-24 06:02 America/Bahia
-MOTIVO: Remover textos PRODUZINDO/PARADO/FORA DO HORARIO do layout e aumentar espacamento das informacoes por hora.
+LAST_RECODE: 2026-02-24 19:40 America/Bahia
+MOTIVO: Ajustar Tempo Prod/Parado para ler *_sec do backend e exibir em minutos no layout.
 -->
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
@@ -10,8 +10,8 @@ Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atu
 -->
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-21 22:30 America/Bahia
-MOTIVO: Historico: corrigir modal do dia (endpoint/fetch), evitar clique conflitando com OP, e corrigir markup quebrado.
+LAST_RECODE: 2026-02-24 19:40 America/Bahia
+MOTIVO: Ajustar Tempo Prod/Parado para ler *_sec do backend e exibir em minutos no layout.
 -->
 
 {#
@@ -1588,8 +1588,10 @@ function safeText(v){
 
       const meta = pickFirstNumber(h, ["meta", "meta_hora", "meta_h"]);
       const prod = pickFirstNumber(h, ["produzido", "producao", "prod", "produzido_hora"]);
-      const tProdMin = pickFirstNumber(h, ["tempo_produzindo_min", "tempo_produzindo_minutos", "tempo_produzindo" ]);
-      const tStopMin = pickFirstNumber(h, ["tempo_parado_min", "tempo_parado_minutos", "tempo_parado" ]);
+      const tProdSec = pickFirstNumber(h, ["tempo_produzindo_sec", "tempo_produzindo_seg", "tempo_produzindo_s" ]);
+      const tStopSec = pickFirstNumber(h, ["tempo_parado_sec", "tempo_parado_seg", "tempo_parado_s" ]);
+      const tProdMin = (tProdSec === null ? pickFirstNumber(h, ["tempo_produzindo_min", "tempo_produzindo_minutos", "tempo_produzindo" ]) : Math.round(tProdSec / 60));
+      const tStopMin = (tStopSec === null ? pickFirstNumber(h, ["tempo_parado_min", "tempo_parado_minutos", "tempo_parado" ]) : Math.round(tStopSec / 60));
       const qtdParadas = pickFirstNumber(h, ["qtd_paradas", "paradas", "quantidade_paradas" ]);
 
       const pills = document.createElement("div");

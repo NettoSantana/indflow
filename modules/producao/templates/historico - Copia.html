@@ -1,0 +1,2192 @@
+<!--
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-02-24 06:02 America/Bahia
+MOTIVO: Remover textos PRODUZINDO/PARADO/FORA DO HORARIO do layout e aumentar espacamento das informacoes por hora.
+-->
+<!--
+Caminho: indflow/modules/producao/templates/historico.html
+Último recode: 2026-02-23 22:14
+Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atualização periódica para refletir produção/parada em tempo real.
+-->
+<!--
+PATH: modules/producao/templates/historico.html
+LAST_RECODE: 2026-02-21 22:30 America/Bahia
+MOTIVO: Historico: corrigir modal do dia (endpoint/fetch), evitar clique conflitando com OP, e corrigir markup quebrado.
+-->
+
+{#
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-02-21 22:30 America/Bahia
+#}
+{% extends "base.html" %}
+{% block title %}Histórico — IndFlow{% endblock %}
+{% block content %}
+
+<style>
+  /* Referência: producao_home.html */
+  .page{
+    padding:24px;
+  }
+
+  .header-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+
+  .subtitle{
+    margin-top:6px;
+    font-size:14px;
+    font-weight:700;
+    color:#334155;
+  }
+
+  .card{
+    background:#ffffff;
+    border-radius:16px;
+    padding:16px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.10);
+    border:1px solid #e5e7eb;
+  }
+
+  .filter-bar{
+    display:flex;
+    align-items:flex-end;
+    gap:12px;
+    flex-wrap:wrap;
+    margin-bottom:14px;
+  }
+  .filter-row{
+    display:flex;
+    align-items:flex-end;
+    gap:14px;
+    flex-wrap:wrap;
+  }
+
+  .filter-group label{
+    display:block;
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+    margin-bottom:6px;
+  }
+
+  .filter-group input{
+    height:40px;
+    padding:8px 10px;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    font-size:14px;
+    outline:none;
+    background:#fff;
+    min-width:220px;
+  }
+
+  .filter-group input:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+
+  .hint{
+    font-size:12px;
+    color:#64748b;
+    padding-bottom:6px;
+    white-space:nowrap;
+  }
+
+  /* Tabela */
+  table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:14px;
+  }
+
+  thead th{
+    background:#f1f5f9;
+    color:#0f172a;
+    font-weight:800;
+    padding:12px 14px;
+    text-align:left;
+    border-bottom:1px solid #e5e7eb;
+  }
+
+  tbody td{
+    padding:10px 14px;
+    border-bottom:1px solid #e5e7eb;
+    color:#0f172a;
+  }
+
+  tbody tr:nth-child(odd){ background:#ffffff; }
+  tbody tr:nth-child(even){ background:#f8fbff; }
+
+  tbody tr:hover{
+    background:#eff6ff;
+  }
+
+  .r{ text-align:right; }
+  .text-right{ text-align:right; }
+  .text-center{ text-align:center; }
+
+  .loading td{
+    padding:14px;
+    text-align:center;
+    color:#64748b;
+  }
+
+  /* ===============================
+     OPs no historico
+     =============================== */
+  .op-row td{
+    background:#f8fafc;
+    color:#334155;
+    font-size:13px;
+    font-weight:700;
+    border-bottom:1px solid #e5e7eb;
+  }
+
+  .op-row{
+    cursor:pointer;
+  }
+
+  .op-row:hover td{
+    background:#eef2ff;
+  }
+
+  .op-pill{
+    display:inline-block;
+    padding:3px 8px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:900;
+    margin-right:8px;
+    vertical-align:middle;
+  }
+
+  .op-pill-ativa{
+    background:#dcfce7;
+    color:#166534;
+    border:1px solid #bbf7d0;
+  }
+
+  .op-pill-encerrada{
+    background:#e5e7eb;
+    color:#374151;
+    border:1px solid #d1d5db;
+  }
+
+  .op-pill-unk{
+    background:#f1f5f9;
+    color:#334155;
+    border:1px solid #e2e8f0;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .btn-danger {
+    background: #dc3545;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn-danger:hover {
+    filter: brightness(0.95);
+  }
+  .btn-danger:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* ===============================
+     Modal OP (respeita layout)
+     =============================== */
+  .op-modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    z-index:9999;
+  }
+
+  .op-modal{
+    width:100%;
+    max-width:1100px;
+    background:#ffffff;
+    border-radius:16px;
+    box-shadow:0 18px 60px rgba(0,0,0,0.30);
+    border:1px solid #e5e7eb;
+    overflow:hidden;
+
+    /* rolagem no conteudo do modal */
+    max-height:90vh;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .op-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#ffffff;
+  }
+
+  .op-modal-title{
+    font-size:16px;
+    font-weight:900;
+    color:#0f172a;
+  }
+
+  .op-modal-close{
+    border:1px solid #cbd5e1;
+    background:#ffffff;
+    width:36px;
+    height:36px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:18px;
+    line-height:1;
+  }
+
+  .op-modal-body{
+    padding:16px;
+
+    /* rolagem interna do modal (mantem header/footer fixos) */
+    flex:1;
+    overflow:auto;
+  }
+
+  .op-form-grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap:12px;
+  }
+
+  .op-field{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+
+  .op-field label{
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+  }
+
+  .op-field input,
+  .op-field textarea{
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    padding:10px 10px;
+    font-size:14px;
+    outline:none;
+    background:#ffffff;
+    color:#0f172a;
+  }
+
+  .op-field textarea{
+    min-height:92px;
+    resize:vertical;
+  }
+
+  .op-field input:focus,
+  .op-field textarea:focus{
+    border-color:#2563eb;
+    box-shadow:0 0 0 2px rgba(37,99,235,0.18);
+  }
+
+  .op-ro input,
+  .op-ro textarea{
+    background:#eaf2ff;
+    border-color:#b6d2ff;
+  }
+
+  .op-ro input[readonly],
+  .op-ro textarea[readonly]{
+    color:#0f172a;
+  }
+
+  .op-edit input,
+  .op-edit textarea{
+    background:#fff7d6;
+    border-color:#f2d37a;
+  }
+
+  .op-modal-footer{
+    display:flex;
+    justify-content:flex-end;
+    gap:10px;
+    padding:12px 16px;
+    border-top:1px solid #e5e7eb;
+    background:#ffffff;
+  }
+
+  .btn-secondary{
+    background:#ffffff;
+    color:#0f172a;
+    border:1px solid #cbd5e1;
+    border-radius:10px;
+    padding:10px 14px;
+    font-weight:700;
+    cursor:pointer;
+  }
+
+  .btn-primary{
+    background:#2563eb;
+    color:#ffffff;
+    border:none;
+    border-radius:10px;
+    padding:10px 14px;
+    font-weight:800;
+    cursor:pointer;
+  }
+
+  .btn-primary:disabled{
+    opacity:0.6;
+    cursor:not-allowed;
+  }
+
+  .col-12{ grid-column: span 12; }
+  .col-6{ grid-column: span 6; }
+  .col-4{ grid-column: span 4; }
+  .col-3{ grid-column: span 3; }
+  .col-2{ grid-column: span 2; }
+
+  /* ===============================
+     Bobinas (fechamento por bobina)
+     =============================== */
+  .bobinas-wrap{
+    grid-column: span 12;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    margin-top:6px;
+  }
+
+  .bobina-card{
+    border:1px solid #e5e7eb;
+    border-radius:14px;
+    padding:12px;
+    background:#ffffff;
+  }
+
+  .bobina-title{
+    font-size:13px;
+    font-weight:900;
+    color:#0f172a;
+    margin-bottom:10px;
+    display:flex;
+    justify-content:space-between;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .bobina-sub{
+    font-size:12px;
+    font-weight:700;
+    color:#475569;
+  }
+
+  .bobina-grid{
+    display:grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap:12px;
+  }
+
+
+  /* Modal Dia (detalhe do dia) */
+  .day-modal-backdrop{
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,0.55);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:18px;
+    z-index:60;
+  }
+  .day-modal-backdrop.open{ display:flex; }
+
+  .day-modal{
+    width:min(1100px, 96vw);
+    max-height:86vh;
+    overflow:auto;
+    background:#ffffff;
+    border-radius:16px;
+    border:1px solid #e5e7eb;
+    box-shadow:0 18px 40px rgba(0,0,0,0.30);
+  }
+  .day-modal-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:#f8fafc;
+  }
+  .day-modal-title{
+    font-weight:900;
+    color:#0f172a;
+    font-size:15px;
+  }
+  .day-modal-close{
+    border:1px solid #cbd5e1;
+    background:#ffffff;
+    color:#0f172a;
+    border-radius:10px;
+    height:34px;
+    padding:0 12px;
+    font-weight:900;
+    cursor:pointer;
+  }
+  .day-modal-body{ padding:14px 16px 18px 16px; }
+
+  .day-hour-table{
+    width:100%;
+    border-collapse:collapse;
+    font-size:13px;
+  }
+  .day-hour-table th{
+    background:#f1f5f9;
+    padding:10px 12px;
+    text-align:left;
+    font-weight:900;
+    color:#0f172a;
+    border-bottom:1px solid #e2e8f0;
+  }
+  .day-hour-table td{
+    padding:10px 12px;
+    border-bottom:1px solid #e2e8f0;
+    vertical-align:top;
+  }
+  .hour-cell{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .hour-top{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .hour-metrics{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+    font-weight:800;
+    color:#0f172a;
+  }
+  .hour-metrics span{
+    display:inline-block;
+    padding:4px 8px;
+    border-radius:999px;
+    background:#f1f5f9;
+    border:1px solid #e2e8f0;
+  }
+
+  .tbar{
+    width:100%;
+    height:12px;
+    border-radius:999px;
+    background:#e5e7eb;
+    overflow:hidden;
+    display:flex;
+    border:1px solid #cbd5e1;
+  }
+  .tseg{ height:100%; }
+  .tseg.run{ background:#16a34a; }
+  .tseg.stop{ background:#dc2626; }
+  .tseg.np{ background:#94a3b8; }
+
+  /* Barra simples (progresso da hora) */
+  .pbar{
+    width:100%;
+    height:12px;
+    border-radius:999px;
+    background:#e5e7eb;
+    overflow:hidden;
+    border:1px solid #cbd5e1;
+  }
+  .pfill{
+    height:100%;
+    width:0%;
+    border-radius:999px;
+  }
+  .pfill.run{ background:#16a34a; }
+  .pfill.stop{ background:#dc2626; }
+  .pfill.np{ background:#94a3b8; }
+
+  /* Clique na linha do dia */
+  tr.day-row{ cursor:pointer; }
+  tr.day-row:hover td{ background:#f8fafc; }
+
+
+  .hwrap{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .pills{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:4px;
+  }
+  .pill{
+    padding:4px 10px;
+    font-size:12px;
+  }
+
+</style>
+
+<div class="page">
+
+  <div class="header-row">
+    <div>
+      <h1 class="section-title">Histórico</h1>
+      <div class="subtitle" id="machine-name">Máquina: —</div>
+    </div>
+  </div>
+
+  <div class="card">
+
+    <!-- EM CIMA: BUSCA POR DATA -->
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label for="filter-date">Buscar por data</label>
+        <input id="filter-date" type="date">
+      </div>
+
+      <div class="hint">Selecione uma data para filtrar (opcional)</div>
+      <div class="actions">
+        <button id="btn-reset-date" type="button" class="btn-danger">Zerar producao por data</button>
+      </div>
+    </div>
+
+    <!-- EMBAIXO: TABELA POR DIA -->
+    <table>
+      <thead>
+        <tr>
+          <th>Data</th>
+          <th class="r">Produção Total</th>
+          <th class="r">Peças Boas</th>
+          <th class="r">Refugo</th>
+        </tr>
+      </thead>
+
+      <tbody id="historico-body">
+        <tr class="loading"><td colspan="4">Carregando histórico...</td></tr>
+      </tbody>
+    </table>
+
+  </div>
+
+</div>
+
+<!-- ===============================
+     MODAL OP (abre ao clicar na linha OP)
+     Azul = read-only | Amarelo = editavel
+     =============================== -->
+<div id="op-modal-backdrop" class="op-modal-backdrop" aria-hidden="true">
+  <div class="op-modal" role="dialog" aria-modal="true" aria-labelledby="op-modal-title">
+    <div class="op-modal-header">
+      <div class="op-modal-title" id="op-modal-title">OP</div>
+      <button type="button" id="op-modal-close" class="op-modal-close">x</button>
+    </div>
+
+    <div class="op-modal-body">
+      <div class="op-form-grid">
+
+
+<!-- Linha 1 (read-only / azul) -->
+        <div class="op-field op-ro col-3">
+          <label>Máquina</label>
+          <input id="opv_machine" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Operador</label>
+          <input id="opv_operador" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Lote</label>
+          <input id="opv_lote" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Status</label>
+          <input id="opv_status" type="text" readonly>
+        </div>
+
+        <!-- Linha 2 (read-only / azul) -->
+        <div class="op-field op-ro col-3">
+          <label>OS</label>
+          <input id="opv_os" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>GR e/ou fio</label>
+          <input id="opv_gr_fio" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Conversão m/pcs</label>
+          <input id="opv_conv" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-3">
+          <label>Bobinas</label>
+          <input id="opv_bobinas_resumo" type="text" readonly>
+        </div>
+
+        <!-- Linha 3 (read-only / azul) -->
+        <div class="op-field op-ro col-6">
+          <label>HS-inicial</label>
+          <input id="opv_started" type="text" readonly>
+        </div>
+        <div class="op-field op-ro col-6">
+          <label>HS-término</label>
+          <input id="opv_ended" type="text" readonly>
+        </div>
+
+        <!-- Bobinas (fechamento por bobina) -->
+        <div class="bobinas-wrap" id="bobinas-wrap">
+          <!-- preenchido via JS -->
+        </div>
+
+        <!-- Observações (editavel / amarelo) -->
+        <div class="op-field op-edit col-12">
+          <label>Observações</label>
+          <textarea id="ope_obs"></textarea>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="op-modal-footer">
+      <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
+      <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
+      <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===============================
+     MODAL DIA (abre ao clicar na linha do DIA)
+     Cada linha (hora) tem duas metades:
+     - topo: meta / produzido / refugo
+     - baixo: barra timeline RUN/STOP/NP
+     =============================== -->
+<div id="day-modal-backdrop" class="day-modal-backdrop" aria-hidden="true">
+  <div class="day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title">
+    <div class="day-modal-header">
+      <div class="day-modal-title" id="day-modal-title">Detalhe do dia</div>
+      <button type="button" id="day-modal-close" class="day-modal-close">Fechar</button>
+    </div>
+    <div class="day-modal-body">
+      <table class="day-hour-table">
+        <thead>
+          <tr>
+            <th style="width:90px;">Hora</th>
+            <th>Detalhe</th>
+          </tr>
+        </thead>
+        <tbody id="day-hour-tbody">
+          <tr><td colspan="2">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+
+<script>
+(function(){
+  "use strict";
+
+  function isoToBr(value){
+    if(!value || typeof value !== "string") return "-";
+    const s = value.trim();
+    if(!s) return "-";
+
+    if(/^(\d{2})\/(\d{2})\/(\d{4})$/.test(s)) return s;
+
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if(m) return `${m[3]}/${m[2]}/${m[1]}`;
+
+    return s;
+  }
+
+  function todayIsoLocal(){
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
+
+  function lsKeyTrail(){
+    return "indflow_state_trail::" + String(clienteId || "") + "::" + String(machineId || "");
+  }
+
+  function loadTrail(){
+    try{
+      const raw = localStorage.getItem(lsKeyTrail());
+      if(!raw){ stateTrail = []; return; }
+      const obj = JSON.parse(raw);
+      const arr = Array.isArray(obj && obj.events) ? obj.events : [];
+      stateTrail = arr
+        .filter(e => e && Number.isFinite(Number(e.ts_ms)) && typeof e.state === "string")
+        .map(e => ({ ts_ms: Number(e.ts_ms), state: String(e.state) }))
+        .sort((a,b) => a.ts_ms - b.ts_ms);
+
+      lastTrailState = stateTrail.length ? stateTrail[stateTrail.length-1].state : null;
+      lastTrailTsMs = stateTrail.length ? stateTrail[stateTrail.length-1].ts_ms : null;
+    }catch(err){
+      stateTrail = [];
+      lastTrailState = null;
+      lastTrailTsMs = null;
+    }
+  }
+
+  function saveTrail(){
+    try{
+      const now = Date.now();
+      const cutoff = now - (14 * 24 * 60 * 60 * 1000);
+      const pruned = stateTrail.filter(e => e.ts_ms >= cutoff);
+      stateTrail = pruned;
+      const payload = { v: 1, events: pruned };
+      localStorage.setItem(lsKeyTrail(), JSON.stringify(payload));
+    }catch(err){
+      // ignore
+    }
+  }
+
+  function normalizeStateFromStatus(st){
+    if(!st || typeof st !== "object") return null;
+    if(st.run === 1 || st.run === true) return "RUN";
+    if(st.run === 0 || st.run === false) return "STOP";
+    return null;
+  }
+
+  function appendTrailState(state, tsMs){
+    if(!state) return;
+
+    const ts = Number.isFinite(Number(tsMs)) ? Number(tsMs) : Date.now();
+
+    if(lastTrailState === state){
+      return;
+    }
+
+    stateTrail.push({ ts_ms: ts, state: state });
+    stateTrail.sort((a,b) => a.ts_ms - b.ts_ms);
+
+    lastTrailState = state;
+    lastTrailTsMs = ts;
+
+    saveTrail();
+  }
+
+  function stateLabelFromCode(code){
+    if(code === "RUN") return "PRODUZINDO";
+    if(code === "STOP") return "PARADO";
+    return "FORA DO HORARIO";
+  }
+
+  function isFutureHour(isoDay, hourIdx){
+    const day = String(isoDay);
+    const now = new Date();
+    const today = todayIsoLocal();
+
+    if(day > today) return true;
+    if(day < today) return false;
+
+    // same day
+    const h = Number(hourIdx);
+    if(!Number.isFinite(h)) return false;
+    return h > now.getHours();
+  }
+
+  function toDayStartMsLocal(isoDay){
+    const d = String(isoDay);
+    return new Date(d + "T00:00:00").getTime();
+  }
+
+  function toHourStartMsLocal(isoDay, hourIdx){
+    const d = String(isoDay);
+    const h = String(hourIdx).padStart(2, "0");
+    return new Date(d + "T" + h + ":00:00").getTime();
+  }
+
+  function segmentsForHour(isoDay, hourIdx){
+    const startMs = toHourStartMsLocal(isoDay, hourIdx);
+    const endMs = startMs + (60 * 60 * 1000);
+
+    // initial state: last event before start
+    let initState = null;
+    for(let i=stateTrail.length-1;i>=0;i--){
+      if(stateTrail[i].ts_ms <= startMs){
+        initState = stateTrail[i].state;
+        break;
+      }
+    }
+
+    const segs = [];
+    let curState = initState;
+    let curStart = startMs;
+
+    // events within hour
+    for(const ev of stateTrail){
+      if(ev.ts_ms <= startMs) continue;
+      if(ev.ts_ms >= endMs) break;
+
+      if(curState !== null){
+        segs.push({ state: curState, start_ms: curStart, end_ms: ev.ts_ms });
+      }
+
+      curState = ev.state;
+      curStart = ev.ts_ms;
+    }
+
+    // tail to end (or to now if current hour today)
+    let capEnd = endMs;
+    const now = Date.now();
+    const today = todayIsoLocal();
+    if(String(isoDay) === today){
+      const nowHourStart = toHourStartMsLocal(today, new Date().getHours());
+      if(startMs == nowHourStart){
+        capEnd = Math.min(endMs, now);
+      }
+    }
+
+    if(curState !== null && curStart < capEnd){
+      segs.push({ state: curState, start_ms: curStart, end_ms: capEnd });
+    }
+
+    return { startMs, endMs, segs };
+  }
+
+  function buildTrailBar(isoDay, hourIdx){
+    const bar = document.createElement("div");
+    bar.className = "pbar";
+
+    // future hours always grey
+    if(isFutureHour(isoDay, hourIdx)){
+      const fill = document.createElement("div");
+      fill.className = "pfill np";
+      fill.style.width = "100%";
+      bar.appendChild(fill);
+      return { bar, lastState: null };
+    }
+
+    const info = segmentsForHour(isoDay, hourIdx);
+    const totalMs = Math.max(1, info.endMs - info.startMs);
+
+    let lastState = null;
+    if(!info.segs.length){
+      const fill = document.createElement("div");
+      fill.className = "pfill np";
+      fill.style.width = "100%";
+      bar.appendChild(fill);
+      return { bar, lastState: null };
+    }
+
+    for(const seg of info.segs){
+      const left = ((seg.start_ms - info.startMs) / totalMs) * 100;
+      const width = ((seg.end_ms - seg.start_ms) / totalMs) * 100;
+
+      const fill = document.createElement("div");
+      fill.className = "pfill";
+      fill.style.position = "absolute";
+      fill.style.left = left.toFixed(4) + "%";
+      fill.style.width = Math.max(0, width).toFixed(4) + "%";
+
+      if(seg.state === "RUN") fill.classList.add("run");
+      else if(seg.state === "STOP") fill.classList.add("stop");
+      else fill.classList.add("np");
+
+      bar.appendChild(fill);
+      lastState = seg.state;
+    }
+
+    // make bar relative for absolute segments
+    bar.style.position = "relative";
+
+    return { bar, lastState };
+  }
+
+
+
+
+  function dateValueToISO(value){
+    if(!value || typeof value !== "string") return "";
+    const s = value.trim();
+    if(!s) return "";
+
+    if(/^(\d{4})-(\d{2})-(\d{2})$/.test(s)) return s;
+
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+    return "";
+  }
+
+  function getRowDateValue(r){
+    if(!r || typeof r !== "object") return "";
+    return String(r.data_ref || r.data || r.dia_ref || r.date || "").trim();
+  }
+
+  function getRowDateISO(r){
+    return dateValueToISO(getRowDateValue(r));
+  }
+
+  function normalizeDateInput(v){
+    const s = String(v || "").trim();
+    if(!s) return "";
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if(m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return "";
+  }
+
+  function fmtNum(n){
+    const x = Number(n);
+    if(!Number.isFinite(x)) return "0";
+    return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
+  }
+
+  function fmtInt(n){
+    return fmtNum(n);
+  }
+
+  
+
+  function fmtMinutes(v){
+    const x = Number(v);
+    if(!Number.isFinite(x)) return "-";
+    const m = Math.max(0, Math.floor(x));
+    return String(m) + " min";
+  }
+
+  function pickFirstNumber(obj, keys){
+    for(const k of keys){
+      if(obj && Object.prototype.hasOwnProperty.call(obj, k)){
+        const x = Number(obj[k]);
+        if(Number.isFinite(x)) return x;
+      }
+    }
+    return null;
+  }
+
+function safeText(v){
+    if(v === null || v === undefined) return "";
+    return String(v);
+  }
+
+  function buildOpLabel(op){
+    const osNum = safeText(op && (op.os || op.os_num || op.ordem_servico)).trim();
+    const lote = safeText(op && op.lote).trim();
+    const operador = safeText(op && op.operador).trim();
+    const status = safeText(op && op.status).trim();
+
+    let parts = [];
+    if(osNum) parts.push("OP " + osNum);
+    if(lote) parts.push("Lote " + lote);
+    if(operador) parts.push("Operador " + operador);
+    if(status) parts.push(status);
+
+    return parts.join(" | ");
+  }
+
+  function statusClass(status){
+    const s = safeText(status).toUpperCase();
+    if(s.includes("ATIV") || s.includes("ABERT") || s.includes("EM_ANDAMENTO")) return "op-pill-ativa";
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return "op-pill-encerrada";
+    return "op-pill-unk";
+  }
+
+  function anyText(v){
+    const s = safeText(v).trim();
+    return s ? s : "-";
+  }
+
+  function fmtIsoDateTimeLocal(v){
+    const s = safeText(v).trim();
+    if(!s) return "-";
+    if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
+      return s.replace("T", " ").slice(0, 19);
+    }
+    return s;
+  }
+
+  const qs = new URLSearchParams(window.location.search);
+  const machineId = qs.get("machine_id") || qs.get("machine") || "";
+
+  const clienteId = qs.get("cliente_id") || qs.get("cliente") || "";
+
+  const elMachine = document.getElementById("machine-name");
+  const elDate = document.getElementById("filter-date");
+  const elBtnReset = document.getElementById("btn-reset-date");
+  const tbody = document.getElementById("historico-body");
+
+  
+  /* Modal */
+  const modalBackdrop = document.getElementById("op-modal-backdrop");
+  const modalClose = document.getElementById("op-modal-close");
+  const modalCancel = document.getElementById("op-modal-cancel");
+  const modalSave = document.getElementById("op-modal-save");
+  const modalPdf = document.getElementById("op-modal-pdf");
+  const modalTitle = document.getElementById("op-modal-title");
+
+  /* Modal Dia */
+  const dayModalBackdrop = document.getElementById("day-modal-backdrop");
+  const dayModalClose = document.getElementById("day-modal-close");
+  const dayModalTitle = document.getElementById("day-modal-title");
+  const dayHourTbody = document.getElementById("day-hour-tbody");
+
+  let dayModalTimer = null;
+  let dayModalCurrentDay = null;
+
+
+  const opv_machine = document.getElementById("opv_machine");
+  const opv_operador = document.getElementById("opv_operador");
+  const opv_lote = document.getElementById("opv_lote");
+  const opv_status = document.getElementById("opv_status");
+  const opv_os = document.getElementById("opv_os");
+  const opv_gr_fio = document.getElementById("opv_gr_fio");
+  const opv_conv = document.getElementById("opv_conv");
+  const opv_bobinas_resumo = document.getElementById("opv_bobinas_resumo");
+  const opv_started = document.getElementById("opv_started");
+  const opv_ended = document.getElementById("opv_ended");
+
+  const bobinasWrap = document.getElementById("bobinas-wrap");
+  const ope_obs = document.getElementById("ope_obs");
+
+  let currentOp = null;
+
+  function num0(v){
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  function fmtMeters2Floor(v){
+    const n = Number(v);
+    if(!Number.isFinite(n)) return "0.00";
+    const floored = Math.floor(n * 100) / 100;
+    return floored.toFixed(2);
+  }
+
+  function calcMatBom(pcsTotal, cost, refugo, saco){
+    const t = Math.floor(num0(pcsTotal));
+    const c = Math.floor(num0(cost));
+    const r = Math.floor(num0(refugo));
+    const s = Math.floor(num0(saco));
+    let res = t - (c + r + s);
+    if(res < 0) res = 0;
+    return res;
+  }
+
+  function clearBobinasUI(){
+    if(!bobinasWrap) return;
+    bobinasWrap.innerHTML = "";
+  }
+
+  function bobinasResumo(bobinasItens){
+    if(!Array.isArray(bobinasItens) || bobinasItens.length === 0) return "-";
+    let totalM = 0;
+    bobinasItens.forEach((b) => {
+      totalM += num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0));
+    });
+    return String(bobinasItens.length) + " bobina(s) | " + String(Math.floor(totalM)) + " m";
+  }
+
+  function createBobinaCard(item, idx, convMporPcs, opts){
+    const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
+    const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
+    const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
+
+    const vCost = Math.floor(num0(item && (item.qtd_cost_elas ?? item.cost_elas ?? 0)));
+    const vRef = Math.floor(num0(item && (item.refugo ?? 0)));
+    const vSaco = Math.floor(num0(item && (item.qtd_saco_caixa ?? item.saco_caixa ?? 0)));
+
+    const card = document.createElement("div");
+    card.className = "bobina-card";
+    card.setAttribute("data-bobina-idx", String(idx));
+
+    const title = document.createElement("div");
+    title.className = "bobina-title";
+    title.textContent = "Bobina " + String(idx + 1);
+
+    const sub = document.createElement("div");
+    sub.className = "bobina-sub";
+    sub.textContent = "Comprimento: " + String(Math.floor(comprimentoM)) + " m";
+    title.appendChild(sub);
+
+    const grid = document.createElement("div");
+    grid.className = "bobina-grid";
+
+    function fieldRO(label, value, col){
+      const w = document.createElement("div");
+      w.className = "op-field op-ro " + col;
+
+      const l = document.createElement("label");
+      l.textContent = label;
+
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.readOnly = true;
+      inp.value = String(value);
+
+      w.appendChild(l);
+      w.appendChild(inp);
+      return w;
+    }
+
+    function fieldEdit(label, value, col, name){
+      const w = document.createElement("div");
+      w.className = "op-field op-edit " + col;
+
+      const l = document.createElement("label");
+      l.textContent = label;
+
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.inputMode = "numeric";
+      inp.min = "0";
+      inp.step = "1";
+      inp.value = String(Math.floor(num0(value)));
+      inp.setAttribute("data-field", name);
+
+      w.appendChild(l);
+      w.appendChild(inp);
+      return {wrap: w, input: inp};
+    }
+
+    const conv = num0(convMporPcs);
+    opts = opts || {};
+    const forceZeroLive = !!opts.forceZeroLive;
+
+    // Opcao 1: nao estimar pcs/metragem por comprimento/conv.
+    // Sem pcs_total real vindo do backend, o valor deve iniciar zerado e aguardar o primeiro update.
+    let derivedPcs = pcsTotal;
+    let derivedMetroConsumido = metroConsumido;
+
+    // Read-only context
+    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
+    let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    const startedStr = fmtIsoDateTimeLocal(startedRaw);
+    let endedStr = fmtIsoDateTimeLocal(endedRaw);
+
+    // Alguns backends preenchem ended_at igual started_at na criacao. Tratar como "ainda nao encerrada".
+    const placeholderEnd = (endedStr && endedStr !== "-" && endedStr === startedStr);
+    if(placeholderEnd){
+      endedRaw = "";
+      endedStr = "";
+    }
+
+    const bobinaAberta = (!endedRaw) || placeholderEnd;
+
+    let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
+    if(!(tempoMin > 0)){
+      try{
+        const ds = new Date(String(startedRaw || ""));
+        const de = new Date(String(endedRaw || ""));
+        if(!isNaN(ds.getTime()) && !isNaN(de.getTime())){
+          const diff = Math.floor((de.getTime() - ds.getTime()) / 60000);
+          if(diff > 0) tempoMin = diff;
+        }
+      }catch(e){
+        // ignore
+      }
+    }
+
+    // Forcar inicio zerado/vazio no modal para OP ativa do dia (evita valores fantasmas antes do primeiro update)
+    // Nao depender de ended_at da bobina, porque o backend pode popular ended_at prematuramente.
+    if(forceZeroLive){
+      derivedPcs = 0;
+      derivedMetroConsumido = 0;
+      tempoMin = 0;
+      endedStr = "";
+    }
+
+    grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
+    grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
+    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3"));
+    grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
+
+    grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
+    grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
+
+    // Editable (yellow)
+    const fCost = fieldEdit("Qtd. cost. elas.", vCost, "col-3", "qtd_cost_elas");
+    const fRef = fieldEdit("Refugo", vRef, "col-3", "refugo");
+    const fSaco = fieldEdit("Qtd. saco ou caixa", vSaco, "col-3", "qtd_saco_caixa");
+
+    // Computed (read-only)
+    const fMat = fieldRO("Qtd. mat bom", calcMatBom(derivedPcs, vCost, vRef, vSaco), "col-3");
+    const matInput = fMat.querySelector("input");
+    if(matInput){
+      matInput.setAttribute("data-field", "qtd_mat_bom");
+    }
+
+    grid.appendChild(fMat);
+    grid.appendChild(fCost.wrap);
+    grid.appendChild(fRef.wrap);
+    grid.appendChild(fSaco.wrap);
+
+    function recalc(){
+      const cost = num0(fCost.input.value);
+      const ref = num0(fRef.input.value);
+      const saco = num0(fSaco.input.value);
+      const mat = calcMatBom(derivedPcs, cost, ref, saco);
+      if(matInput) matInput.value = String(mat);
+    }
+
+    fCost.input.addEventListener("input", recalc);
+    fRef.input.addEventListener("input", recalc);
+    fSaco.input.addEventListener("input", recalc);
+
+    card.appendChild(title);
+    card.appendChild(grid);
+    return card;
+  }
+
+  function openModal(op){
+    currentOp = op || null;
+
+    if(modalTitle){
+      const osNum = safeText(op && (op.os || op.os_num || op.ordem_servico)).trim();
+      const lote = safeText(op && op.lote).trim();
+
+      if(osNum && lote){
+        modalTitle.textContent = "OP " + osNum + " - Lote " + lote;
+      }else if(osNum){
+        modalTitle.textContent = "OP " + osNum;
+      }else if(lote){
+        modalTitle.textContent = "OP - Lote " + lote;
+      }else{
+        modalTitle.textContent = "OP";
+      }
+    }
+
+    if(opv_machine) opv_machine.value = anyText(op && op.machine_id ? op.machine_id : machineId);
+    if(opv_operador) opv_operador.value = anyText(op && op.operador);
+    if(opv_lote) opv_lote.value = anyText(op && op.lote);
+    if(opv_status) opv_status.value = anyText(op && op.status);
+
+    if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
+    if(opv_gr_fio) opv_gr_fio.value = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
+    if(opv_conv) opv_conv.value = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
+
+    const opStatus = safeText(op && op.status).toUpperCase();
+    const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
+    const diaRef = safeText(op && op.__dia_ref);
+    const isHoje = (diaRef && diaRef === todayIsoLocal());
+    // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
+    // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
+    let temProducaoReal = false;
+    try {
+      const itensCheck = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+      let accPcs = 0;
+      let accMetro = 0;
+      let accMatBom = 0;
+      let accTempo = 0;
+      if(Array.isArray(itensCheck)){
+        itensCheck.forEach((it) => {
+          accPcs += num0(it && (it.pcs_total ?? it.total_pcs ?? 0));
+          accMetro += num0(it && (it.metro_consumido ?? it.metro_linear_consumido ?? 0));
+          accMatBom += num0(it && (it.qtd_mat_bom ?? it.mat_bom ?? 0));
+          accTempo += num0(it && (it.tempo_consumo_min ?? it.tempo_min ?? 0));
+        });
+      }
+      const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
+      const opMetros = num0(op && (op.op_metros ?? op.total_m ?? 0));
+      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0);
+    } catch(e) { temProducaoReal = false; }
+
+    const isLiveHoje = (!opEncerrada) && isHoje;
+    const forceZeroLive = isLiveHoje && !temProducaoReal;
+
+    const opStartedStr = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
+    let opEndedStr = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
+    if(opEndedStr && opEndedStr !== "-" && opEndedStr === opStartedStr) opEndedStr = "";
+    if(forceZeroLive) opEndedStr = "";
+
+    if(opv_started) opv_started.value = opStartedStr;
+    if(opv_ended) opv_ended.value = opEndedStr;
+
+    if(ope_obs) ope_obs.value = safeText(op && op.observacoes);
+
+    const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
+
+    clearBobinasUI();
+
+    const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+    if(Array.isArray(itens) && itens.length > 0){
+      if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
+      itens.forEach((b, i) => {
+        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive});
+        if(bobinasWrap) bobinasWrap.appendChild(card);
+      });
+    }else{
+      if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
+      // Fallback legacy: cria uma bobina virtual com base no total da OP
+      const totalPcs = Math.floor(num0(op && (op.total_pcs ?? op.op_pcs ?? op.produzido ?? 0)));
+      const comprimentoM = num0(op && (op.bobina ?? 0));
+      const metroConsumido = (totalPcs > 0 && convMporPcs > 0) ? (totalPcs * convMporPcs) : 0;
+
+      const legacy = {
+        comprimento_m: comprimentoM,
+        pcs_total: totalPcs,
+        metro_consumido: metroConsumido,
+        qtd_cost_elas: num0(op && (op.qtd_cost_elas ?? 0)),
+        refugo: num0(op && (op.refugo ?? op.refugo_total ?? 0)),
+        qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
+      };
+
+      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive});
+      if(bobinasWrap) bobinasWrap.appendChild(card);
+    }
+
+    if(modalBackdrop){
+      modalBackdrop.style.display = "flex";
+      modalBackdrop.setAttribute("aria-hidden", "false");
+    }
+  }
+
+  function closeModal(){
+    currentOp = null;
+    if(modalBackdrop){
+      modalBackdrop.style.display = "none";
+      modalBackdrop.setAttribute("aria-hidden", "true");
+    }
+  }
+
+
+  function closeDayModal(){
+    if(dayModalBackdrop){
+      dayModalBackdrop.classList.remove("open");
+      dayModalBackdrop.style.display = "none";
+      dayModalBackdrop.setAttribute("aria-hidden", "true");
+    }
+
+    if(dayModalTimer){
+      clearInterval(dayModalTimer);
+      dayModalTimer = null;
+    }
+    dayModalCurrentDay = null;
+  }
+
+  function parseTs(v){
+    if(v === null || v === undefined) return null;
+    if(typeof v === "number"){
+      // aceita ms ou s
+      if(v < 2000000000){ return new Date(v * 1000); }
+      return new Date(v);
+    }
+    if(typeof v === "string"){
+      const d = new Date(v);
+      if(!isNaN(d.getTime())) return d;
+    }
+    return null;
+  }
+
+  function clamp(n, a, b){
+    return Math.max(a, Math.min(b, n));
+  }
+
+  function buildHourBar(isoDay, hourIdx, segments){
+    const bar = document.createElement("div");
+    bar.className = "tbar";
+
+    const day = isoDay;
+    const hh = String(hourIdx).padStart(2, "0");
+    const hourStart = new Date(day + "T" + hh + ":00:00");
+    const hourEnd = new Date(day + "T" + hh + ":59:59");
+
+    const now = new Date();
+    const isToday = (day === todayIsoLocal());
+    const isCurrentHour = isToday && (now.getHours() === hourIdx);
+    const capEnd = (isCurrentHour && now < hourEnd) ? now : hourEnd;
+
+    const totalMs = Math.max(1, hourEnd.getTime() - hourStart.getTime());
+
+    function parseInDay(dayIso, value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === "string" && /^\d{2}:\d{2}(:\d{2})?$/.test(value)){
+        const t = value.length === 5 ? (value + ":00") : value;
+        return new Date(dayIso + "T" + t);
+      }
+      return parseTs(value);
+    }
+
+    let lastPctEnd = 0;
+
+    (Array.isArray(segments) ? segments : []).forEach(seg=>{
+      const state = (seg && (seg.state || seg.status || seg.color)) ? String(seg.state || seg.status || seg.color) : "NP";
+      const startStr = seg && (seg.start || seg.started_at || seg.ts_start) ? (seg.start || seg.started_at || seg.ts_start) : null;
+      const endStr = seg && (seg.end || seg.ended_at || seg.ts_end) ? (seg.end || seg.ended_at || seg.ts_end) : null;
+
+      const startTs = parseInDay(day, startStr) || hourStart;
+      const endTsRaw = parseInDay(day, endStr);
+      const endTs = endTsRaw || capEnd;
+
+      const st = startTs < hourStart ? hourStart : startTs;
+      const en = endTs > capEnd ? capEnd : endTs;
+
+      if(en <= st) return;
+
+      const sp = ((st.getTime() - hourStart.getTime()) / totalMs) * 100;
+      const ep = ((en.getTime() - hourStart.getTime()) / totalMs) * 100;
+
+      const startPct = Math.max(lastPctEnd, sp);
+      const endPct = Math.max(startPct, ep);
+
+      let cls = "np";
+      if(state === "RUN" || state === "PROD" || state === "PRODUZINDO" || state === "GREEN"){ cls = "run"; }
+      else if(state === "STOP" || state === "PARADO" || state === "PAUSA" || state === "RED"){ cls = "stop"; }
+      else if(state === "NP" || state === "NAO_PROGRAMADO" || state === "CINZA" || state === "GRAY" || state === "GREY"){ cls = "np"; }
+
+      const div = document.createElement("div");
+      div.className = "tseg " + cls;
+      div.style.width = (endPct - startPct).toFixed(3) + "%";
+      bar.appendChild(div);
+
+      lastPctEnd = endPct;
+    });
+
+    if(!bar.children.length){
+      const div = document.createElement("div");
+      div.className = "tseg np";
+      div.style.width = "100%";
+      bar.appendChild(div);
+    }
+
+    return bar;
+  }
+
+  function buildLiveProgressBar(isoDay, hourIdx, row){
+    const bar = document.createElement("div");
+    bar.className = "pbar";
+
+    const fill = document.createElement("div");
+    fill.className = "pfill";
+
+    const meta = Number(row && (row.meta ?? row.meta_hora ?? 0)) || 0;
+    const prod = Number(row && (row.produzido ?? row.producao ?? 0)) || 0;
+
+    let cls = "stop";
+    if(meta <= 0){
+      cls = "np";
+    }else if(prod >= meta){
+      cls = "run";
+    }else{
+      cls = "stop";
+    }
+    fill.classList.add(cls);
+
+    const day = String(isoDay || "").trim();
+    const now = new Date();
+    const today = todayIsoLocal();
+
+    let pct = 0;
+
+    if(meta > 0){
+      pct = clamp((prod / meta) * 100, 0, 100);
+    }else{
+      pct = 0;
+    }
+
+    fill.style.width = pct.toFixed(3) + "%";
+    bar.appendChild(fill);
+    return bar;
+  }
+
+
+  async function fetchDayDetail(isoDay){
+    if(!machineId) throw new Error("machine_id vazio");
+
+    // Compatibilidade: tenta mais de um caminho (dependendo de como o blueprint foi montado)
+    const candidates = [
+      `/producao/api/producao/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`,
+      `/api/producao/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`,
+      `/producao/detalhe-dia?machine_id=${encodeURIComponent(machineId)}&date=${encodeURIComponent(isoDay)}`
+    ];
+
+    let lastErr = null;
+
+    for(const url of candidates){
+      try{
+        const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+        if(resp.ok){
+          return await resp.json();
+        }
+
+        // Se for 404, tenta o proximo candidato
+        if(resp.status === 404){
+          lastErr = new Error("Endpoint nao encontrado: " + url);
+          continue;
+        }
+
+        lastErr = new Error("Falha ao buscar detalhe do dia (HTTP " + resp.status + ")");
+      }catch(e){
+        lastErr = e;
+      }
+    }
+
+    throw (lastErr || new Error("Falha ao buscar detalhe do dia"));
+  }
+
+
+  function renderDayDetail(payload){
+    const isoDay = payload && payload.date ? String(payload.date) : "";
+    const effectiveId = payload && payload.effective_machine_id ? String(payload.effective_machine_id) : "";
+    const machineId = payload && payload.machine_id ? String(payload.machine_id) : "";
+
+    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay) + (effectiveId && effectiveId !== machineId ? (" (id efetivo: " + effectiveId + ")") : "");
+
+    const hours = (payload && Array.isArray(payload.hours)) ? payload.hours : [];
+    dayHourTbody.innerHTML = "";
+
+    if(!hours.length){
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Sem dados.</td></tr>';
+      return;
+    }
+
+    hours.forEach(h=>{
+      const hourIdx = Number(h.hour ?? h.hora ?? h.hora_idx ?? 0);
+      const tr = document.createElement("tr");
+
+      const tdH = document.createElement("td");
+      tdH.textContent = String(hourIdx).padStart(2,"0") + ":00";
+      tr.appendChild(tdH);
+
+      const tdD = document.createElement("td");
+
+      const wrap = document.createElement("div");
+      wrap.className = "hwrap";
+
+      
+
+      const meta = pickFirstNumber(h, ["meta", "meta_hora", "meta_h"]);
+      const prod = pickFirstNumber(h, ["produzido", "producao", "prod", "produzido_hora"]);
+      const tProdMin = pickFirstNumber(h, ["tempo_produzindo_min", "tempo_produzindo_minutos", "tempo_produzindo" ]);
+      const tStopMin = pickFirstNumber(h, ["tempo_parado_min", "tempo_parado_minutos", "tempo_parado" ]);
+      const qtdParadas = pickFirstNumber(h, ["qtd_paradas", "paradas", "quantidade_paradas" ]);
+
+      const pills = document.createElement("div");
+      pills.className = "pills";
+      pills.innerHTML =
+        '<span class="pill">Meta ' + (meta === null ? '-' : fmtInt(meta)) + '</span>' +
+        '<span class="pill">Prod ' + (prod === null ? '-' : fmtInt(prod)) + '</span>' +
+        '<span class="pill">Tempo Prod ' + (tProdMin === null ? '-' : fmtMinutes(tProdMin)) + '</span>' +
+        '<span class="pill">Tempo Parado ' + (tStopMin === null ? '-' : fmtMinutes(tStopMin)) + '</span>' +
+        '<span class="pill">Paradas ' + (qtdParadas === null ? '-' : fmtInt(qtdParadas)) + '</span>';
+      wrap.appendChild(pills);
+
+const label = document.createElement("div");
+      label.className = "hour-top";
+      const st = buildTrailBar(isoDay, hourIdx);
+      wrap.appendChild(st.bar);
+
+
+      tdD.appendChild(wrap);
+      tr.appendChild(tdD);
+
+      dayHourTbody.appendChild(tr);
+    });
+  }
+  async function refreshDayModal(preserveScroll){
+    if(!dayModalCurrentDay) return;
+
+    const bodyEl = dayModalBackdrop.querySelector(".day-modal-body");
+    const prevScroll = bodyEl ? bodyEl.scrollTop : 0;
+
+    try{
+      const payload = await fetchDayDetail(dayModalCurrentDay);
+      renderDayDetail(payload);
+    }catch(err){
+      console.error(err);
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
+    }
+
+    if(preserveScroll && bodyEl){
+      bodyEl.scrollTop = prevScroll;
+    }
+  }
+
+
+  async function openDayModal(dateIso){
+    dayModalCurrentDay = String(dateIso || "");
+    if(!dayModalCurrentDay) return;
+
+    dayModalBackdrop.classList.add("open");
+    dayModalBackdrop.style.display = "";
+    dayModalBackdrop.setAttribute("aria-hidden", "false");
+
+    await refreshDayModal(false);
+
+    if(dayModalTimer){
+      clearInterval(dayModalTimer);
+      dayModalTimer = null;
+    }
+    dayModalTimer = setInterval(()=>{ refreshDayModal(true); }, 5000);
+  }
+
+  function escapeHtml(s){
+    return String(s || "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+  }
+
+  function buildOpPrintHtml(op){
+    const title = (op && op.lote) ? ("OP - Lote " + escapeHtml(op.lote)) : "OP";
+    const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
+
+    const bobinas = Array.isArray(op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) ? (op.bobinas_itens || op.bobinas_items || op.bobinas) : [];
+
+    function row2(label, value){
+      return `<tr><td class="k">${escapeHtml(label)}</td><td class="v">${escapeHtml(value)}</td></tr>`;
+    }
+
+    let infoRows = "";
+    infoRows += row2("Maquina", anyText(op && (op.machine_id || machineId)));
+    infoRows += row2("Operador", anyText(op && op.operador));
+    infoRows += row2("Lote", anyText(op && op.lote));
+    infoRows += row2("Status", anyText(op && op.status));
+    infoRows += row2("OS", anyText(op && (op.os || op.os_num || op.ordem_servico)));
+    infoRows += row2("GR e/ou fio", anyText(op && (op.gr_fio || op.gr_e_ou_fio)));
+    infoRows += row2("Conversao m/pcs", anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs)));
+    infoRows += row2("HS-inicial", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
+    infoRows += row2("HS-termino", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
+
+    let bobinasHtml = "";
+    if(bobinas.length === 0){
+      bobinasHtml = `<tr><td colspan="8" class="empty">Sem bobinas registradas.</td></tr>`;
+    }else{
+      bobinasHtml = bobinas.map((b, i) => {
+        const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
+        const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
+        const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
+        const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
+        const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
+        const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
+        const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
+        const ref = Math.floor(num0(b && (b.refugo ?? 0)));
+        const saco = Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)));
+        const mat = calcMatBom(pcs, cost, ref, saco);
+
+        return `
+          <tr>
+            <td class="c">${i + 1}</td>
+            <td class="r">${comprimento}</td>
+            <td class="r">${pcs}</td>
+            <td class="r">${metro}</td>
+            <td class="r">${tempo}</td>
+            <td>${escapeHtml(hi)}</td>
+            <td>${escapeHtml(hf)}</td>
+            <td class="r">${mat}</td>
+          </tr>
+          <tr class="sub">
+            <td></td>
+            <td colspan="2">Qtd. cost. elas.: <b>${cost}</b></td>
+            <td colspan="2">Refugo: <b>${ref}</b></td>
+            <td colspan="3">Qtd. saco/caixa: <b>${saco}</b></td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
+
+    return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>${title}</title>
+<style>
+  body{ font-family: Arial, sans-serif; color:#0f172a; margin:24px; }
+  h1{ font-size:18px; margin:0 0 12px 0; }
+  table{ width:100%; border-collapse:collapse; font-size:12px; }
+  td, th{ border:1px solid #e5e7eb; padding:8px; vertical-align:top; }
+  th{ background:#f1f5f9; text-align:left; }
+  .meta td{ border:1px solid #e5e7eb; }
+  .k{ width:180px; font-weight:700; background:#f8fafc; }
+  .v{ }
+  .r{ text-align:right; }
+  .text-right{ text-align:right; }
+  .text-center{ text-align:center; }
+  .c{ text-align:center; }
+  .sub td{ background:#fafafa; border-top:none; }
+  .empty{ text-align:center; color:#64748b; }
+  .section{ margin-top:16px; }
+  .obs{ white-space:pre-wrap; border:1px solid #e5e7eb; padding:10px; border-radius:8px; }
+  @media print{
+    body{ margin:0; }
+  }
+</style>
+</head>
+<body>
+  <h1>${title}</h1>
+
+  <table class="meta">
+    <tbody>
+      ${infoRows}
+    </tbody>
+  </table>
+
+  <div class="section">
+    <table>
+      <thead>
+        <tr>
+          <th class="c">Bobina</th>
+          <th class="r">Comprimento (m)</th>
+          <th class="r">Total pcs</th>
+          <th class="r">Metro consumido (m)</th>
+          <th class="r">Tempo (min)</th>
+          <th>Hora inicial</th>
+          <th>Hora final</th>
+          <th class="r">Mat bom</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${bobinasHtml}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="section">
+    <h1>Observacoes</h1>
+    <div class="obs">${obs || "-"}</div>
+  </div>
+</body>
+</html>`;
+  }
+
+  function openPrintWindow(){
+    if(!currentOp){
+      alert("OP invalida.");
+      return;
+    }
+    const html = buildOpPrintHtml(currentOp);
+    const w = window.open("", "_blank");
+    if(!w){
+      alert("Bloqueio de popup. Libere popups para gerar PDF.");
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try{ w.print(); }catch(e){} }, 250);
+  }
+
+
+  if(modalClose) modalClose.addEventListener("click", closeModal);
+  if(modalCancel) modalCancel.addEventListener("click", closeModal);
+
+  if(modalBackdrop){
+    modalBackdrop.addEventListener("click", function(e){
+      if(e && e.target === modalBackdrop){
+        closeModal();
+      }
+    });
+  }
+
+  document.addEventListener("keydown", function(e){
+    if(e && e.key === "Escape"){
+      if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
+        closeDayModal();
+        return;
+      }
+      if(modalBackdrop && modalBackdrop.style.display === "flex"){
+        closeModal();
+        return;
+      }
+    }
+  });
+
+  if(modalSave){
+    modalSave.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+      const bobinasPayload = [];
+      if(bobinasWrap){
+        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
+        cards.forEach((card) => {
+          const idx = Number(card.getAttribute("data-bobina-idx") || "0");
+
+          const getField = (name) => {
+            const el = card.querySelector('[data-field="' + name + '"]');
+            if(!el) return 0;
+            return num0(el.value);
+          };
+
+          bobinasPayload.push({
+            idx: idx,
+            qtd_cost_elas: Math.floor(getField("qtd_cost_elas")),
+            refugo: Math.floor(getField("refugo")),
+            qtd_saco_caixa: Math.floor(getField("qtd_saco_caixa"))
+          });
+        });
+      }
+
+      const payload = {
+        op_id: opId,
+        observacoes: (ope_obs && ope_obs.value) ? ope_obs.value : "",
+        bobinas: bobinasPayload
+      };
+
+      modalSave.disabled = true;
+
+      try{
+        const resp = await fetch("/producao/op/salvar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json().catch(() => null);
+
+        if(!resp.ok){
+          const msg = data && (data.error || data.message)
+            ? (data.error || data.message)
+            : ("Erro HTTP " + resp.status);
+          throw new Error(msg);
+        }
+
+        alert("OP salva com sucesso.");
+        closeModal();
+        await fetchHistorico();
+
+      }catch(err){
+        alert("Falha ao salvar OP: " + (err.message || err));
+      }finally{
+        modalSave.disabled = false;
+      }
+    });
+  }
+
+  if(modalPdf){
+    modalPdf.addEventListener("click", function(){
+      openPrintWindow();
+    });
+  }
+
+
+  function renderMsgRow(msg){
+    if(!tbody) return;
+    tbody.innerHTML = "";
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "text-center";
+    td.textContent = msg;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  function appendOpsRows(r){
+    if(!tbody) return;
+    const ops = r && r.ops;
+    if(!Array.isArray(ops) || ops.length === 0) return;
+
+    ops.forEach((op) => {
+      const trOp = document.createElement("tr");
+      trOp.className = "op-row";
+
+      const tdOp = document.createElement("td");
+      tdOp.colSpan = 4;
+
+      const pill = document.createElement("span");
+      pill.className = "op-pill " + statusClass(op && op.status);
+      pill.textContent = "OP";
+
+      const label = document.createElement("span");
+      label.textContent = " " + buildOpLabel(op);
+
+      tdOp.appendChild(pill);
+      tdOp.appendChild(label);
+
+      trOp.appendChild(tdOp);
+      tbody.appendChild(trOp);
+
+      trOp.addEventListener("click", function(e){
+        if(e){
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        // Se por algum motivo o modal do dia estiver aberto, fecha antes de abrir OP
+        if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
+          closeDayModal();
+        }
+
+        const op2 = Object.assign({}, op || {});
+        op2.__dia_ref = getRowDateISO(r);
+        openModal(op2);
+      });
+    });
+  }
+
+  function renderRows(rows){
+    if(!tbody) return;
+    tbody.innerHTML = "";
+
+    if(!Array.isArray(rows) || rows.length === 0){
+      renderMsgRow("Nenhum dado encontrado.");
+      return;
+    }
+
+    rows.forEach((r) => {
+      const tr = document.createElement("tr");
+
+      tr.className = "day-row";
+      tr.dataset.dayIso = getRowDateISO(r);
+
+      const tdData = document.createElement("td");
+      tdData.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
+
+      const tdProd = document.createElement("td");
+      tdProd.className = "text-right";
+      tdProd.textContent = fmtNum(r.produzido);
+
+      const tdBoas = document.createElement("td");
+      tdBoas.className = "text-right";
+      tdBoas.textContent = fmtNum(r.pecas_boas);
+
+      const tdRef = document.createElement("td");
+      tdRef.className = "text-right";
+      tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
+
+      tr.appendChild(tdData);
+      tr.appendChild(tdProd);
+      tr.appendChild(tdBoas);
+      tr.appendChild(tdRef);
+
+      tr.addEventListener("click", function(ev){
+        // Evita conflitar com clique em linhas de OP (elas sao outras trs)
+        const iso = tr.dataset.dayIso || "";
+        if(!iso) return;
+        openDayModal(iso);
+      });
+
+      tbody.appendChild(tr);
+
+      appendOpsRows(r);
+    });
+  }
+
+  let cache = null;
+  let liveTimer = null;
+  let lastMachineStatus = null;
+  let stateTrail = [];
+  let lastTrailState = null;
+  let lastTrailTsMs = null;
+
+
+  async function fetchStatus(){
+    if(!machineId) return null;
+
+    const url = `/machine/status?machine_id=${encodeURIComponent(machineId)}`;
+    const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+    if(!resp.ok){
+      throw new Error("Falha ao buscar status (HTTP " + resp.status + ")");
+    }
+    return await resp.json();
+  }
+
+  function applyLiveOverride(status){
+    if(!status || !cache || !Array.isArray(cache)) return;
+
+    const dayIso = normalizeDateInput(status.ultimo_dia || status._bd_dia_ref || status._ph_data_ref || "");
+    const v = Number(status.producao_turno);
+
+    if(!dayIso) return;
+    if(!Number.isFinite(v)) return;
+
+    let row = cache.find((r) => getRowDateISO(r) === dayIso);
+    if(!row){
+      row = {
+        data: dayIso,
+        data_ref: dayIso,
+        machine_id: machineId,
+        meta: Number(status.meta_turno) || 0,
+        ops: [],
+        produzido: 0,
+        pecas_boas: 0,
+        refugo_total: 0,
+        percentual: 0
+      };
+      cache.unshift(row);
+    }
+
+    row.produzido = v;
+    row.pecas_boas = v;
+
+    if(row.refugo_total === undefined && row.refugo !== undefined){
+      row.refugo_total = row.refugo;
+    }
+
+    const p = Number(status.percentual_turno);
+    if(Number.isFinite(p)){
+      row.percentual = p;
+    }
+  }
+
+if(dayModalClose){
+    dayModalClose.addEventListener("click", function(){
+      closeDayModal();
+    });
+  }
+
+  if(dayModalBackdrop){
+    dayModalBackdrop.addEventListener("click", function(e){
+      if(e && e.target === dayModalBackdrop){
+        closeDayModal();
+      }
+    });
+  }
+
+  async function refreshLive(){
+    if(!machineId) return;
+    try{
+      const status = await fetchStatus();
+      const runVal = (status && (status.run === 1 || status.run === true)) ? 1 : ((status && (status.run === 0 || status.run === false)) ? 0 : null);
+      if(runVal !== null){
+        appendTrailState(runVal === 1 ? "RUN" : "STOP", Date.now());
+      }
+      applyLiveOverride(status);
+      applyFilterAndRender();
+    }catch(e){
+      // silencioso: historico continua com cache
+    }
+  }
+
+  async function fetchHistorico(){
+    if(!machineId){
+      renderMsgRow("Selecione uma maquina.");
+      return;
+    }
+
+    renderMsgRow("Carregando historico...");
+
+    try{
+      const url = `/producao/api/producao/historico?machine_id=${encodeURIComponent(machineId)}`;
+      const resp = await fetch(url, { method: "GET", headers: { "Accept": "application/json" } });
+      if(!resp.ok){
+        throw new Error("Falha ao buscar historico (HTTP " + resp.status + ")");
+      }
+      const data = await resp.json();
+      cache = Array.isArray(data) ? data : [];
+
+      await refreshLive();
+    }catch(err){
+      cache = [];
+      renderMsgRow("Falha ao carregar historico.");
+      return;
+    }
+
+    applyFilterAndRender();
+  }
+
+  function applyFilterAndRender(){
+    const iso = normalizeDateInput(elDate ? elDate.value : "");
+    if(!cache){
+      renderMsgRow("Carregando historico...");
+      return;
+    }
+    if(!iso){
+      renderRows(cache);
+      return;
+    }
+    const filtered = cache.filter((r) => getRowDateISO(r) === iso);
+    renderRows(filtered);
+  }
+
+  async function resetByDate(){
+    if(!machineId){ alert("Maquina nao selecionada."); return; }
+
+    const iso = normalizeDateInput(elDate ? elDate.value : "");
+    if(!iso){ alert("Selecione uma data."); return; }
+
+    if(!confirm("CONFIRMAR RESET DA PRODUCAO NA DATA " + isoToBr(iso) + "?\nEssa acao zera a producao do dia e reancora o baseline.")){
+      return;
+    }
+
+    try{
+      const resp = await fetch("/admin/reset-date", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ machine_id: machineId, date: iso })
+      });
+
+      let payload = null;
+      try{ payload = await resp.json(); }catch(e){ payload = null; }
+
+      if(!resp.ok){
+        const msg = (payload && (payload.error || payload.message)) ? (payload.error || payload.message) : ("Falha no reset (HTTP " + resp.status + ")");
+        throw new Error(msg);
+      }
+
+      alert("Reset por data executado.");
+      await fetchHistorico();
+    }catch(err){
+      alert(String(err && err.message ? err.message : err));
+    }
+  }
+
+  if(elDate){
+    elDate.addEventListener("change", applyFilterAndRender);
+    elDate.addEventListener("input", applyFilterAndRender);
+  }
+
+  if(elBtnReset){
+    elBtnReset.addEventListener("click", resetByDate);
+  }
+
+  function init(){
+    loadTrail();
+    fetchHistorico();
+
+    if(liveTimer){
+      clearInterval(liveTimer);
+      liveTimer = null;
+    }
+
+    liveTimer = setInterval(refreshLive, 5000);
+  }
+
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", init);
+  }else{
+    init();
+  }
+})();
+</script>
+
+{% endblock %}
