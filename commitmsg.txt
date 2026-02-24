@@ -1,4 +1,5 @@
-﻿fix(historico): corrigir fmtInt undefined no modal do dia e padronizar modal open/close
+﻿fix(historico): forcar cor no detalhe do dia por meta/prod quando segments vier inconsistente
 
-- adiciona fmtInt() (alias de fmtNum) para evitar ReferenceError no renderDayDetail
-- abre/fecha modal do dia via classe open (alinha com CSS e handler do Escape)
+- buildHourBar agora recebe meta/prod e aplica forceState (RUN/STOP/NP)
+- renderDayDetail passa meta/prod ao buildHourBar
+- mantém segmentacao visual, mas corrige cor geral conforme contagem
