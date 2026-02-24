@@ -1,7 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 15:56 America/Bahia
-# MOTIVO: Calcular e retornar tempo_produzindo_sec, tempo_parado_sec e qtd_paradas por hora no endpoint /api/producao/detalhe-dia com base nos segments.
-
+# LAST_RECODE: 2026-02-23 21:00 America/Bahia
+# MOTIVO: Detalhe-dia agora usa machine_state_event para gerar segmentos RUN/STOP e manter rastro de cores (verde/vermelho/cinza) no historico.
 
 from __future__ import annotations
 
@@ -73,46 +72,6 @@ def _get_conn() -> sqlite3.Connection:
 
     db_path = os.environ.get("INDFLOW_DB_PATH") or os.environ.get("DB_PATH") or "/data/indflow.db"
     return _sqlite_connect(db_path)
-
-
-def _hhmmss_to_sec(s: str) -> int:
-    try:
-        parts = (s or "").split(":")
-        if len(parts) != 3:
-            return 0
-        h = int(parts[0])
-        m = int(parts[1])
-        sec = int(parts[2])
-        return h * 3600 + m * 60 + sec
-    except Exception:
-        return 0
-
-
-def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
-    tempo_produzindo_sec = 0
-    tempo_parado_sec = 0
-    qtd_paradas = 0
-
-    last_state = None
-    for s in segs or []:
-        st = s.get("state")
-        start_s = s.get("start", "00:00:00")
-        end_s = s.get("end", "00:00:00")
-        a = _hhmmss_to_sec(start_s)
-        b = _hhmmss_to_sec(end_s)
-        dur = max(0, b - a)
-
-        if st == "RUN":
-            tempo_produzindo_sec += dur
-        elif st == "STOP":
-            tempo_parado_sec += dur
-            if last_state == "RUN":
-                qtd_paradas += 1
-
-        last_state = st
-
-    return tempo_produzindo_sec, tempo_parado_sec, qtd_paradas
-
 
 def _safe_int(v, default: int = 0) -> int:
     try:
@@ -830,9 +789,6 @@ def api_producao_detalhe_dia():
                                 "produzido": 0,
                                 "refugo": 0,
                                 "segments": _build_segments_for_hour(hs, he, True, []),
-                                "tempo_produzindo_sec": 0,
-                                "tempo_parado_sec": 0,
-                                "qtd_paradas": 0,
                             }
                         )
                     return jsonify(
@@ -865,8 +821,6 @@ def api_producao_detalhe_dia():
                 is_np = meta <= 0
                 segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
 
-                tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
-
                 horas.append(
                     {
                         "hour": h,
@@ -875,9 +829,6 @@ def api_producao_detalhe_dia():
                         "produzido": produzido,
                         "refugo": refugo,
                         "segments": segs,
-                        "tempo_produzindo_sec": tempo_produzindo_sec,
-                        "tempo_parado_sec": tempo_parado_sec,
-                        "qtd_paradas": qtd_paradas,
                     }
                 )
 
