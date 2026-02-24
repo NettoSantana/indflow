@@ -1,6 +1,7 @@
-﻿style(historico): remover textos de estado do layout e melhorar espacamento por hora
+﻿feat(detalhe-dia): adicionar calculos de tempo e quantidade de paradas por hora
 
-- remove labels PRODUZINDO/PARADO/FORA DO HORARIO
-- mantem rastro apenas visual por cor
-- aumenta espacamento entre informacoes e barra
-- melhora padding das pills
+- soma duracao_sec por state
+- tempo_produzindo_sec (state=1)
+- tempo_parado_sec (state=0)
+- qtd_paradas (transicao 1 -> 0)
+- mantem estrutura original do endpoint
