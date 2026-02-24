@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-24 05:56 America/Bahia
-MOTIVO: Exibir acima da barra por hora os campos do JSON (meta, produzido, tempo produzindo, tempo parado, qtd paradas) quando existirem, sem calcular via frontend.
+LAST_RECODE: 2026-02-24 06:02 America/Bahia
+MOTIVO: Remover textos PRODUZINDO/PARADO/FORA DO HORARIO do layout e aumentar espacamento das informacoes por hora.
 -->
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
@@ -540,6 +540,23 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   /* Clique na linha do dia */
   tr.day-row{ cursor:pointer; }
   tr.day-row:hover td{ background:#f8fafc; }
+
+
+  .hwrap{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .pills{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:4px;
+  }
+  .pill{
+    padding:4px 10px;
+    font-size:12px;
+  }
 
 </style>
 
@@ -1587,17 +1604,7 @@ function safeText(v){
 
 const label = document.createElement("div");
       label.className = "hour-top";
-
       const st = buildTrailBar(isoDay, hourIdx);
-      const stLabel = stateLabelFromCode(st.lastState);
-
-      const left = document.createElement("div");
-      left.style.fontWeight = "900";
-      left.style.color = "#0f172a";
-      left.textContent = stLabel;
-
-      label.appendChild(left);
-      wrap.appendChild(label);
       wrap.appendChild(st.bar);
 
 
