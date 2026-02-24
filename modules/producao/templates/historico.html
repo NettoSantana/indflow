@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 22:51 America/Bahia
-MOTIVO: Detalhe do dia com "rastro do estado" baseado somente em status.run (1=verde, 0=vermelho). Persistencia via localStorage. Ignorar meta/segments do JSON.
+LAST_RECODE: 2026-02-24 05:56 America/Bahia
+MOTIVO: Exibir acima da barra por hora os campos do JSON (meta, produzido, tempo produzindo, tempo parado, qtd paradas) quando existirem, sem calcular via frontend.
 -->
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
@@ -960,7 +960,26 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return fmtNum(n);
   }
 
-  function safeText(v){
+  
+
+  function fmtMinutes(v){
+    const x = Number(v);
+    if(!Number.isFinite(x)) return "-";
+    const m = Math.max(0, Math.floor(x));
+    return String(m) + " min";
+  }
+
+  function pickFirstNumber(obj, keys){
+    for(const k of keys){
+      if(obj && Object.prototype.hasOwnProperty.call(obj, k)){
+        const x = Number(obj[k]);
+        if(Number.isFinite(x)) return x;
+      }
+    }
+    return null;
+  }
+
+function safeText(v){
     if(v === null || v === undefined) return "";
     return String(v);
   }
@@ -1549,6 +1568,23 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
       wrap.className = "hwrap";
 
       
+
+      const meta = pickFirstNumber(h, ["meta", "meta_hora", "meta_h"]);
+      const prod = pickFirstNumber(h, ["produzido", "producao", "prod", "produzido_hora"]);
+      const tProdMin = pickFirstNumber(h, ["tempo_produzindo_min", "tempo_produzindo_minutos", "tempo_produzindo" ]);
+      const tStopMin = pickFirstNumber(h, ["tempo_parado_min", "tempo_parado_minutos", "tempo_parado" ]);
+      const qtdParadas = pickFirstNumber(h, ["qtd_paradas", "paradas", "quantidade_paradas" ]);
+
+      const pills = document.createElement("div");
+      pills.className = "pills";
+      pills.innerHTML =
+        '<span class="pill">Meta ' + (meta === null ? '-' : fmtInt(meta)) + '</span>' +
+        '<span class="pill">Prod ' + (prod === null ? '-' : fmtInt(prod)) + '</span>' +
+        '<span class="pill">Tempo Prod ' + (tProdMin === null ? '-' : fmtMinutes(tProdMin)) + '</span>' +
+        '<span class="pill">Tempo Parado ' + (tStopMin === null ? '-' : fmtMinutes(tStopMin)) + '</span>' +
+        '<span class="pill">Paradas ' + (qtdParadas === null ? '-' : fmtInt(qtdParadas)) + '</span>';
+      wrap.appendChild(pills);
+
 const label = document.createElement("div");
       label.className = "hour-top";
 
