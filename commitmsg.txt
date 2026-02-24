@@ -1,5 +1,5 @@
-﻿fix(historico): tempos e paradas acumulativos por hora baseados em segments
+﻿fix(historico): corrigir indentacao e bloco except orfao no detalhe-dia
 
-- Tempo Produzindo soma duracao de todos os segmentos RUN
-- Tempo Parado soma duracao de todos os segmentos STOP
-- Paradas conta transicoes RUN -> STOP dentro da hora
+- Remove except Exception sem try (erro de indentacao no Pylance)
+- Reindenta comentario de segmentos dentro do bloco correto
+- Mantem logica de persistencia RUN/STOP em machine_state_event (opcao 1)

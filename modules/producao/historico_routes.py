@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 21:23 America/Bahia
-# MOTIVO: Persistir transicoes RUN/STOP em machine_state_event (opcao 1) para manter historico e evitar zerar tempo_parado/paradas no refresh.
+# LAST_RECODE: 2026-02-24 21:35 America/Bahia
+# MOTIVO: Corrigir indentacao e limpar codigo morto em _calc_seg_metrics; manter logica acumulativa por segments e persistencia RUN/STOP em machine_state_event.
 
 
 from __future__ import annotations
@@ -133,28 +133,6 @@ def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
 
     return tempo_produzindo_sec, tempo_parado_sec, qtd_paradas
 
-
-    # Pega o ultimo segmento com duracao > 0 (se existir). Caso contrario, usa o ultimo mesmo.
-    last = None
-    for s in reversed(segs):
-        a = _hhmmss_to_sec(s.get("start", "00:00:00"))
-        b = _hhmmss_to_sec(s.get("end", "00:00:00"))
-        if b > a:
-            last = s
-            break
-    if last is None:
-        last = segs[-1]
-
-    st = (last.get("state") or "").upper()
-    a = _hhmmss_to_sec(last.get("start", "00:00:00"))
-    b = _hhmmss_to_sec(last.get("end", "00:00:00"))
-    dur = max(0, b - a)
-
-    if st == "RUN":
-        return dur, 0, 0
-    if st == "STOP":
-        return 0, dur, 1
-    return 0, 0, 0
 
 def _safe_int(v, default: int = 0) -> int:
     try:
