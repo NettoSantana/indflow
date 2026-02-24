@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 17:40 America/Bahia
-# MOTIVO: Detalhe-dia: aplicar parada atual (status_ui/run + stopped_since_ms) para somar tempo_parado_sec e qtd_paradas na hora em andamento.
+# LAST_RECODE: 2026-02-24 20:51 America/Bahia
+# MOTIVO: Detalhe-dia: tempos e paradas cumulativos derivados exclusivamente de segments (RUN/STOP/NP).
 
 
 from __future__ import annotations
@@ -163,6 +163,14 @@ def _apply_current_stop_to_segments(
 
 
 def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
+    # Regra unica (mesma da barra):
+    # - RUN soma em tempo_produzindo_sec
+    # - STOP soma em tempo_parado_sec
+    # - NP nao soma
+    #
+    # Paradas (cumulativas na hora):
+    # - Conta 1 parada a cada inicio de segmento STOP com duracao > 0,
+    #   inclusive se a hora ja comecar em STOP (sem exigir RUN->STOP).
     tempo_produzindo_sec = 0
     tempo_parado_sec = 0
     qtd_paradas = 0
@@ -170,23 +178,22 @@ def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
     last_state = None
     for s in segs or []:
         st = s.get("state")
-        start_s = s.get("start", "00:00:00")
-        end_s = s.get("end", "00:00:00")
-        a = _hhmmss_to_sec(start_s)
-        b = _hhmmss_to_sec(end_s)
+        a = _hhmmss_to_sec(s.get("start", "00:00:00"))
+        b = _hhmmss_to_sec(s.get("end", "00:00:00"))
         dur = max(0, b - a)
 
         if st == "RUN":
             tempo_produzindo_sec += dur
+
         elif st == "STOP":
             tempo_parado_sec += dur
-            if last_state == "RUN":
+            # Parada = inicio de STOP com duracao
+            if dur > 0 and last_state != "STOP":
                 qtd_paradas += 1
 
         last_state = st
 
     return tempo_produzindo_sec, tempo_parado_sec, qtd_paradas
-
 
 def _safe_int(v, default: int = 0) -> int:
     try:
