@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-24 16:16 America/Bahia
-MOTIVO: Corrigir SyntaxError causado por strings escapadas em fmtSecondsToMin e manter leitura de *_sec no historico.
+LAST_RECODE: 2026-02-24 06:02 America/Bahia
+MOTIVO: Remover textos PRODUZINDO/PARADO/FORA DO HORARIO do layout e aumentar espacamento das informacoes por hora.
 -->
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
@@ -541,6 +541,23 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   tr.day-row{ cursor:pointer; }
   tr.day-row:hover td{ background:#f8fafc; }
 
+
+  .hwrap{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .pills{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-bottom:4px;
+  }
+  .pill{
+    padding:4px 10px;
+    font-size:12px;
+  }
+
 </style>
 
 <div class="page">
@@ -765,25 +782,8 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   function normalizeStateFromStatus(st){
     if(!st || typeof st !== "object") return null;
-
-    if(st.status_ui !== undefined && st.status_ui !== null){
-      const s = String(st.status_ui).toUpperCase().trim();
-      if(s.includes("PRODUZ")) return "RUN";
-      if(s.includes("PARAD")) return "STOP";
-    }
-
     if(st.run === 1 || st.run === true) return "RUN";
     if(st.run === 0 || st.run === false) return "STOP";
-
-    const cands = [st.estado, st.state, st.status, st.machine_state, st.modo, st.situacao, st.label];
-    for(const v of cands){
-      if(v === null || v === undefined) continue;
-      const s = String(v).toUpperCase().trim();
-      if(!s) continue;
-      if(s.includes("PRODUZ") || s === "RUN" || s === "ON" || s === "RUNNING") return "RUN";
-      if(s.includes("PARAD") || s === "STOP" || s === "OFF" || s === "STOPPED") return "STOP";
-    }
-
     return null;
   }
 
@@ -977,7 +977,26 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return fmtNum(n);
   }
 
-  function safeText(v){
+  
+
+  function fmtMinutes(v){
+    const x = Number(v);
+    if(!Number.isFinite(x)) return "-";
+    const m = Math.max(0, Math.floor(x));
+    return String(m) + " min";
+  }
+
+  function pickFirstNumber(obj, keys){
+    for(const k of keys){
+      if(obj && Object.prototype.hasOwnProperty.call(obj, k)){
+        const x = Number(obj[k]);
+        if(Number.isFinite(x)) return x;
+      }
+    }
+    return null;
+  }
+
+function safeText(v){
     if(v === null || v === undefined) return "";
     return String(v);
   }
@@ -1020,6 +1039,8 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   const qs = new URLSearchParams(window.location.search);
   const machineId = qs.get("machine_id") || qs.get("machine") || "";
+
+  const clienteId = qs.get("cliente_id") || qs.get("cliente") || "";
 
   const elMachine = document.getElementById("machine-name");
   const elDate = document.getElementById("filter-date");
@@ -1361,7 +1382,11 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
 
   function closeDayModal(){
-    dayModalBackdrop.style.display = "none";
+    if(dayModalBackdrop){
+      dayModalBackdrop.classList.remove("open");
+      dayModalBackdrop.style.display = "none";
+      dayModalBackdrop.setAttribute("aria-hidden", "true");
+    }
 
     if(dayModalTimer){
       clearInterval(dayModalTimer);
@@ -1559,24 +1584,29 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
       const wrap = document.createElement("div");
       wrap.className = "hwrap";
 
-      const meta = Number(h.meta ?? 0) || 0;
-      const prod = Number(h.produzido ?? 0) || 0;
-      const ref = Number(h.refugo ?? 0) || 0;
+      
+
+      const meta = pickFirstNumber(h, ["meta", "meta_hora", "meta_h"]);
+      const prod = pickFirstNumber(h, ["produzido", "producao", "prod", "produzido_hora"]);
+      const tProdMin = pickFirstNumber(h, ["tempo_produzindo_min", "tempo_produzindo_minutos", "tempo_produzindo" ]);
+      const tStopMin = pickFirstNumber(h, ["tempo_parado_min", "tempo_parado_minutos", "tempo_parado" ]);
+      const qtdParadas = pickFirstNumber(h, ["qtd_paradas", "paradas", "quantidade_paradas" ]);
 
       const pills = document.createElement("div");
       pills.className = "pills";
       pills.innerHTML =
-        '<span class="pill">Meta ' + fmtInt(meta) + '</span>' +
-        '<span class="pill">Prod ' + fmtInt(prod) + '</span>' +
-        '<span class="pill">Ref ' + fmtInt(ref) + '</span>';
+        '<span class="pill">Meta ' + (meta === null ? '-' : fmtInt(meta)) + '</span>' +
+        '<span class="pill">Prod ' + (prod === null ? '-' : fmtInt(prod)) + '</span>' +
+        '<span class="pill">Tempo Prod ' + (tProdMin === null ? '-' : fmtMinutes(tProdMin)) + '</span>' +
+        '<span class="pill">Tempo Parado ' + (tStopMin === null ? '-' : fmtMinutes(tStopMin)) + '</span>' +
+        '<span class="pill">Paradas ' + (qtdParadas === null ? '-' : fmtInt(qtdParadas)) + '</span>';
       wrap.appendChild(pills);
 
-      const segs = Array.isArray(h.segments) ? h.segments : [];
-      if(segs.length){
-        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs));
-      }else{
-        wrap.appendChild(buildLiveProgressBar(isoDay, hourIdx, h));
-      }
+const label = document.createElement("div");
+      label.className = "hour-top";
+      const st = buildTrailBar(isoDay, hourIdx);
+      wrap.appendChild(st.bar);
+
 
       tdD.appendChild(wrap);
       tr.appendChild(tdD);
@@ -1608,7 +1638,9 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     dayModalCurrentDay = String(dateIso || "");
     if(!dayModalCurrentDay) return;
 
-    dayModalBackdrop.style.display = "block";
+    dayModalBackdrop.classList.add("open");
+    dayModalBackdrop.style.display = "";
+    dayModalBackdrop.setAttribute("aria-hidden", "false");
 
     await refreshDayModal(false);
 
@@ -2044,6 +2076,10 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+      const runVal = (status && (status.run === 1 || status.run === true)) ? 1 : ((status && (status.run === 0 || status.run === false)) ? 0 : null);
+      if(runVal !== null){
+        appendTrailState(runVal === 1 ? "RUN" : "STOP", Date.now());
+      }
       applyLiveOverride(status);
       applyFilterAndRender();
     }catch(e){
@@ -2134,6 +2170,7 @@ if(dayModalClose){
   }
 
   function init(){
+    loadTrail();
     fetchHistorico();
 
     if(liveTimer){
