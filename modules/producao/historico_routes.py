@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 17:25 America/Bahia
-# MOTIVO: Remover active_days (simplificar) e corrigir UnboundLocalError de he_calc no detalhe-dia.
+# LAST_RECODE: 2026-02-24 17:40 America/Bahia
+# MOTIVO: Detalhe-dia: aplicar parada atual (status_ui/run + stopped_since_ms) para somar tempo_parado_sec e qtd_paradas na hora em andamento.
 
 
 from __future__ import annotations
@@ -86,6 +86,80 @@ def _hhmmss_to_sec(s: str) -> int:
         return h * 3600 + m * 60 + sec
     except Exception:
         return 0
+
+
+def _sec_to_hhmmss(total_sec: int) -> str:
+    try:
+        total_sec = int(total_sec)
+    except Exception:
+        total_sec = 0
+    if total_sec < 0:
+        total_sec = 0
+    h = total_sec // 3600
+    m = (total_sec % 3600) // 60
+    s = total_sec % 60
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+def _dt_naive_to_day_sec(dt: datetime) -> int:
+    try:
+        return (dt.hour * 3600) + (dt.minute * 60) + int(dt.second)
+    except Exception:
+        return 0
+
+def _ms_to_naive_bahia(ms: int) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
+    except Exception:
+        return None
+
+def _apply_current_stop_to_segments(
+    segs: list[dict],
+    stop_start_naive: datetime,
+    hour_start: datetime,
+    hour_end_calc: datetime,
+) -> list[dict]:
+    """
+    Forca STOP no intervalo [max(stop_start, hour_start), hour_end_calc] na hora atual.
+
+    - Preserva partes anteriores a stop_start.
+    - Trunca o segmento que cruza stop_start.
+    - Substitui todo o restante por um unico STOP ate hour_end_calc.
+    """
+    if not segs:
+        return segs
+    if hour_end_calc <= hour_start:
+        return segs
+
+    stop_sec = _dt_naive_to_day_sec(stop_start_naive)
+    hs_sec = _dt_naive_to_day_sec(hour_start)
+    he_sec = _dt_naive_to_day_sec(hour_end_calc)
+
+    if stop_sec < hs_sec:
+        stop_sec = hs_sec
+    if stop_sec > he_sec:
+        stop_sec = he_sec
+
+    new_segs: list[dict] = []
+    for s in segs:
+        st = s.get("state")
+        a = _hhmmss_to_sec(s.get("start", "00:00:00"))
+        b = _hhmmss_to_sec(s.get("end", "00:00:00"))
+        if b <= stop_sec:
+            new_segs.append({"start": _sec_to_hhmmss(a), "end": _sec_to_hhmmss(b), "state": st})
+            continue
+        if a < stop_sec:
+            # Mantem parte ate stop_sec
+            new_segs.append({"start": _sec_to_hhmmss(a), "end": _sec_to_hhmmss(stop_sec), "state": st})
+        # descarta partes depois de stop_sec (serao substituidas por STOP)
+
+    if he_sec > stop_sec:
+        # Evita duplicar STOP se ultimo ja for STOP e encostar
+        if new_segs and new_segs[-1].get("state") == "STOP" and _hhmmss_to_sec(new_segs[-1].get("end", "00:00:00")) == stop_sec:
+            new_segs[-1]["end"] = _sec_to_hhmmss(he_sec)
+        else:
+            new_segs.append({"start": _sec_to_hhmmss(stop_sec), "end": _sec_to_hhmmss(he_sec), "state": "STOP"})
+
+    return new_segs
 
 
 def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
@@ -821,6 +895,32 @@ def api_producao_detalhe_dia():
                 120,
             )
 
+            stop_start_naive = None
+            if now_naive is not None and callable(get_machine):
+                try:
+                    st = get_machine(eff_mid) or get_machine(machine_id)
+                    if isinstance(st, dict):
+                        stopped_ms = st.get("stopped_since_ms") or st.get("stopped_since")
+                        status_ui = str(st.get("status_ui") or "").strip().upper()
+                        run_flag = st.get("run")
+                        is_stopped = False
+                        if status_ui in ("PARADA", "PARADO", "STOP", "STOPPED"):
+                            is_stopped = True
+                        else:
+                            try:
+                                if run_flag is not None and int(run_flag) == 0:
+                                    is_stopped = True
+                            except Exception:
+                                is_stopped = False
+                        if is_stopped and stopped_ms is not None:
+                            try:
+                                stop_start_naive = _ms_to_naive_bahia(int(stopped_ms))
+                            except Exception:
+                                stop_start_naive = None
+                except Exception:
+                    stop_start_naive = None
+
+
 # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
@@ -892,6 +992,14 @@ def api_producao_detalhe_dia():
                         }]
                 else:
                     segs = _build_segments_for_hour(hs, he_calc, is_np, run_intervals)
+
+                if (not is_np) and now_naive is not None and stop_start_naive is not None:
+                    try:
+                        if hs <= now_naive < he and stop_start_naive <= he_calc:
+                            segs = _apply_current_stop_to_segments(segs, stop_start_naive, hs, he_calc)
+                    except Exception:
+                        pass
+
                 tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
 
                 horas.append(
