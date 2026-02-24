@@ -1,5 +1,10 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-02-23 22:37 America/Bahia
+MOTIVO: Corrigir erro JS "fmtInt is not defined" no modal de detalhe do dia e padronizar abertura/fechamento do modal (classe open).
+-->
+<!--
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 P26-02-24 01:28
 MOTIVO: Ajustar cores do histórico: PRODUZINDO=verde, PARADO=vermelho, FUTURO=cinza, usando status atual.
 -->
@@ -764,7 +769,12 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
   }
 
-  function safeText(v){
+  
+  function fmtInt(n){
+    return fmtNum(n);
+  }
+
+function safeText(v){
     if(v === null || v === undefined) return "";
     return String(v);
   }
@@ -1148,7 +1158,11 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
 
   function closeDayModal(){
-    dayModalBackdrop.style.display = "none";
+    if(dayModalBackdrop){
+      dayModalBackdrop.classList.remove("open");
+      dayModalBackdrop.style.display = "none";
+      dayModalBackdrop.setAttribute("aria-hidden", "true");
+    }
 
     if(dayModalTimer){
       clearInterval(dayModalTimer);
@@ -1427,7 +1441,9 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     dayModalCurrentDay = String(dateIso || "");
     if(!dayModalCurrentDay) return;
 
-    dayModalBackdrop.style.display = "block";
+    dayModalBackdrop.classList.add("open");
+    dayModalBackdrop.style.display = "";
+    dayModalBackdrop.setAttribute("aria-hidden", "false");
 
     await refreshDayModal(false);
 
