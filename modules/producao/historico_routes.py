@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 16:48 America/Bahia
-# MOTIVO: Ajustar fallback quando nao ha machine_state_event: usar produzido>0 para marcar RUN na hora; evita tempo_parado_sec=3600 em horas com producao.
+# LAST_RECODE: 2026-02-24 17:02 America/Bahia
+# MOTIVO: Detalhe-dia: calcular tempo_produzindo_sec/tempo_parado_sec de forma cumulativa na hora atual (corta no agora e nao preenche futuro).
 
 
 from __future__ import annotations
@@ -795,6 +795,15 @@ def api_producao_detalhe_dia():
 
     data_ref = _parse_date_any(date_str) or datetime.now(TZ_BAHIA).date()
 
+
+    # Hora atual (naive, TZ_BAHIA) para cortar a hora em andamento e nao preencher futuro
+    now_naive = None
+    try:
+        now_dt = datetime.now(TZ_BAHIA)
+        if data_ref == now_dt.date():
+            now_naive = now_dt.replace(tzinfo=None)
+    except Exception:
+        now_naive = None
     conn = _get_conn()
     try:
         try:
@@ -822,6 +831,13 @@ def api_producao_detalhe_dia():
                     for h in range(24):
                         hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
                         he = hs + timedelta(hours=1)
+                # Para o dia atual: hora atual acumula ate "agora"; horas futuras nao acumulam (0s)
+                he_calc = he
+                if now_naive is not None:
+                    if now_naive <= hs:
+                        he_calc = hs
+                    elif now_naive < he:
+                        he_calc = now_naive
                         horas.append(
                             {
                                 "hour": h,
@@ -829,7 +845,7 @@ def api_producao_detalhe_dia():
                                 "meta": 0,
                                 "produzido": 0,
                                 "refugo": 0,
-                                "segments": _build_segments_for_hour(hs, he, True, []),
+                                "segments": _build_segments_for_hour(hs, he_calc, True, []),
                                 "tempo_produzindo_sec": 0,
                                 "tempo_parado_sec": 0,
                                 "qtd_paradas": 0,
@@ -864,6 +880,31 @@ def api_producao_detalhe_dia():
 
                 is_np = meta <= 0
 
+                # Se he_calc == hs (hora futura no dia atual), nao inventar 60 min.
+                if he_calc == hs:
+                    zstate = "NP" if is_np else "STOP"
+                    segs = [{
+                        "start": hs.strftime("%H:%M:%S"),
+                        "end": hs.strftime("%H:%M:%S"),
+                        "state": zstate,
+                    }]
+                    tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = 0, 0, 0
+                    horas.append(
+                        {
+                            "hour": h,
+                            "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
+                            "meta": meta,
+                            "produzido": produzido,
+                            "refugo": refugo,
+                            "segments": segs,
+                            "tempo_produzindo_sec": tempo_produzindo_sec,
+                            "tempo_parado_sec": tempo_parado_sec,
+                            "qtd_paradas": qtd_paradas,
+                        }
+                    )
+                    continue
+
+
                 # Fallback: se nao houver rastro em machine_state_event para o dia,
                 # nao marque a hora inteira como STOP quando houve producao.
                 # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN a hora inteira; senao => STOP.
@@ -871,17 +912,17 @@ def api_producao_detalhe_dia():
                     if produzido > 0:
                         segs = [{
                             "start": hs.strftime("%H:%M:%S"),
-                            "end": he.strftime("%H:%M:%S"),
+                            "end": he_calc.strftime("%H:%M:%S"),
                             "state": "RUN",
                         }]
                     else:
                         segs = [{
                             "start": hs.strftime("%H:%M:%S"),
-                            "end": he.strftime("%H:%M:%S"),
+                            "end": he_calc.strftime("%H:%M:%S"),
                             "state": "STOP",
                         }]
                 else:
-                    segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
+                    segs = _build_segments_for_hour(hs, he_calc, is_np, run_intervals)
                 tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
 
                 horas.append(

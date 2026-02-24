@@ -1,4 +1,4 @@
-﻿fix(historico): corrigir SyntaxError em fmtSecondsToMin (strings escapadas)
+﻿fix(historico): fallback RUN/STOP quando nao ha machine_state_event no dia
 
-- remove sequencias \"-\" e \" min\" que quebravam o JS
-- mantem leitura de tempo_produzindo_sec/tempo_parado_sec e exibicao em minutos
+- Se run_intervals estiver vazio: usa produzido>0 para marcar RUN na hora; senao STOP
+- Evita tempo_parado_sec=3600 em horas com producao quando nao ha rastro no banco
