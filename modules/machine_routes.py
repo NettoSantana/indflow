@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-24 19:57 America/Bahia
-# MOTIVO: Registrar eventos RUN/STOP/NP no machine_state_event usando effective_machine_id sem escopo (compat com historico MAIN), filtrando por cliente_id para evitar colisao e garantir persistencia visivel no Historico.
+# LAST_RECODE: 2026-02-24 20:05 America/Bahia
+# MOTIVO: Normalizar machine_id (remover escopo cliente::) ao salvar configuracao da maquina, garantindo que a config persista e seja lida corretamente apos deploy.
 
 import os
 import json
@@ -1511,7 +1511,8 @@ def _cfgv2_apply_to_memory(m: dict, cfg_v2: dict):
 @machine_bp.route("/machine/config", methods=["POST"])
 def configurar_maquina():
     data = request.get_json(silent=True) or {}
-    machine_id = _norm_machine_id(data.get("machine_id", "maquina01"))
+    machine_id_in = (data.get("machine_id", "maquina01") or "").strip()
+    machine_id = _norm_machine_id(_unscope_machine_id(machine_id_in))
     m = get_machine(machine_id)
 
     cliente_id = None

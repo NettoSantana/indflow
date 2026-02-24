@@ -1,5 +1,5 @@
-﻿fix(db): alinhar schema de machine_state_event com machine_routes
+﻿fix(historico): corrigir datetime naive/aware no detalhe-dia
 
-- Adiciona colunas faltantes (machine_id, cliente_id, ts_iso, hora_idx)
-- Garante migracao defensiva via ALTER TABLE quando tabela ja existe
-- Cria indices para consulta por effective_machine_id/data_ref/ts_ms
+- Converte intervalos RUN de machine_state_event para datetimes naive (Bahia)
+- Mantem calculo de day_start_ms via aware apenas para timestamp correto
+- Remove erro 500: can't compare offset-naive and offset-aware datetimes
