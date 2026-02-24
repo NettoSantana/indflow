@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 20:45 America/Bahia
-MOTIVO: Corrigir modal "Detalhe do dia" para desenhar rastro AO VIVO por estado (PRODUZINDO/PARADO) via /machine/status, com segmentos e persistencia local; horas futuras sempre cinza; remover dependencias faltantes que causavam "Falha ao carregar detalhe do dia".
+LAST_RECODE: 2026-02-23 21:00 America/Bahia
+MOTIVO: Corrigir erro JS (ReferenceError buildSegmentsForHour) causado por escopo errado; modal "Detalhe do dia" volta a renderizar rastro por estado (PRODUZINDO/PARADO/FORA DO HORARIO) sem depender de meta/producao; horas futuras sempre cinza.
 -->
 
 <!DOCTYPE html>
@@ -856,7 +856,6 @@ MOTIVO: Corrigir modal "Detalhe do dia" para desenhar rastro AO VIVO por estado 
       // ignore
     }
   }
-
   function normalizeStateFromStatus(st){
     if(!st || typeof st !== "object") return null;
 
@@ -865,6 +864,21 @@ MOTIVO: Corrigir modal "Detalhe do dia" para desenhar rastro AO VIVO por estado 
       if(s.includes("PRODUZ")) return "RUN";
       if(s.includes("PARAD")) return "STOP";
     }
+
+    if(st.run === 1 || st.run === true) return "RUN";
+    if(st.run === 0 || st.run === false) return "STOP";
+
+    const cands = [st.estado, st.state, st.status, st.machine_state, st.modo, st.situacao, st.label];
+    for(const v of cands){
+      if(v === null || v === undefined) continue;
+      const s = String(v).toUpperCase().trim();
+      if(!s) continue;
+      if(s.includes("PRODUZ") || s === "RUN" || s === "ON" || s === "RUNNING") return "RUN";
+      if(s.includes("PARAD") || s === "STOP" || s === "OFF" || s === "STOPPED") return "STOP";
+    }
+
+    return null;
+  }
 
   function getStatusTsMs(st){
     if(!st || typeof st !== "object") return Date.now();
@@ -938,22 +952,6 @@ MOTIVO: Corrigir modal "Detalhe do dia" para desenhar rastro AO VIVO por estado 
     }
 
     return segs;
-  }
-
-
-    if(st.run === 1 || st.run === true) return "RUN";
-    if(st.run === 0 || st.run === false) return "STOP";
-
-    const cands = [st.estado, st.state, st.status, st.machine_state, st.modo, st.situacao, st.label];
-    for(const v of cands){
-      if(v === null || v === undefined) continue;
-      const s = String(v).toUpperCase().trim();
-      if(!s) continue;
-      if(s.includes("PRODUZ") || s === "RUN" || s === "ON" || s === "RUNNING") return "RUN";
-      if(s.includes("PARAD") || s === "STOP" || s === "OFF" || s === "STOPPED") return "STOP";
-    }
-
-    return null;
   }
 
   function appendTrailState(state, tsMs){
