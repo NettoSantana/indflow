@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 22:37 America/Bahia
-MOTIVO: Corrigir erro JS "fmtInt is not defined" no modal de detalhe do dia e padronizar abertura/fechamento do modal (classe open).
+LAST_RECODE: 2026-02-23 22:43 America/Bahia
+MOTIVO: Forcar cor do detalhe do dia por meta/prod (verde se prod>0, vermelho se prod==0, cinza se meta<=0), mesmo quando API retorna segments inconsistentes.
 -->
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
@@ -1189,7 +1189,7 @@ function safeText(v){
     return Math.max(a, Math.min(b, n));
   }
 
-  function buildHourBar(isoDay, hourIdx, segments){
+  function buildHourBar(isoDay, hourIdx, segments, meta, prod){
     const bar = document.createElement("div");
     bar.className = "tbar";
 
@@ -1217,6 +1217,14 @@ function safeText(v){
         bar.appendChild(segDiv);
         return bar;
     }
+
+
+    const m = Number(meta ?? 0) || 0;
+    const p = Number(prod ?? 0) || 0;
+
+    // Estado forçado por contagem (fallback quando "segments" vem inconsistente)
+    // meta<=0 -> NP, meta>0 e prod>0 -> RUN, meta>0 e prod==0 -> STOP
+    const forceState = (m <= 0) ? "NP" : (p > 0 ? "RUN" : "STOP");
 
     const capEnd = (isCurrentHour && now < hourEnd) ? now : hourEnd;
 
@@ -1257,6 +1265,12 @@ function safeText(v){
       if(state === "RUN" || state === "PROD" || state === "PRODUZINDO" || state === "GREEN"){ cls = "run"; }
       else if(state === "STOP" || state === "PARADO" || state === "PAUSA" || state === "RED"){ cls = "stop"; }
       else if(state === "NP" || state === "NAO_PROGRAMADO" || state === "CINZA" || state === "GRAY" || state === "GREY"){ cls = "np"; }
+
+
+      // Se o backend mandar segmentos inconsistentes, usa o estado calculado por meta/prod
+      // Mantem NP (cinza) quando o segmento explicitamente for NP/nao programado
+      if(forceState === "RUN" && cls !== "np"){ cls = "run"; }
+      else if(forceState === "STOP" && cls !== "np"){ cls = "stop"; }
 
       const div = document.createElement("div");
       div.className = "tseg " + cls;
@@ -1406,7 +1420,7 @@ function safeText(v){
 
       const segs = Array.isArray(h.segments) ? h.segments : [];
       if(segs.length){
-        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs));
+        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs, meta, prod));
       }else{
         wrap.appendChild(buildLiveProgressBar(isoDay, hourIdx, h));
       }
