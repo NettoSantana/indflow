@@ -1,6 +1,7 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-23 21:00 America/Bahia
-# MOTIVO: Detalhe-dia agora usa machine_state_event para gerar segmentos RUN/STOP e manter rastro de cores (verde/vermelho/cinza) no historico.
+# LAST_RECODE: 2026-02-24 06:16 America/Bahia
+# MOTIVO: Adicionar calculo de tempo_produzindo_sec, tempo_parado_sec e qtd_paradas no endpoint detalhe-dia
+
 
 from __future__ import annotations
 
@@ -828,7 +829,28 @@ def api_producao_detalhe_dia():
                         "meta": meta,
                         "produzido": produzido,
                         "refugo": refugo,
-                        "segments": segs,
+                        
+                # ==== CALCULOS AUTOMATICOS POR HORA ====
+                tempo_produzindo_sec = 0
+                tempo_parado_sec = 0
+                qtd_paradas = 0
+
+                last_state = None
+                for s in segs:
+                    dur = int(s.get("duracao_sec", 0))
+                    state = s.get("state")
+                    if state == 1:
+                        tempo_produzindo_sec += dur
+                    elif state == 0:
+                        tempo_parado_sec += dur
+                        if last_state == 1:
+                            qtd_paradas += 1
+                    last_state = state
+
+                "tempo_produzindo_sec": tempo_produzindo_sec,
+                "tempo_parado_sec": tempo_parado_sec,
+                "qtd_paradas": qtd_paradas,
+                "segments": segs,
                     }
                 )
 
