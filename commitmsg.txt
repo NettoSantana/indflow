@@ -1,5 +1,5 @@
-﻿fix(historico): corrigir indentacao e bloco except orfao no detalhe-dia
+﻿fix(historico): corrigir indentacao e limpar codigo morto em _calc_seg_metrics
 
-- Remove except Exception sem try (erro de indentacao no Pylance)
-- Reindenta comentario de segmentos dentro do bloco correto
-- Mantem logica de persistencia RUN/STOP em machine_state_event (opcao 1)
+- Remove bloco antigo sobrando apos return em _calc_seg_metrics (causava erro no Pylance)
+- Mantem regra acumulativa por segments (RUN/STOP) e paradas (RUN->STOP)
+- Mantem persistencia RUN/STOP em machine_state_event (opcao 1)
