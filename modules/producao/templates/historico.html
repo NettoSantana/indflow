@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 20:25 America/Bahia
-MOTIVO: Implementar "rastro do estado" (verde=PRODUZINDO, vermelho=PARADO, cinza=futuro/sem dados) baseado somente em /machine/status, com persistencia em localStorage e continuidade entre dias (nao zera 00:00).
+P26-02-24 01:28
+MOTIVO: Ajustar cores do histórico: PRODUZINDO=verde, PARADO=vermelho, FUTURO=cinza, usando status atual.
 -->
 
 <!--
@@ -727,216 +727,6 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   }
 
 
-  function lsKeyTrail(){
-    return "indflow_state_trail::" + String(clienteId || "") + "::" + String(machineId || "");
-  }
-
-  function loadTrail(){
-    try{
-      const raw = localStorage.getItem(lsKeyTrail());
-      if(!raw){ stateTrail = []; return; }
-      const obj = JSON.parse(raw);
-      const arr = Array.isArray(obj && obj.events) ? obj.events : [];
-      stateTrail = arr
-        .filter(e => e && Number.isFinite(Number(e.ts_ms)) && typeof e.state === "string")
-        .map(e => ({ ts_ms: Number(e.ts_ms), state: String(e.state) }))
-        .sort((a,b) => a.ts_ms - b.ts_ms);
-
-      lastTrailState = stateTrail.length ? stateTrail[stateTrail.length-1].state : null;
-      lastTrailTsMs = stateTrail.length ? stateTrail[stateTrail.length-1].ts_ms : null;
-    }catch(err){
-      stateTrail = [];
-      lastTrailState = null;
-      lastTrailTsMs = null;
-    }
-  }
-
-  function saveTrail(){
-    try{
-      const now = Date.now();
-      const cutoff = now - (14 * 24 * 60 * 60 * 1000);
-      const pruned = stateTrail.filter(e => e.ts_ms >= cutoff);
-      stateTrail = pruned;
-      const payload = { v: 1, events: pruned };
-      localStorage.setItem(lsKeyTrail(), JSON.stringify(payload));
-    }catch(err){
-      // ignore
-    }
-  }
-
-  function normalizeStateFromStatus(st){
-    if(!st || typeof st !== "object") return null;
-
-    if(st.status_ui !== undefined && st.status_ui !== null){
-      const s = String(st.status_ui).toUpperCase().trim();
-      if(s.includes("PRODUZ")) return "RUN";
-      if(s.includes("PARAD")) return "STOP";
-    }
-
-    if(st.run === 1 || st.run === true) return "RUN";
-    if(st.run === 0 || st.run === false) return "STOP";
-
-    const cands = [st.estado, st.state, st.status, st.machine_state, st.modo, st.situacao, st.label];
-    for(const v of cands){
-      if(v === null || v === undefined) continue;
-      const s = String(v).toUpperCase().trim();
-      if(!s) continue;
-      if(s.includes("PRODUZ") || s === "RUN" || s === "ON" || s === "RUNNING") return "RUN";
-      if(s.includes("PARAD") || s === "STOP" || s === "OFF" || s === "STOPPED") return "STOP";
-    }
-
-    return null;
-  }
-
-  function appendTrailState(state, tsMs){
-    if(!state) return;
-
-    const ts = Number.isFinite(Number(tsMs)) ? Number(tsMs) : Date.now();
-
-    if(lastTrailState === state){
-      return;
-    }
-
-    stateTrail.push({ ts_ms: ts, state: state });
-    stateTrail.sort((a,b) => a.ts_ms - b.ts_ms);
-
-    lastTrailState = state;
-    lastTrailTsMs = ts;
-
-    saveTrail();
-  }
-
-  function stateLabelFromCode(code){
-    if(code === "RUN") return "PRODUZINDO";
-    if(code === "STOP") return "PARADO";
-    return "FORA DO HORARIO";
-  }
-
-  function isFutureHour(isoDay, hourIdx){
-    const day = String(isoDay);
-    const now = new Date();
-    const today = todayIsoLocal();
-
-    if(day > today) return true;
-    if(day < today) return false;
-
-    // same day
-    const h = Number(hourIdx);
-    if(!Number.isFinite(h)) return false;
-    return h > now.getHours();
-  }
-
-  function toDayStartMsLocal(isoDay){
-    const d = String(isoDay);
-    return new Date(d + "T00:00:00").getTime();
-  }
-
-  function toHourStartMsLocal(isoDay, hourIdx){
-    const d = String(isoDay);
-    const h = String(hourIdx).padStart(2, "0");
-    return new Date(d + "T" + h + ":00:00").getTime();
-  }
-
-  function segmentsForHour(isoDay, hourIdx){
-    const startMs = toHourStartMsLocal(isoDay, hourIdx);
-    const endMs = startMs + (60 * 60 * 1000);
-
-    // initial state: last event before start
-    let initState = null;
-    for(let i=stateTrail.length-1;i>=0;i--){
-      if(stateTrail[i].ts_ms <= startMs){
-        initState = stateTrail[i].state;
-        break;
-      }
-    }
-
-    const segs = [];
-    let curState = initState;
-    let curStart = startMs;
-
-    // events within hour
-    for(const ev of stateTrail){
-      if(ev.ts_ms <= startMs) continue;
-      if(ev.ts_ms >= endMs) break;
-
-      if(curState !== null){
-        segs.push({ state: curState, start_ms: curStart, end_ms: ev.ts_ms });
-      }
-
-      curState = ev.state;
-      curStart = ev.ts_ms;
-    }
-
-    // tail to end (or to now if current hour today)
-    let capEnd = endMs;
-    const now = Date.now();
-    const today = todayIsoLocal();
-    if(String(isoDay) === today){
-      const nowHourStart = toHourStartMsLocal(today, new Date().getHours());
-      if(startMs == nowHourStart){
-        capEnd = Math.min(endMs, now);
-      }
-    }
-
-    if(curState !== null && curStart < capEnd){
-      segs.push({ state: curState, start_ms: curStart, end_ms: capEnd });
-    }
-
-    return { startMs, endMs, segs };
-  }
-
-  function buildTrailBar(isoDay, hourIdx){
-    const bar = document.createElement("div");
-    bar.className = "pbar";
-
-    // future hours always grey
-    if(isFutureHour(isoDay, hourIdx)){
-      const fill = document.createElement("div");
-      fill.className = "pfill np";
-      fill.style.width = "100%";
-      bar.appendChild(fill);
-      return { bar, lastState: null };
-    }
-
-    const info = segmentsForHour(isoDay, hourIdx);
-    const totalMs = Math.max(1, info.endMs - info.startMs);
-
-    let lastState = null;
-    if(!info.segs.length){
-      const fill = document.createElement("div");
-      fill.className = "pfill np";
-      fill.style.width = "100%";
-      bar.appendChild(fill);
-      return { bar, lastState: null };
-    }
-
-    for(const seg of info.segs){
-      const left = ((seg.start_ms - info.startMs) / totalMs) * 100;
-      const width = ((seg.end_ms - seg.start_ms) / totalMs) * 100;
-
-      const fill = document.createElement("div");
-      fill.className = "pfill";
-      fill.style.position = "absolute";
-      fill.style.left = left.toFixed(4) + "%";
-      fill.style.width = Math.max(0, width).toFixed(4) + "%";
-
-      if(seg.state === "RUN") fill.classList.add("run");
-      else if(seg.state === "STOP") fill.classList.add("stop");
-      else fill.classList.add("np");
-
-      bar.appendChild(fill);
-      lastState = seg.state;
-    }
-
-    // make bar relative for absolute segments
-    bar.style.position = "relative";
-
-    return { bar, lastState };
-  }
-
-
-
-
   function dateValueToISO(value){
     if(!value || typeof value !== "string") return "";
     const s = value.trim();
@@ -972,10 +762,6 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const x = Number(n);
     if(!Number.isFinite(x)) return "0";
     return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
-  }
-
-  function fmtInt(n){
-    return fmtNum(n);
   }
 
   function safeText(v){
@@ -1401,9 +1187,26 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const now = new Date();
     const isToday = (day === todayIsoLocal());
     const isCurrentHour = isToday && (now.getHours() === hourIdx);
+
+    // Regras de cor (estado):
+    // - Hora futura do dia atual: sempre cinza (NP)
+    // - Hora atual do dia atual: usa o status atual vindo de /machine/status (PRODUZINDO/PARADO)
+    const futureHour = isToday && (hourIdx > now.getHours());
+    const liveUiRaw = (window.__LIVE_STATUS_UI || "");
+    const liveUi = String(liveUiRaw).toUpperCase();
+    const liveOverrideState = (isCurrentHour && liveUi) ? (liveUi.includes("PRODUZ") ? "RUN" : (liveUi.includes("PARAD") ? "STOP" : "")) : "";
+
+    if (futureHour){
+        const segDiv = document.createElement("div");
+        segDiv.className = "tseg np";
+        segDiv.style.width = "100%";
+        bar.appendChild(segDiv);
+        return bar;
+    }
+
     const capEnd = (isCurrentHour && now < hourEnd) ? now : hourEnd;
 
-    const totalMs = Math.max(1, hourEnd.getTime() - hourStart.getTime());
+    const totalMs = Math.max(1, capEnd.getTime() - hourStart.getTime());
 
     function parseInDay(dayIso, value){
       if(value === null || value === undefined) return null;
@@ -1472,7 +1275,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     let cls = "stop";
     if(meta <= 0){
       cls = "np";
-    }else if(prod >= meta){
+    }else if(prod > 0){
       cls = "run";
     }else{
       cls = "stop";
@@ -1485,10 +1288,25 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
     let pct = 0;
 
-    if(meta > 0){
-      pct = clamp((prod / meta) * 100, 0, 100);
+    if(day === today){
+      const curH = now.getHours();
+      if(hourIdx < curH){
+        pct = 100;
+      }else if(hourIdx === curH){
+        const minutes = now.getMinutes() + (now.getSeconds() / 60);
+        pct = clamp((minutes / 60) * 100, 0, 100);
+      }else{
+        pct = 0;
+      }
     }else{
-      pct = 0;
+      // dias passados: cheio. dias futuros: vazio.
+      const dDay = new Date(day + "T00:00:00");
+      const dToday = new Date(today + "T00:00:00");
+      if(!isNaN(dDay.getTime()) && !isNaN(dToday.getTime()) && dDay.getTime() < dToday.getTime()){
+        pct = 100;
+      }else{
+        pct = 0;
+      }
     }
 
     fill.style.width = pct.toFixed(3) + "%";
@@ -1972,11 +1790,6 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   let cache = null;
   let liveTimer = null;
-  let lastMachineStatus = null;
-  let stateTrail = [];
-  let lastTrailState = null;
-  let lastTrailTsMs = null;
-
 
   async function fetchStatus(){
     if(!machineId) return null;
@@ -1986,7 +1799,9 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     if(!resp.ok){
       throw new Error("Falha ao buscar status (HTTP " + resp.status + ")");
     }
-    return await resp.json();
+    const data = await resp.json();
+    window.__LIVE_STATUS_UI = data && (data.status_ui || data.statusUi || data.status || "");
+    return data;
   }
 
   function applyLiveOverride(status){
