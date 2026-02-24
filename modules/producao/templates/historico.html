@@ -1,9 +1,8 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-23 20:25 America/Bahia
-MOTIVO: Implementar "rastro do estado" (verde=PRODUZINDO, vermelho=PARADO, cinza=futuro/sem dados) baseado somente em /machine/status, com persistencia em localStorage e continuidade entre dias (nao zera 00:00).
+LAST_RECODE: 2026-02-23 22:51 America/Bahia
+MOTIVO: Detalhe do dia com "rastro do estado" baseado somente em status.run (1=verde, 0=vermelho). Persistencia via localStorage. Ignorar meta/segments do JSON.
 -->
-
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
 Último recode: 2026-02-23 22:14
@@ -766,25 +765,8 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   function normalizeStateFromStatus(st){
     if(!st || typeof st !== "object") return null;
-
-    if(st.status_ui !== undefined && st.status_ui !== null){
-      const s = String(st.status_ui).toUpperCase().trim();
-      if(s.includes("PRODUZ")) return "RUN";
-      if(s.includes("PARAD")) return "STOP";
-    }
-
     if(st.run === 1 || st.run === true) return "RUN";
     if(st.run === 0 || st.run === false) return "STOP";
-
-    const cands = [st.estado, st.state, st.status, st.machine_state, st.modo, st.situacao, st.label];
-    for(const v of cands){
-      if(v === null || v === undefined) continue;
-      const s = String(v).toUpperCase().trim();
-      if(!s) continue;
-      if(s.includes("PRODUZ") || s === "RUN" || s === "ON" || s === "RUNNING") return "RUN";
-      if(s.includes("PARAD") || s === "STOP" || s === "OFF" || s === "STOPPED") return "STOP";
-    }
-
     return null;
   }
 
@@ -1021,6 +1003,8 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   const qs = new URLSearchParams(window.location.search);
   const machineId = qs.get("machine_id") || qs.get("machine") || "";
+
+  const clienteId = qs.get("cliente_id") || qs.get("cliente") || "";
 
   const elMachine = document.getElementById("machine-name");
   const elDate = document.getElementById("filter-date");
@@ -1362,7 +1346,11 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
 
   function closeDayModal(){
-    dayModalBackdrop.style.display = "none";
+    if(dayModalBackdrop){
+      dayModalBackdrop.classList.remove("open");
+      dayModalBackdrop.style.display = "none";
+      dayModalBackdrop.setAttribute("aria-hidden", "true");
+    }
 
     if(dayModalTimer){
       clearInterval(dayModalTimer);
@@ -1560,24 +1548,22 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
       const wrap = document.createElement("div");
       wrap.className = "hwrap";
 
-      const meta = Number(h.meta ?? 0) || 0;
-      const prod = Number(h.produzido ?? 0) || 0;
-      const ref = Number(h.refugo ?? 0) || 0;
+      
+const label = document.createElement("div");
+      label.className = "hour-top";
 
-      const pills = document.createElement("div");
-      pills.className = "pills";
-      pills.innerHTML =
-        '<span class="pill">Meta ' + fmtInt(meta) + '</span>' +
-        '<span class="pill">Prod ' + fmtInt(prod) + '</span>' +
-        '<span class="pill">Ref ' + fmtInt(ref) + '</span>';
-      wrap.appendChild(pills);
+      const st = buildTrailBar(isoDay, hourIdx);
+      const stLabel = stateLabelFromCode(st.lastState);
 
-      const segs = Array.isArray(h.segments) ? h.segments : [];
-      if(segs.length){
-        wrap.appendChild(buildHourBar(isoDay, hourIdx, segs));
-      }else{
-        wrap.appendChild(buildLiveProgressBar(isoDay, hourIdx, h));
-      }
+      const left = document.createElement("div");
+      left.style.fontWeight = "900";
+      left.style.color = "#0f172a";
+      left.textContent = stLabel;
+
+      label.appendChild(left);
+      wrap.appendChild(label);
+      wrap.appendChild(st.bar);
+
 
       tdD.appendChild(wrap);
       tr.appendChild(tdD);
@@ -1609,7 +1595,9 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     dayModalCurrentDay = String(dateIso || "");
     if(!dayModalCurrentDay) return;
 
-    dayModalBackdrop.style.display = "block";
+    dayModalBackdrop.classList.add("open");
+    dayModalBackdrop.style.display = "";
+    dayModalBackdrop.setAttribute("aria-hidden", "false");
 
     await refreshDayModal(false);
 
@@ -2045,6 +2033,10 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+      const runVal = (status && (status.run === 1 || status.run === true)) ? 1 : ((status && (status.run === 0 || status.run === false)) ? 0 : null);
+      if(runVal !== null){
+        appendTrailState(runVal === 1 ? "RUN" : "STOP", Date.now());
+      }
       applyLiveOverride(status);
       applyFilterAndRender();
     }catch(e){
@@ -2135,6 +2127,7 @@ if(dayModalClose){
   }
 
   function init(){
+    loadTrail();
     fetchHistorico();
 
     if(liveTimer){
