@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-24 00:00 America/Bahia
-# MOTIVO: Persistir eventos RUN/STOP também no /machine/update (transição gravada no momento do payload do ESP), garantindo histórico estável sem depender do polling do /machine/status.
+# LAST_RECODE: 2026-02-24 19:57 America/Bahia
+# MOTIVO: Registrar eventos RUN/STOP/NP no machine_state_event usando effective_machine_id sem escopo (compat com historico MAIN), filtrando por cliente_id para evitar colisao e garantir persistencia visivel no Historico.
 
 import os
 import json
@@ -86,14 +86,18 @@ def _ensure_machine_state_event_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_mse_mid_ts ON machine_state_event (effective_machine_id, ts_ms)"
     )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mse_cid_mid_day ON machine_state_event (cliente_id, effective_machine_id, data_ref, ts_ms)"
+    )
 
 
-def _get_last_machine_state(conn: sqlite3.Connection, effective_machine_id: str) -> dict | None:
+def _get_last_machine_state(conn: sqlite3.Connection, effective_machine_id: str, cliente_id: str | None = None) -> dict | None:
     try:
         row = conn.execute(
             "SELECT state, ts_ms, data_ref, hora_idx FROM machine_state_event "
-            "WHERE effective_machine_id=? ORDER BY ts_ms DESC LIMIT 1",
-            (effective_machine_id,),
+            "WHERE effective_machine_id=? AND (cliente_id IS ? OR cliente_id=?) "
+            "ORDER BY ts_ms DESC LIMIT 1",
+            (effective_machine_id, cliente_id, cliente_id),
         ).fetchone()
         if not row:
             return None
@@ -124,7 +128,7 @@ def _record_machine_state_transition(
     conn = get_db()
     try:
         _ensure_machine_state_event_schema(conn)
-        last = _get_last_machine_state(conn, effective_machine_id)
+        last = _get_last_machine_state(conn, effective_machine_id, cliente_id)
         if last and str(last.get("state") or "").upper() == st:
             return
         conn.execute(
@@ -1946,7 +1950,7 @@ def update_machine():
         hora_evt_u = int(dt_evt_u.hour)
         data_ref_evt_u = dia_operacional_ref_str(dt_evt_u)
         raw_mid_u = _norm_machine_id(machine_id)
-        eff_mid_u = f"{cliente_id}::{raw_mid_u}" if cliente_id else raw_mid_u
+        eff_mid_u = raw_mid_u
 
         _record_machine_state_transition(
             raw_mid_u,
@@ -2786,7 +2790,7 @@ def machine_status():
             data_ref_evt = dia_operacional_ref_str(agora_evt)
             cid_evt = (m.get("cliente_id") or None)
             raw_mid = _norm_machine_id(machine_id)
-            eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
+            eff_mid = raw_mid
             _record_machine_state_transition(raw_mid, eff_mid, cid_evt, "NP", agora_evt, data_ref_evt, hora_evt)
         except Exception:
             pass
@@ -2813,7 +2817,7 @@ def machine_status():
         data_ref_evt = dia_operacional_ref_str(agora_evt)
         cid_evt = (m.get("cliente_id") or None)
         raw_mid = _norm_machine_id(machine_id)
-        eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
+        eff_mid = raw_mid
         st_evt = _infer_state_for_timeline(m, hora_evt)
         _record_machine_state_transition(raw_mid, eff_mid, cid_evt, st_evt, agora_evt, data_ref_evt, hora_evt)
     except Exception:

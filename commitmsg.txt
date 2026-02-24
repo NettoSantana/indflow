@@ -1,5 +1,5 @@
-﻿fix(db): alinhar schema de machine_state_event com machine_routes
+﻿fix(machine_routes): persistir transicoes RUN/STOP no /machine/update
 
-- Adiciona colunas faltantes (machine_id, cliente_id, ts_iso, hora_idx)
-- Garante migracao defensiva via ALTER TABLE quando tabela ja existe
-- Cria indices para consulta por effective_machine_id/data_ref/ts_ms
+- Grava eventos de estado no momento do payload do ESP (usa ts_ms quando existir)
+- Elimina dependencia do polling do /machine/status para formar a timeline
+- Mantem regra RUN=AUTO+run=1 e STOP caso contrario (considera no_count_stop_sec)
