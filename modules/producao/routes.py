@@ -1,12 +1,13 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-21 22:59 America/Bahia
-# MOTIVO: Registrar rota de detalhe do dia (detalhe-dia) no blueprint de producao para o modal do Historico.
+# LAST_RECODE: 2026-02-24 00:00 America/Bahia
+# MOTIVO: Backfill persistente RUN/STOP em machine_state_event (a partir de producao_evento) antes de responder detalhe-dia, estabilizando Historico no refresh.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import sqlite3
 import os
+import json
 from pathlib import Path
 from threading import Lock
 
@@ -1762,24 +1763,193 @@ def _incrementar_producao_diaria_por_op(machine_id: str, dia_iso: str, delta_pcs
 @producao_bp.route("/api/producao/detalhe-dia", methods=["GET"])
 @login_required
 def api_detalhe_dia():
-    """Proxy do endpoint de detalhe do dia.
+    """Endpoint do detalhe do dia (JSON) para o modal do Historico.
 
-    O front do historico.html chama por padrao uma URL relativa (detalhe-dia?...),
-    que resolve para /producao/detalhe-dia quando a pagina esta em /producao/historico.
+    Implementacao:
+    - Mantem o payload/contrato do endpoint existente (modules.producao.historico_routes.api_producao_detalhe_dia).
+    - Antes de delegar, garante que exista uma fonte persistida para RUN/STOP em machine_state_event.
 
-    Para manter compatibilidade, expomos tambem /api/producao/detalhe-dia no mesmo blueprint.
-
-    Implementacao: delega para modules.producao.historico_routes.api_producao_detalhe_dia,
-    que contem a logica de horas + segmentos RUN/STOP/NP.
+    Problema que resolve:
+    - Quando machine_state_event existe mas nao recebe linhas, o Historico fica instavel (STOP some no refresh).
+    - Este handler faz um *backfill* deterministico a partir de producao_evento (pulsos do ESP):
+        * primeiro pulso do dia => RUN
+        * gap > stop_sec => STOP (em last_ts + stop_sec) e RUN (no proximo pulso)
+        * se a ultima atividade ficou parada e ainda nao voltou => STOP ate agora (apenas evento STOP)
     """
+    machine_id = (request.args.get("machine_id") or "").strip()
+    date_str = (request.args.get("date") or request.args.get("data") or "").strip()
+
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
+
+    # Import tardio para evitar circular import no boot do Flask.
     try:
         from modules.producao.historico_routes import api_producao_detalhe_dia
+        from modules.producao.historico_routes import _parse_date_any, TZ_BAHIA
     except Exception:
         try:
-            from .historico_routes import api_producao_detalhe_dia
+            from .historico_routes import api_producao_detalhe_dia  # type: ignore
+            from .historico_routes import _parse_date_any, TZ_BAHIA  # type: ignore
         except Exception as e:
             return jsonify({"ok": False, "error": f"cannot_import_historico_routes: {e}"}), 500
 
+    # Data de referencia (Bahia)
+    data_ref = _parse_date_any(date_str) or datetime.now(TZ_BAHIA).date()
+    data_ref_str = data_ref.isoformat()
+
+    # Compat: se vier scoped (cliente::maquina), usa o sufixo como effective_machine_id.
+    eff_mid = (machine_id or "").strip()
+    if "::" in eff_mid:
+        eff_mid = (eff_mid.split("::", 1)[1] or "").strip()
+    if not eff_mid:
+        eff_mid = machine_id
+
+    # stop_sec da config (se existir), senao 120.
+    stop_sec = 120
+    try:
+        conn_cfg = sqlite3.connect(str(DB_PATH))
+        conn_cfg.row_factory = sqlite3.Row
+        try:
+            row = conn_cfg.execute(
+                "SELECT config_json FROM machine_config WHERE machine_id = ? ORDER BY id DESC LIMIT 1",
+                (machine_id,),
+            ).fetchone()
+            if row is None and eff_mid != machine_id:
+                row = conn_cfg.execute(
+                    "SELECT config_json FROM machine_config WHERE machine_id = ? ORDER BY id DESC LIMIT 1",
+                    (eff_mid,),
+                ).fetchone()
+            if row and row["config_json"]:
+                try:
+                    cfg = json.loads(row["config_json"])
+                    oee = cfg.get("oee") if isinstance(cfg, dict) else None
+                    if isinstance(oee, dict) and oee.get("no_count_stop_sec") is not None:
+                        stop_sec = int(oee.get("no_count_stop_sec") or 120)
+                except Exception:
+                    stop_sec = 120
+        finally:
+            conn_cfg.close()
+    except Exception:
+        stop_sec = 120
+
+    # Backfill somente se ainda nao houver eventos para esse dia/maquina.
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+
+        # Tabela pode nao existir em DBs antigos (defensivo).
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS machine_state_event ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "machine_id TEXT NOT NULL, "
+            "effective_machine_id TEXT NOT NULL, "
+            "cliente_id TEXT, "
+            "ts_ms INTEGER NOT NULL, "
+            "ts_iso TEXT NOT NULL, "
+            "data_ref TEXT NOT NULL, "
+            "hora_idx INTEGER NOT NULL, "
+            "state TEXT NOT NULL"
+            ")"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mse_c_mid_day_ts ON machine_state_event (cliente_id, effective_machine_id, data_ref, ts_ms)"
+        )
+
+        existing = conn.execute(
+            "SELECT COUNT(1) AS c FROM machine_state_event WHERE effective_machine_id = ? AND data_ref = ?",
+            (eff_mid, data_ref_str),
+        ).fetchone()
+        existing_count = int(existing["c"] if existing and existing["c"] is not None else 0)
+
+        if existing_count == 0:
+            # Puxa pulsos do dia (fonte persistida e estavel).
+            rows = conn.execute(
+                "SELECT ts_ms FROM producao_evento WHERE machine_id = ? AND date(ts_ms/1000,'unixepoch') = ? ORDER BY ts_ms ASC",
+                (eff_mid, data_ref_str),
+            ).fetchall()
+
+            # Se nao achar pelo eff_mid, tenta pelo machine_id original (caso tenha scope no evento).
+            if (not rows) and (machine_id != eff_mid):
+                rows = conn.execute(
+                    "SELECT ts_ms FROM producao_evento WHERE machine_id = ? AND date(ts_ms/1000,'unixepoch') = ? ORDER BY ts_ms ASC",
+                    (machine_id, data_ref_str),
+                ).fetchall()
+
+            ts_list = [int(r["ts_ms"]) for r in rows if r and r["ts_ms"] is not None]
+
+            if ts_list:
+                now_ms = int(datetime.now(TZ_BAHIA).timestamp() * 1000)
+                # Se o dia nao for hoje, corta no fim do dia (sem inventar futuro).
+                if data_ref != datetime.now(TZ_BAHIA).date():
+                    # 23:59:59.999 Bahia
+                    dt_end = datetime.combine(data_ref, datetime.max.time()).replace(tzinfo=TZ_BAHIA)
+                    now_ms = int(dt_end.timestamp() * 1000)
+
+                def _ms_to_bahia_iso(ms: int) -> str:
+                    dt = datetime.fromtimestamp(ms / 1000.0, tz=TZ_BAHIA)
+                    return dt.isoformat()
+
+                def _hora_idx(ms: int) -> int:
+                    dt = datetime.fromtimestamp(ms / 1000.0, tz=TZ_BAHIA)
+                    return int(dt.hour)
+
+                def _insert_event(state: str, ts_ms: int):
+                    conn.execute(
+                        "INSERT INTO machine_state_event (machine_id, effective_machine_id, cliente_id, ts_ms, ts_iso, data_ref, hora_idx, state) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (machine_id, eff_mid, None, int(ts_ms), _ms_to_bahia_iso(int(ts_ms)), data_ref_str, _hora_idx(int(ts_ms)), state),
+                    )
+
+                last_state = None
+                last_ts = None
+
+                # Primeiro pulso do dia => RUN (inicio conhecido)
+                _insert_event("RUN", ts_list[0])
+                last_state = "RUN"
+                last_ts = ts_list[0]
+
+                gap_ms = int(stop_sec) * 1000
+
+                for ts in ts_list[1:]:
+                    ts = int(ts)
+                    if last_ts is None:
+                        last_ts = ts
+                        continue
+
+                    # Se ficou mais que stop_sec sem pulso, considera STOP a partir do last_ts+stop_sec.
+                    if ts - last_ts > gap_ms:
+                        stop_ts = last_ts + gap_ms
+                        # nao deixa stop_ts passar do proximo RUN (defensivo)
+                        if stop_ts < ts:
+                            if last_state != "STOP":
+                                _insert_event("STOP", stop_ts)
+                                last_state = "STOP"
+                            # volta RUN no pulso atual
+                            _insert_event("RUN", ts)
+                            last_state = "RUN"
+                    last_ts = ts
+
+                # Se o ultimo pulso ja passou de stop_sec e ainda estamos dentro da janela do dia, fecha com STOP.
+                if last_ts is not None and (now_ms - last_ts) > gap_ms:
+                    stop_ts = last_ts + gap_ms
+                    if stop_ts < now_ms:
+                        if last_state != "STOP":
+                            _insert_event("STOP", stop_ts)
+                            last_state = "STOP"
+
+                conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    # Delegar para a implementacao oficial do Historico (mantem contrato da resposta)
     return api_producao_detalhe_dia()
 
 @producao_bp.route("/api/producao/salvar_diaria", methods=["POST"])
