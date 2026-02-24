@@ -1,5 +1,4 @@
-﻿fix(historico): corrigir indentacao e limpar codigo morto em _calc_seg_metrics
+﻿feat(db): criar tabela machine_state_event para persistir RUN/STOP
 
-- Remove bloco antigo sobrando apos return em _calc_seg_metrics (causava erro no Pylance)
-- Mantem regra acumulativa por segments (RUN/STOP) e paradas (RUN->STOP)
-- Mantem persistencia RUN/STOP em machine_state_event (opcao 1)
+- Adiciona machine_state_event (effective_machine_id, data_ref, ts_ms, state, cliente_id)
+- Cria indices por (machine_id, dia, ts) e por (cliente_id, machine_id, dia, ts)

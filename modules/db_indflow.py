@@ -1,6 +1,6 @@
-# PATH: modules/db_indflow.py
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\db_indflow.py
 # LAST_RECODE: 2026-02-24 00:00 America/Bahia
-# MOTIVO: Criar tabela machine_state_event para persistir transicoes RUN/STOP e estabilizar Historico por hora.
+# MOTIVO: Ajustar schema de machine_state_event para bater com machine_routes (persistência RUN/STOP sem falha silenciosa).
 
 import os
 import sqlite3
@@ -66,6 +66,17 @@ def _dedupe_keep_latest(conn: sqlite3.Connection, table: str, keys: list[str]) -
             GROUP BY {group_expr}
         )
     """)
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    try:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
 
 
 def init_db():
@@ -214,24 +225,45 @@ def init_db():
 
     # -------------------- machine_state_event (RUN/STOP) --------------------
     # Fonte persistente de estado para montar o Historico (segments) sem "sumir" no refresh.
-    # Regra: gravar somente transicoes (RUN->STOP ou STOP->RUN) com ts_ms real.
+    #
+    # IMPORTANTE:
+    # O machine_routes.py já tenta inserir: machine_id, effective_machine_id, cliente_id, ts_ms, ts_iso, data_ref, hora_idx, state.
+    # Se o schema não tiver essas colunas, o insert falha e o erro fica "silencioso" (try/except).
+    #
+    # Por isso, aqui garantimos o schema completo.
     cur.execute("""
         CREATE TABLE IF NOT EXISTS machine_state_event (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            machine_id TEXT,
             effective_machine_id TEXT NOT NULL,
-            data_ref TEXT NOT NULL,
+            cliente_id TEXT,
             ts_ms INTEGER NOT NULL,
-            state TEXT NOT NULL,
-            cliente_id TEXT
+            ts_iso TEXT,
+            data_ref TEXT NOT NULL,
+            hora_idx INTEGER,
+            state TEXT NOT NULL
         )
     """)
+
+    # Migração defensiva (caso a tabela já exista em schema antigo)
+    if _table_exists(conn, "machine_state_event"):
+        _add_column_if_missing(conn, "machine_state_event", "machine_id", "TEXT")
+        _add_column_if_missing(conn, "machine_state_event", "cliente_id", "TEXT")
+        _add_column_if_missing(conn, "machine_state_event", "ts_iso", "TEXT")
+        _add_column_if_missing(conn, "machine_state_event", "hora_idx", "INTEGER")
+
+    # Índices para leitura por dia e reconstrução de segments
     cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_machine_state_event_machine_day_ts
+        CREATE INDEX IF NOT EXISTS ix_machine_state_event_eff_day_ts
         ON machine_state_event(effective_machine_id, data_ref, ts_ms)
     """)
     cur.execute("""
-        CREATE INDEX IF NOT EXISTS ix_machine_state_event_cliente_machine_day_ts
+        CREATE INDEX IF NOT EXISTS ix_machine_state_event_cliente_eff_day_ts
         ON machine_state_event(cliente_id, effective_machine_id, data_ref, ts_ms)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS ix_machine_state_event_machine_day_ts
+        ON machine_state_event(machine_id, data_ref, ts_ms)
     """)
 
     conn.commit()
