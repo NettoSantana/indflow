@@ -1,6 +1,5 @@
-﻿fix(historico): rastro por status.run no detalhe do dia (verde run=1, vermelho run=0)
+﻿feat(historico): mostrar informacoes por hora (meta, produzido, tempos e paradas) a partir do JSON
 
-- persistir eventos de estado via /machine/status (run) em localStorage
-- detalhe do dia desenha barras por rastro (ignora meta e ignora segments)
-- corrigir clienteId indefinido na chave do localStorage
-- ajustar abrir/fechar modal do dia com classe open
+- adiciona helpers pickFirstNumber e fmtMinutes
+- exibe acima da barra por hora: Meta, Prod, Tempo Prod, Tempo Parado, Paradas (quando existirem no JSON)
+- nao calcula nada no frontend; apenas renderiza os campos recebidos
