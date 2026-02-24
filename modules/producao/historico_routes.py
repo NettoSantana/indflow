@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 20:51 America/Bahia
-# MOTIVO: Detalhe-dia: tempos e paradas cumulativos derivados exclusivamente de segments (RUN/STOP/NP).
+# LAST_RECODE: 2026-02-24 21:10 America/Bahia
+# MOTIVO: Corrigir erro de datetime naive/aware no detalhe-dia; intervalos RUN agora sao naive (Bahia) para comparar com hs/he e estabilizar o endpoint.
 
 
 from __future__ import annotations
@@ -461,17 +461,20 @@ def _fetch_run_intervals_from_state_events(
     except Exception:
         return []
 
-    day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0, tzinfo=TZ_BAHIA)
+    # IMPORTANTE: o restante do Historico usa datetimes naive (sem tzinfo).
+    # Para evitar erro de comparacao naive vs aware, aqui tambem usamos naive.
+    day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0)
     day_end = day_start + timedelta(days=1)
 
     # "agora" somente se for o dia atual, para nao inventar futuro
-    now_dt = datetime.now(TZ_BAHIA)
+    now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
     if day_start.date() == now_dt.date():
         hard_end = min(day_end, now_dt)
     else:
         hard_end = day_end
 
-    day_start_ms = int(day_start.timestamp() * 1000)
+    # day_start_ms deve respeitar o fuso America/Bahia; calcula via aware apenas para timestamp.
+    day_start_ms = int(day_start.replace(tzinfo=TZ_BAHIA).timestamp() * 1000)
 
     # Estado inicial: ultimo evento antes do dia
     state0 = None
@@ -523,7 +526,7 @@ def _fetch_run_intervals_from_state_events(
 
     for ts_ms, st in evs:
         try:
-            t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA)
+            t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
         except Exception:
             continue
         if t < day_start:
@@ -880,7 +883,7 @@ def api_producao_detalhe_dia():
     # Hora atual (naive, TZ_BAHIA) para cortar a hora em andamento e nao preencher futuro
     now_naive = None
     try:
-        now_dt = datetime.now(TZ_BAHIA)
+        now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
         if data_ref == now_dt.date():
             now_naive = now_dt.replace(tzinfo=None)
     except Exception:
