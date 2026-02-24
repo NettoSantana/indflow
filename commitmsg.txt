@@ -1,5 +1,4 @@
-﻿fix(historico): exibir tempo prod/parado a partir de *_sec (fallback *_min)
+﻿fix(historico): corrigir SyntaxError em fmtSecondsToMin (strings escapadas)
 
-- front passa a ler tempo_produzindo_sec e tempo_parado_sec do detalhe-dia
-- converte segundos para minutos na exibicao
-- mantem compatibilidade com campos em minutos se existirem
+- remove sequencias \"-\" e \" min\" que quebravam o JS
+- mantem leitura de tempo_produzindo_sec/tempo_parado_sec e exibicao em minutos
