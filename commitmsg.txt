@@ -1,5 +1,5 @@
-﻿fix(historico): detalhe-dia acumula tempo na hora atual e nao preenche futuro
+﻿fix(historico): remover active_days e corrigir he_calc no detalhe-dia
 
-- Para o dia atual: corta o fim do slot no 'agora' (he_calc)
-- Horas futuras retornam 0s para evitar 60 min antecipado
-- Mantem comportamento normal para horas passadas e dias anteriores
+- Remove regra de active_days no detalhe-dia (simplifica e evita fluxo quebrado)
+- Define he_calc por hora para cortar no agora sem preencher futuro
+- Corrige 500: UnboundLocalError (he_calc)
