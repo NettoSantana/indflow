@@ -1,4 +1,5 @@
-﻿fix(historico): tempos e paradas cumulativos baseados em segments
+﻿fix(historico): tempo e paradas por estado atual (streak) baseado no ultimo segmento
 
-- Tempo Produzindo/Parado calculados exclusivamente por segments (RUN/STOP/NP), cumulativos ate agora
-- Paradas passam a ser cumulativas por inicio de segmento STOP com duracao > 0 (inclui hora iniciando em STOP)
+- Tempo Prod/Parado passam a usar apenas o ultimo segmento da hora (RUN/STOP/NP)
+- Ao alternar STOP<->RUN, o tempo do estado anterior zera e passa a contar o novo estado
+- Paradas vira indicador do estado atual (STOP=1, RUN/NP=0)

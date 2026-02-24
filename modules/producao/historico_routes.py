@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 21:00 America/Bahia
-# MOTIVO: Detalhe-dia: tempos e paradas por estado atual (streak) derivados do ultimo segmento (RUN/STOP/NP).
+# LAST_RECODE: 2026-02-24 21:13 America/Bahia
+# MOTIVO: Detalhe-dia: tempos acumulativos por hora (soma RUN e STOP) e paradas acumulativas (RUN->STOP) baseados em segments.
 
 
 from __future__ import annotations
@@ -163,15 +163,32 @@ def _apply_current_stop_to_segments(
 
 
 def _calc_seg_metrics(segs: list[dict]) -> tuple[int, int, int]:
-    # Regra unica (mesma da barra) para EXIBICAO "estado atual" (streak), cumulativa dentro do estado:
-    # - Se o ultimo segmento da hora for RUN: Tempo Prod = duracao desse ultimo RUN; Tempo Parado = 0; Paradas = 0
-    # - Se o ultimo segmento da hora for STOP: Tempo Parado = duracao desse ultimo STOP; Tempo Prod = 0; Paradas = 1
-    # - Se o ultimo segmento for NP: tudo 0
-    #
-    # Observacao: "Paradas" aqui e um indicador do estado atual (0 produzindo, 1 parado),
-    # nao e quantidade de paradas ocorridas no horario.
-    if not segs:
-        return 0, 0, 0
+    # Regra unica (mesma da barra), ACUMULATIVA na hora:
+    # - Tempo Produzindo: soma duracao de todos os segmentos RUN
+    # - Tempo Parado: soma duracao de todos os segmentos STOP
+    # - Paradas: conta transicoes RUN -> STOP (incrementa ao iniciar um STOP apos um RUN)
+    tempo_produzindo_sec = 0
+    tempo_parado_sec = 0
+    qtd_paradas = 0
+
+    last_state = None
+    for s in segs or []:
+        st = (s.get("state") or "").upper()
+        a = _hhmmss_to_sec(s.get("start", "00:00:00"))
+        b = _hhmmss_to_sec(s.get("end", "00:00:00"))
+        dur = max(0, b - a)
+
+        if st == "RUN":
+            tempo_produzindo_sec += dur
+        elif st == "STOP":
+            tempo_parado_sec += dur
+            if dur > 0 and last_state == "RUN":
+                qtd_paradas += 1
+
+        last_state = st
+
+    return tempo_produzindo_sec, tempo_parado_sec, qtd_paradas
+
 
     # Pega o ultimo segmento com duracao > 0 (se existir). Caso contrario, usa o ultimo mesmo.
     last = None
