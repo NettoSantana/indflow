@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 17:02 America/Bahia
-# MOTIVO: Detalhe-dia: calcular tempo_produzindo_sec/tempo_parado_sec de forma cumulativa na hora atual (corta no agora e nao preenche futuro).
+# LAST_RECODE: 2026-02-24 17:25 America/Bahia
+# MOTIVO: Remover active_days (simplificar) e corrigir UnboundLocalError de he_calc no detalhe-dia.
 
 
 from __future__ import annotations
@@ -820,48 +820,8 @@ def api_producao_detalhe_dia():
                 ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
                 120,
             )
-            active_days = cfg.get("active_days")
 
-            if isinstance(active_days, list) and active_days:
-                # Python weekday: Mon=0..Sun=6; nossa lista default e 1..7 (Seg=1)
-                wd = data_ref.weekday() + 1
-                if wd not in set(int(x) for x in active_days if str(x).isdigit()):
-                    # Dia nao ativo: tudo NP
-                    horas = []
-                    for h in range(24):
-                        hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
-                        he = hs + timedelta(hours=1)
-                # Para o dia atual: hora atual acumula ate "agora"; horas futuras nao acumulam (0s)
-                he_calc = he
-                if now_naive is not None:
-                    if now_naive <= hs:
-                        he_calc = hs
-                    elif now_naive < he:
-                        he_calc = now_naive
-                        horas.append(
-                            {
-                                "hour": h,
-                                "slot": f"{h:02d}:00-{(h+1)%24:02d}:00",
-                                "meta": 0,
-                                "produzido": 0,
-                                "refugo": 0,
-                                "segments": _build_segments_for_hour(hs, he_calc, True, []),
-                                "tempo_produzindo_sec": 0,
-                                "tempo_parado_sec": 0,
-                                "qtd_paradas": 0,
-                            }
-                        )
-                    return jsonify(
-                        {
-                            "ok": True,
-                            "machine_id": machine_id,
-                            "effective_machine_id": eff_mid,
-                            "date": data_ref.isoformat(),
-                            "stop_sec": stop_sec,
-                            "hours": horas,
-                        }
-                    )
-            # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
+# Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
 
@@ -873,6 +833,15 @@ def api_producao_detalhe_dia():
             for h in range(24):
                 hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
                 he = hs + timedelta(hours=1)
+
+                # Para o dia atual: corta a hora em andamento no "agora" e nao preenche futuro.
+                he_calc = he
+                if now_naive is not None:
+                    if now_naive <= hs:
+                        he_calc = hs
+                    elif now_naive < he:
+                        he_calc = now_naive
+
 
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
