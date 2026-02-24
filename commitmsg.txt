@@ -1,4 +1,5 @@
-﻿feat(db): criar tabela machine_state_event para persistir RUN/STOP
+﻿fix(db): alinhar schema de machine_state_event com machine_routes
 
-- Adiciona machine_state_event (effective_machine_id, data_ref, ts_ms, state, cliente_id)
-- Cria indices por (machine_id, dia, ts) e por (cliente_id, machine_id, dia, ts)
+- Adiciona colunas faltantes (machine_id, cliente_id, ts_iso, hora_idx)
+- Garante migracao defensiva via ALTER TABLE quando tabela ja existe
+- Cria indices para consulta por effective_machine_id/data_ref/ts_ms
