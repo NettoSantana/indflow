@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 15:56 America/Bahia
-# MOTIVO: Calcular e retornar tempo_produzindo_sec, tempo_parado_sec e qtd_paradas por hora no endpoint /api/producao/detalhe-dia com base nos segments.
+# LAST_RECODE: 2026-02-24 16:48 America/Bahia
+# MOTIVO: Ajustar fallback quando nao ha machine_state_event: usar produzido>0 para marcar RUN na hora; evita tempo_parado_sec=3600 em horas com producao.
 
 
 from __future__ import annotations
@@ -863,8 +863,25 @@ def api_producao_detalhe_dia():
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
 
                 is_np = meta <= 0
-                segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
 
+                # Fallback: se nao houver rastro em machine_state_event para o dia,
+                # nao marque a hora inteira como STOP quando houve producao.
+                # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN a hora inteira; senao => STOP.
+                if (not is_np) and (not run_intervals):
+                    if produzido > 0:
+                        segs = [{
+                            "start": hs.strftime("%H:%M:%S"),
+                            "end": he.strftime("%H:%M:%S"),
+                            "state": "RUN",
+                        }]
+                    else:
+                        segs = [{
+                            "start": hs.strftime("%H:%M:%S"),
+                            "end": he.strftime("%H:%M:%S"),
+                            "state": "STOP",
+                        }]
+                else:
+                    segs = _build_segments_for_hour(hs, he, is_np, run_intervals)
                 tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
 
                 horas.append(
