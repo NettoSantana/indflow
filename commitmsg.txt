@@ -1,5 +1,6 @@
-﻿fix(historico): forcar cor no detalhe do dia por meta/prod quando segments vier inconsistente
+﻿fix(historico): rastro por status.run no detalhe do dia (verde run=1, vermelho run=0)
 
-- buildHourBar agora recebe meta/prod e aplica forceState (RUN/STOP/NP)
-- renderDayDetail passa meta/prod ao buildHourBar
-- mantém segmentacao visual, mas corrige cor geral conforme contagem
+- persistir eventos de estado via /machine/status (run) em localStorage
+- detalhe do dia desenha barras por rastro (ignora meta e ignora segments)
+- corrigir clienteId indefinido na chave do localStorage
+- ajustar abrir/fechar modal do dia com classe open
