@@ -1,5 +1,5 @@
-﻿fix(detalhe-dia): calcular tempos e paradas por hora a partir de segments (corrige 500)
+﻿fix(historico): exibir tempo prod/parado a partir de *_sec (fallback *_min)
 
-- adiciona helpers _hhmmss_to_sec e _calc_seg_metrics
-- inclui tempo_produzindo_sec, tempo_parado_sec e qtd_paradas em cada hour
-- mantem segments e estrutura existente
+- front passa a ler tempo_produzindo_sec e tempo_parado_sec do detalhe-dia
+- converte segundos para minutos na exibicao
+- mantem compatibilidade com campos em minutos se existirem
