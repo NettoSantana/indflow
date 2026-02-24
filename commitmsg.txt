@@ -1,5 +1,5 @@
-﻿fix(historico): corrigir modal detalhe-dia e rastro por estado via /machine/status
+﻿fix(historico): corrigir escopo JS que quebrava modal (buildSegmentsForHour)
 
-- Corrige funcoes faltantes (buildSegmentsForHour/stateToCss/getStatusTsMs) que causavam 'Falha ao carregar detalhe do dia'
-- Rastro por segmentos usa timestamp do status (quando disponivel) em vez de Date.now()
-- Mantem horas futuras sempre cinza
+Corrige bloco de funcoes (normalizeStateFromStatus/getStatusTsMs/stateToCss/buildSegmentsForHour) para ficarem no escopo correto
+
+Remove ReferenceError e faz o modal "Detalhe do dia" voltar a renderizar o rastro por estado
