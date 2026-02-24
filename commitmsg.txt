@@ -1,4 +1,4 @@
-﻿fix(historico): usar machine_id efetivo por eventos para preencher modal por hora
+﻿fix(historico): corrigir fmtInt undefined no modal do dia e padronizar modal open/close
 
-- Resolve effective_machine_id pelo producao_evento no dia (prefere id escopado com mais eventos)
-- Evita modal detalhe-dia zerado quando producao_diaria usa id legado e eventos usam id escopado
+- adiciona fmtInt() (alias de fmtNum) para evitar ReferenceError no renderDayDetail
+- abre/fecha modal do dia via classe open (alinha com CSS e handler do Escape)
