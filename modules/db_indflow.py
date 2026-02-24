@@ -1,4 +1,7 @@
-# modules/db_indflow.py
+# PATH: modules/db_indflow.py
+# LAST_RECODE: 2026-02-24 00:00 America/Bahia
+# MOTIVO: Criar tabela machine_state_event para persistir transicoes RUN/STOP e estabilizar Historico por hora.
+
 import os
 import sqlite3
 from pathlib import Path
@@ -208,6 +211,28 @@ def init_db():
         WHERE cliente_id IS NULL
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS ix_baseline_diario_cliente_id ON baseline_diario(cliente_id)")
+
+    # -------------------- machine_state_event (RUN/STOP) --------------------
+    # Fonte persistente de estado para montar o Historico (segments) sem "sumir" no refresh.
+    # Regra: gravar somente transicoes (RUN->STOP ou STOP->RUN) com ts_ms real.
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS machine_state_event (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            effective_machine_id TEXT NOT NULL,
+            data_ref TEXT NOT NULL,
+            ts_ms INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            cliente_id TEXT
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS ix_machine_state_event_machine_day_ts
+        ON machine_state_event(effective_machine_id, data_ref, ts_ms)
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS ix_machine_state_event_cliente_machine_day_ts
+        ON machine_state_event(cliente_id, effective_machine_id, data_ref, ts_ms)
+    """)
 
     conn.commit()
     conn.close()
