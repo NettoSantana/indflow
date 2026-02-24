@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-23 18:26 America/Bahia
-# MOTIVO: Persistir eventos de estado (RUN/STOP/NP) no /machine/status para manter historico de cores (verde/vermelho/cinza) e suportar timeline.
+# LAST_RECODE: 2026-02-24 00:00 America/Bahia
+# MOTIVO: Persistir eventos RUN/STOP também no /machine/update (transição gravada no momento do payload do ESP), garantindo histórico estável sem depender do polling do /machine/status.
 
 import os
 import json
@@ -1909,6 +1909,58 @@ def update_machine():
             processar_nao_programado(m, machine_id, cliente_id)
         except Exception:
             pass
+    # --------------------------------------------------
+    # TIMELINE (RUN/STOP) - persistencia no /machine/update
+    # --------------------------------------------------
+    # Sem depender do /machine/status (polling), gravamos transicoes quando o ESP envia payload.
+    try:
+        thr_u = 0
+        try:
+            thr_u = int(m.get("no_count_stop_sec", 0) or 0)
+        except Exception:
+            thr_u = 0
+
+        sem_contar_u = 0
+        try:
+            last_ts_u = m.get("_last_count_ts_ms")
+            if last_ts_u is None:
+                last_ts_u = int(effective_ts_ms)
+                m["_last_count_ts_ms"] = last_ts_u
+            last_ts_u = int(last_ts_u)
+            if int(effective_ts_ms) >= last_ts_u:
+                sem_contar_u = int((int(effective_ts_ms) - last_ts_u) / 1000)
+        except Exception:
+            sem_contar_u = 0
+
+        stopped_by_no_count_u = bool(thr_u >= 5 and sem_contar_u >= thr_u)
+
+        # Regra de estado:
+        # RUN  = status AUTO + run=1 + nao estourou janela sem contagem
+        # STOP = caso contrario
+        if new_status == "AUTO" and int(m.get("run") or 0) == 1 and not stopped_by_no_count_u:
+            st_evt_u = "RUN"
+        else:
+            st_evt_u = "STOP"
+
+        dt_evt_u = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA)
+        hora_evt_u = int(dt_evt_u.hour)
+        data_ref_evt_u = dia_operacional_ref_str(dt_evt_u)
+        raw_mid_u = _norm_machine_id(machine_id)
+        eff_mid_u = f"{cliente_id}::{raw_mid_u}" if cliente_id else raw_mid_u
+
+        _record_machine_state_transition(
+            raw_mid_u,
+            eff_mid_u,
+            str(cliente_id) if cliente_id else None,
+            st_evt_u,
+            dt_evt_u,
+            data_ref_evt_u,
+            hora_evt_u,
+        )
+    except Exception:
+        pass
+
+
 
     resp = {
         "message": "OK",
