@@ -1,5 +1,5 @@
-﻿fix(historico): corrigir datetime naive/aware no detalhe-dia
+﻿fix(machine/config): recarregar config_v2 do SQLite apos deploy
 
-- Converte intervalos RUN de machine_state_event para datetimes naive (Bahia)
-- Mantem calculo de day_start_ms via aware apenas para timestamp correto
-- Remove erro 500: can't compare offset-naive and offset-aware datetimes
+- Aplica config_v2 persistida (machine_config.config_json) na memoria em:
+  /machine/status, /machine/update e /api/producao/historico
+- Garante que a tela de configuracao e calculos usem a config salva mesmo apos restart/deploy
