@@ -1,4 +1,4 @@
-﻿fix(historico): corrigir hora atual/futura usando timezone America/Bahia
+﻿fix(historico): hora atual do detalhe-dia alinhada ao card (ESP - baseline_esp)
 
-- Evita considerar 07:00 quando na Bahia ainda e 05:50
-- Corrige corte por hora para trilha de estados e barras no detalhe-dia
+- Para o dia atual, recalcula produzido da hora corrente como (snapshot ESP - baseline_esp da hora)
+- Evita detalhe-dia ficar "atrasado" em relacao ao dashboard
