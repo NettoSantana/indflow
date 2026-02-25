@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:49 America/Bahia
-# MOTIVO: Alinhar produzido por hora no detalhe-dia com o card (delta do contador do ESP) e remover contagem por eventos; corrigir indentacao que quebrava o bloco.
+# LAST_RECODE: 2026-02-25 09:51 America/Bahia
+# MOTIVO: Detalhe-dia (opcao A): preencher produzido/meta/refugo por hora somente via producao_horaria/refugo_horaria, sem alterar estado nem afetar o card; zera horas futuras no dia atual.
 
 
 from __future__ import annotations
@@ -998,15 +998,18 @@ def api_producao_detalhe_dia():
 
     data_ref = _parse_date_any(date_str) or datetime.now(TZ_BAHIA).date()
 
-
     # Hora atual (naive, TZ_BAHIA) para cortar a hora em andamento e nao preencher futuro
     now_naive = None
+    now_hour = None
     try:
         now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
         if data_ref == now_dt.date():
-            now_naive = now_dt.replace(tzinfo=None)
+            now_naive = now_dt
+            now_hour = int(now_dt.hour)
     except Exception:
         now_naive = None
+        now_hour = None
+
     conn = _get_conn()
     try:
         try:
@@ -1018,12 +1021,13 @@ def api_producao_detalhe_dia():
             if (not cfg) and eff_mid and eff_mid != machine_id:
                 cfg = _load_machine_config_json(conn, eff_mid)
 
-            # stop_sec e dias ativos (se existir)
+            # stop_sec (se existir)
             stop_sec = _safe_int(
                 ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
                 120,
             )
 
+            # Estado atual (somente leitura) para aplicar STOP na hora corrente, se aplicavel.
             machine_state = None
             stop_start_naive = None
             if now_naive is not None and callable(get_machine):
@@ -1050,99 +1054,12 @@ def api_producao_detalhe_dia():
                 except Exception:
                     stop_start_naive = None
 
-
-            # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
-            # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
+            # Segmentos RUN/STOP vem do rastro persistido em machine_state_event.
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
-            # Tabela horaria (meta/produzido/refugo)
+
+            # Fonte da verdade (OPCAO A): producao_horaria / refugo_horaria para produzido/meta/refugo por hora.
+            # Nao recalcula, nao usa eventos e nao altera o estado da maquina (nao afeta o card).
             hor = _fetch_horaria(conn, eff_mid, data_ref)
-
-            # ============================================================
-            # Meta por Hora (fonte da verdade: estado/config da maquina)
-            # Regra:
-            # - Usa meta_por_hora + turno_inicio do estado retornado por get_machine()
-            # - Converte para vetor de 24h do relogio (00..23)
-            # - Aplica no JSON hours[].meta (sem recalcular em banco)
-            #
-            # Observacao:
-            # - Mantemos produzido/refugo do banco sem recalcular
-            # - Se nao houver meta_por_hora/turno_inicio, mantem meta do banco (compatibilidade)
-            # ============================================================
-            try:
-                meta24 = _build_meta_24_from_machine_state(machine_state)
-                if meta24 is not None:
-                    for hh in range(24):
-                        hor[hh]["meta"] = _safe_int(meta24[hh], 0)
-            except Exception:
-                pass
-
-
-
-            # ============================================================
-            # Normalizacao (dia atual): evitar valores acumulados em producao_horaria
-            #
-            # Caso producao_horaria tenha armazenado ESP acumulado em 'produzido',
-            # usamos esp_last/baseline_esp (se existirem) para converter em delta por hora.
-            # Para a hora corrente, alinhamos com o card (ESP_atual - baseline_da_hora).
-            # ============================================================
-            try:
-                if now_naive is not None:
-                    now_hour = int(now_naive.hour)
-                    esp_now = _extract_esp_counter(machine_state)
-
-                    # Baseline por hora: preferir baseline_esp do banco; se faltar, usar esp_last da hora anterior
-                    last_esp = 0
-                    for hh in range(24):
-                        try:
-                            last_esp = max(_safe_int(hor.get(hh, {}).get("esp_last", 0), 0), last_esp)
-                        except Exception:
-                            pass
-
-                    prev_esp = 0
-                    for hh in range(24):
-                        base = _safe_int(hor.get(hh, {}).get("baseline_esp", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if base <= 0 and hh > 0:
-                            prev_esp_val = _safe_int(hor.get(hh - 1, {}).get("esp_last", 0), 0)
-                            if prev_esp_val > 0:
-                                base = prev_esp_val
-                        if base <= 0:
-                            base = prev_esp
-
-                        # Atualiza prev_esp para permitir fallback mesmo sem esp_last
-                        if esp_h > 0:
-                            prev_esp = esp_h
-
-                        hor[hh]["_baseline_calc"] = base
-
-                    # Ajusta produzido por hora usando esp_last/baseline quando disponivel
-                    for hh in range(24):
-                        if hh > now_hour:
-                            # Futuro no dia atual: zera para nao herdar acumulado
-                            hor[hh]["produzido"] = 0
-                            continue
-
-                        base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if hh == now_hour and esp_now is not None:
-                            # Hora corrente: usa o contador atual do ESP
-                            delta = _safe_int(esp_now, 0) - base
-                        else:
-                            # Horas passadas: se houver esp_last, calcula delta
-                            if esp_h > 0:
-                                delta = esp_h - base
-                            else:
-                                delta = None
-
-                        if delta is None:
-                            continue
-                        if delta < 0:
-                            delta = 0
-                        hor[hh]["produzido"] = int(delta)
-            except Exception:
-                pass
-
-            # Monta resposta hora a hora
 
             horas = []
             for h in range(24):
@@ -1157,12 +1074,14 @@ def api_producao_detalhe_dia():
                     elif now_naive < he:
                         he_calc = now_naive
 
-
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
 
-
+                # No dia atual, horas futuras sempre zeradas (evita herdar acumulado).
+                if now_hour is not None and h > now_hour:
+                    produzido = 0
+                    refugo = 0
 
                 is_np = meta <= 0
 
@@ -1190,10 +1109,9 @@ def api_producao_detalhe_dia():
                     )
                     continue
 
-
                 # Fallback: se nao houver rastro em machine_state_event para o dia,
                 # nao marque a hora inteira como STOP quando houve producao.
-                # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN a hora inteira; senao => STOP.
+                # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN; senao => STOP.
                 if (not is_np) and (not run_intervals):
                     if produzido > 0:
                         segs = [{
@@ -1256,6 +1174,7 @@ def api_producao_detalhe_dia():
                 conn.close()
             except Exception:
                 pass
+
 
 
 
