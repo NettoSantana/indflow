@@ -1,3 +1,7 @@
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\repos\producao_horaria_repo.py
+# LAST_RECODE: 2026-02-25 15:58 America/Bahia
+# MOTIVO: Fixar cliente_id consistente em producao_horaria: ignorar cliente_id do machine_id scoped, resolver por tabelas de config/vinculo e, se preciso, pelo cliente_id mais recente em producao_horaria. Evita mistura de dois clientes no historico.
+
 # modules/repos/producao_horaria_repo.py
 # LAST_RECODE: 2026-02-25 14:35 America/Bahia
 # MOTIVO: Corrigir divergencia de cliente_id na persistencia de producao_horaria: ignorar cid de machine_id scoped e resolver cliente_id consistente por consulta ao DB antes do upsert/leitura.
@@ -17,14 +21,16 @@ def _resolve_cliente_id(conn, mid: str, fallback_cid: str | None):
     Resolve cliente_id consistente para um machine_id (mid) consultando o SQLite.
     - Tenta tabelas que tenham colunas de machine_id e cliente_id.
     - Cacheia o schema encontrado para evitar custo em chamadas repetidas.
-    - Se nao encontrar, usa fallback_cid (quando veio no formato scoped) ou None.
+    - Se nao encontrar, retorna None (nao confia no cid do scoped).
     """
     mid_norm = (mid or "").strip().lower()
     if not mid_norm:
         return fallback_cid or None
 
     if mid_norm in _CLIENTE_CACHE:
-        return _CLIENTE_CACHE[mid_norm] if _CLIENTE_CACHE[mid_norm] else (fallback_cid or None)
+        # Se já resolvemos uma vez, nunca mais confiamos no fallback do scoped.
+        cached = _CLIENTE_CACHE.get(mid_norm)
+        return cached if cached else None
 
     global _SCHEMA_CACHE
     if _SCHEMA_CACHE is None:
@@ -40,7 +46,7 @@ def _resolve_cliente_id(conn, mid: str, fallback_cid: str | None):
                     continue
 
                 machine_col = None
-                for cand in ("machine_id", "maquina_id", "id_maquina", "machine"):
+                for cand in ("machine_id", "effective_machine_id", "maquina_id", "id_maquina", "machine", "machine_key", "machine_code", "codigo_maquina", "id", "key"):
                     if cand in colnames:
                         machine_col = cand
                         break
@@ -56,7 +62,7 @@ def _resolve_cliente_id(conn, mid: str, fallback_cid: str | None):
         def _score(item):
             tname = item[0].lower()
             score = 0
-            for key in ("config", "maquina", "machine", "device", "vinc", "binding", "producao"):
+            for key in ("config_maquina", "maquina_config", "machine_config", "machines", "config", "maquina", "machine", "device", "vinculo", "vinc", "binding", "producao"):
                 if key in tname:
                     score += 1
             return -score, tname
@@ -91,8 +97,44 @@ def _resolve_cliente_id(conn, mid: str, fallback_cid: str | None):
             except Exception:
                 continue
 
-    _CLIENTE_CACHE[mid_norm] = resolved or ""
-    return resolved or (fallback_cid or None)
+    # fallback extra: se ainda nao resolveu por tabela de config/vinculo,
+    # tenta inferir pelo proprio producao_horaria (cliente_id mais recente).
+    if not resolved:
+        try:
+            has_clientes = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='clientes'").fetchone()
+            if has_clientes:
+                row = conn.execute(
+                    """
+                    SELECT ph.cliente_id
+                    FROM producao_horaria ph
+                    JOIN clientes c ON c.id = ph.cliente_id
+                    WHERE ph.machine_id = ? AND ph.cliente_id IS NOT NULL AND ph.cliente_id <> ''
+                    ORDER BY ph.updated_at DESC
+                    LIMIT 1
+                    """,
+                    (mid_norm,),
+                ).fetchone()
+                if row and row[0]:
+                    resolved = str(row[0]).strip()
+            else:
+                row = conn.execute(
+                    """
+                    SELECT cliente_id
+                    FROM producao_horaria
+                    WHERE machine_id = ? AND cliente_id IS NOT NULL AND cliente_id <> ''
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (mid_norm,),
+                ).fetchone()
+                if row and row[0]:
+                    resolved = str(row[0]).strip()
+        except Exception:
+            pass
+
+    if resolved:
+        _CLIENTE_CACHE[mid_norm] = resolved
+    return resolved or None
 
 
 def _normalize_machine_cliente(conn, machine_id: str):
