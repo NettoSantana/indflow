@@ -1,5 +1,3 @@
-﻿fix(machine/config): garantir persistencia real da config_v2 no SQLite
+﻿fix(machine_routes): corrigir header quebrado que gerava SyntaxError no VS Code
 
-- Migra schema legado: adiciona machine_config.config_json e updated_at quando faltarem
-- /machine/config nao engole mais erro de banco (retorna 500 com detalhe)
-- Corrige variavel indefinida em /machine/status
+- Linha LAST_RECODE ficou sem comentario e causava erro de sintaxe
