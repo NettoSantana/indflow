@@ -1,5 +1,5 @@
-﻿fix(historico): detalhe-dia usa producao_horaria como fonte da verdade (opcao A)
+﻿fix(machine_calc): garantir persistencia por hora em producao_horaria (write-only)
 
-- Produzido/meta/refugo por hora vem somente de producao_horaria/refugo_horaria
-- Remove recalculo por ESP/machine_state para nao afetar o card
-- Zera horas futuras no dia atual para evitar herdar acumulado
+- Adiciona persistencia defensiva com cliente_id quando suportado pelo repo
+- Grava por machine_id do calculo (scoped) e também por effective_machine_id (quando existir)
+- Nao altera card/front; apenas alimenta historico
