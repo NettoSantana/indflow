@@ -1,5 +1,4 @@
-﻿fix(historico): evitar produzido acumulado por hora (delta via baseline_esp/esp_last)
+﻿fix(producao): corrigir SyntaxError em historico_routes (_fetch_horaria)
 
-- No detalhe-dia do dia atual, converte acumulado do ESP em delta por hora quando colunas existem
-- Hora corrente usa esp_agora - baseline_da_hora (alinha com card)
-- Zera horas futuras para nao herdar acumulado
+- Adiciona bloco no except que estava vazio (pass)
+- Mantem a logica existente sem alterar escopo
