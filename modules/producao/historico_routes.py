@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:43 America/Bahia
-# MOTIVO: Ajustar meta por hora no endpoint detalhe-dia para usar meta_por_hora do estado/config da maquina (turno), refletindo exatamente a tela de configuracao.
+# LAST_RECODE: 2026-02-25 22:30 America/Bahia
+# MOTIVO: Detalhe-dia: alinhar produzido da hora atual com o card (snapshot ESP - baseline_esp), evitando hora atual 'atrasada'.
 
 
 from __future__ import annotations
@@ -27,6 +27,106 @@ except Exception:
 
 TZ_BAHIA = ZoneInfo("America/Bahia")
 
+
+
+def _get_current_esp_snapshot(conn: sqlite3.Connection, machine_id: str) -> tuple[int | None, str | None]:
+    """Snapshot seguro do contador absoluto do ESP.
+
+    Retorna (esp_abs, updated_at_iso). Ambos podem ser None se nao houver dado.
+
+    Regra:
+    - Busca esp_last/updated_at em baseline_diario e producao_horaria (quando existirem).
+    - Escolhe o MAIOR esp_last valido. Em empate, escolhe o updated_at mais recente.
+    """
+    best_esp: int | None = None
+    best_updated: str | None = None
+
+    def _consider(esp_val, upd_val):
+        nonlocal best_esp, best_updated
+        try:
+            esp_i = int(esp_val)
+        except Exception:
+            return
+        if esp_i < 0:
+            return
+        upd_s = None
+        if upd_val is not None:
+            s = str(upd_val).strip()
+            if s:
+                upd_s = s
+        if best_esp is None:
+            best_esp = esp_i
+            best_updated = upd_s
+            return
+        if esp_i > best_esp:
+            best_esp = esp_i
+            best_updated = upd_s
+            return
+        if esp_i == best_esp:
+            # desempate por updated_at mais recente (lexicografico ISO ou YYYY-MM-DD HH:MM:SS costuma funcionar)
+            if (best_updated or "") < (upd_s or ""):
+                best_updated = upd_s
+
+    # baseline_diario
+    if _table_exists(conn, "baseline_diario"):
+        cols = _get_columns(conn, "baseline_diario")
+        if "machine_id" in cols:
+            esp_col = "esp_last" if "esp_last" in cols else ("esp" if "esp" in cols else None)
+            upd_col = "updated_at" if "updated_at" in cols else ("updated_at_iso" if "updated_at_iso" in cols else None)
+            if esp_col:
+                sql = f"SELECT {esp_col} as esp_last{(', ' + upd_col + ' as updated_at') if upd_col else ''} FROM baseline_diario WHERE machine_id=? ORDER BY rowid DESC LIMIT 1"
+                try:
+                    r = conn.execute(sql, (machine_id,)).fetchone()
+                    if r is not None:
+                        _consider(r["esp_last"] if isinstance(r, sqlite3.Row) else r[0], (r["updated_at"] if (upd_col and isinstance(r, sqlite3.Row)) else None))
+                except Exception:
+                    pass
+
+    # producao_horaria
+    if _table_exists(conn, "producao_horaria"):
+        cols = _get_columns(conn, "producao_horaria")
+        if "machine_id" in cols:
+            esp_col = "esp_last" if "esp_last" in cols else None
+            upd_col = "updated_at" if "updated_at" in cols else ("updated_at_iso" if "updated_at_iso" in cols else None)
+            if esp_col:
+                sql = f"SELECT {esp_col} as esp_last{(', ' + upd_col + ' as updated_at') if upd_col else ''} FROM producao_horaria WHERE machine_id=? ORDER BY rowid DESC LIMIT 1"
+                try:
+                    r = conn.execute(sql, (machine_id,)).fetchone()
+                    if r is not None:
+                        _consider(r["esp_last"] if isinstance(r, sqlite3.Row) else r[0], (r["updated_at"] if (upd_col and isinstance(r, sqlite3.Row)) else None))
+                except Exception:
+                    pass
+
+    return best_esp, best_updated
+
+
+def _get_baseline_esp_for_hour(conn: sqlite3.Connection, machine_id: str, data_ref: date, hour_idx: int) -> int | None:
+    """Retorna baseline_esp (ou equivalente) da hora no banco, se existir."""
+    if not _table_exists(conn, "producao_horaria"):
+        return None
+
+    cols = _get_columns(conn, "producao_horaria")
+    data_col = _resolve_data_col(conn, "producao_horaria")
+    hour_col = "hora_idx" if "hora_idx" in cols else ("hora" if "hora" in cols else ("hora_int" if "hora_int" in cols else None))
+    if not data_col or not hour_col:
+        return None
+
+    baseline_col = None
+    for c in ("baseline_esp", "esp_first", "esp_inicio", "esp_start"):
+        if c in cols:
+            baseline_col = c
+            break
+    if not baseline_col:
+        return None
+
+    sql = f"SELECT {baseline_col} as b FROM producao_horaria WHERE machine_id=? AND {data_col}=? AND {hour_col}=? LIMIT 1"
+    try:
+        r = conn.execute(sql, (machine_id, data_ref.isoformat(), int(hour_idx))).fetchone()
+        if r is None:
+            return None
+        return _safe_int(r["b"] if isinstance(r, sqlite3.Row) else r[0], None)
+    except Exception:
+        return None
 def _to_sql_dt(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -995,7 +1095,28 @@ def api_producao_detalhe_dia():
                 pass
 
 
-            # Monta resposta hora a hora
+            
+            # ============================================================
+            # Hora atual: alinhamento com o card do dashboard
+            # - O card usa (ESP atual - baseline_esp da hora) como produzido da hora.
+            # - A tabela producao_horaria pode ficar "atrasada" ate chegar novo evento/pulso.
+            # - Aqui, para o dia atual, corrigimos apenas a hora corrente.
+            # ============================================================
+            try:
+                if now_naive is not None:
+                    cur_h = int(now_naive.hour)
+                    b = _get_baseline_esp_for_hour(conn, eff_mid, data_ref, cur_h)
+                    if b is not None and _safe_int(b, 0) > 0:
+                        esp_abs, _esp_upd = _get_current_esp_snapshot(conn, eff_mid)
+                        if esp_abs is not None:
+                            try:
+                                hor[cur_h]["produzido"] = max(int(esp_abs) - int(b), 0)
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
+# Monta resposta hora a hora
 
             horas = []
             for h in range(24):

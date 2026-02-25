@@ -1,4 +1,4 @@
-﻿refactor(admin): padronizar cards com botoes Novo e Listar
+﻿fix(historico): corrigir hora atual/futura usando timezone America/Bahia
 
-- Um unico card por modulo (Usuarios, Devices, Clientes)
-- Cada card com dois links internos: Novo e Listar
+- Evita considerar 07:00 quando na Bahia ainda e 05:50
+- Corrige corte por hora para trilha de estados e barras no detalhe-dia
