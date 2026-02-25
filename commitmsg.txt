@@ -1,5 +1,5 @@
-﻿fix(machine_calc): garantir persistencia por hora em producao_horaria (write-only)
+﻿fix(machine_calc): persistir producao_horaria por hora com compatibilidade scoped/plain
 
-- Adiciona persistencia defensiva com cliente_id quando suportado pelo repo
-- Grava por machine_id do calculo (scoped) e também por effective_machine_id (quando existir)
-- Nao altera card/front; apenas alimenta historico
+- Grava em producao_horaria usando machine_id scoped (cliente_id::id) e tambem plain (id) quando aplicavel
+- Mantem assinatura do repo (sem novos parametros)
+- Nao altera card; apenas garante que o historico encontre as horas
