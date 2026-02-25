@@ -1,6 +1,6 @@
-﻿fix(detalhe-dia): meta por hora igual tela de configuracao (soma exata)
+﻿fix(detalhe-dia): meta por hora deve vir do estado da maquina (meta_por_hora + turno_inicio)
 
-- Meta do Dia vem de producao_diaria.meta
-- Distribui em inteiros nas horas ativas e zera horas inativas
-- Garante soma das 24h igual a meta do dia
+- Converte meta_por_hora do turno para vetor 24h do relogio
+- Aplica em hours[].meta no endpoint detalhe-dia
 - Mantem produzido/refugo do banco
+- Fallback: se nao houver meta_por_hora/turno_inicio, usa meta do banco

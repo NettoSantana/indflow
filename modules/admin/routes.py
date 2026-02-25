@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\routes.py
-# LAST_RECODE: 2026-02-19 11:00 America/Bahia
-# MOTIVO: Portal no /admin com gestao de usuarios por cliente (roles admin/viewer) e limite de 5 usuarios ativos por cliente.
+# LAST_RECODE: 2026-02-25 04:56 America/Bahia
+# MOTIVO: Recolocar acesso a Clientes no /admin via rotas /admin/clientes e /admin/clientes/novo (telas clientes_list.html e clientes_form.html).
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, render_template_string
 from datetime import datetime
 import uuid
@@ -533,6 +533,21 @@ def logout():
 def home():
     return render_template("admin_home.html")
 
+
+
+
+@admin_bp.route("/clientes", methods=["GET"])
+@admin_required
+def clientes_list_admin():
+    # Renderiza a lista de clientes dentro do portal /admin
+    return render_template("clientes_list.html")
+
+
+@admin_bp.route("/clientes/novo", methods=["GET"])
+@admin_required
+def clientes_form_admin():
+    # Renderiza o formulario de cadastro/edicao de cliente dentro do portal /admin
+    return render_template("clientes_form.html")
 
 @admin_bp.route("/usuarios", methods=["GET"])
 @admin_required
