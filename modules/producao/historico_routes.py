@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:55 America/Bahia
-# MOTIVO: No detalhe-dia, usar producao_hora em memória (machine_state) para a hora atual; remover sobrescrita por contagem de eventos; manter horas passadas pelo banco e evitar preencher futuro.
+# LAST_RECODE: 2026-02-25 07:49 America/Bahia
+# MOTIVO: Alinhar produzido por hora no detalhe-dia com o card (delta do contador do ESP) e remover contagem por eventos; corrigir indentacao que quebrava o bloco.
 
 
 from __future__ import annotations
@@ -1049,19 +1049,9 @@ def api_producao_detalhe_dia():
                                 stop_start_naive = None
                 except Exception:
                     stop_start_naive = None
-            # Produção da hora em memória (fonte usada no card do dashboard).
-            live_producao_hora = None
-            try:
-                if isinstance(machine_state, dict):
-                    v = machine_state.get("producao_hora")
-                    if v is not None:
-                        live_producao_hora = int(v)
-            except Exception:
-                live_producao_hora = None
 
 
-
-# Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
+            # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
             # Tabela horaria (meta/produzido/refugo)
@@ -1170,23 +1160,14 @@ def api_producao_detalhe_dia():
 
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
-
-                # Para o dia atual, a hora corrente deve refletir o mesmo valor do card (memória).
-                if now_naive is not None and live_producao_hora is not None:
-                    try:
-                        if int(h) == int(now_naive.hour):
-                            produzido = int(live_producao_hora)
-                    except Exception:
-                        pass
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
+
 
 
                 is_np = meta <= 0
 
                 # Se he_calc == hs (hora futura no dia atual), nao inventar 60 min.
                 if he_calc == hs:
-                    produzido = 0
-                    refugo = 0
                     zstate = "NP" if is_np else "STOP"
                     segs = [{
                         "start": hs.strftime("%H:%M:%S"),
