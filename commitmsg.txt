@@ -1,5 +1,4 @@
-﻿fix(admin): rotas corretas para Clientes no /admin (lista e novo)
+﻿refactor(admin): padronizar cards com botoes Novo e Listar
 
-- Cria /admin/clientes (lista) carregando rows do banco de forma defensiva
-- Cria /admin/clientes/novo (novo) renderizando clientes_form.html (modo create)
-- Evita Clientes (Novo) cair na lista por rota incorreta
+- Um unico card por modulo (Usuarios, Devices, Clientes)
+- Cada card com dois links internos: Novo e Listar
