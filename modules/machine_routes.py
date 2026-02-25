@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-24 20:05 America/Bahia
-# MOTIVO: Normalizar machine_id (remover escopo cliente::) ao salvar configuracao da maquina, garantindo que a config persista e seja lida corretamente apos deploy.
+# LAST_RECODE: 2026-02-24 21:03 America/Bahia
+# MOTIVO: Persistir e recarregar configuracao V2 (shifts/breaks) do SQLite em /data, aplicando na memoria ao iniciar (pos-deploy).
 
 import os
 import json
@@ -1176,6 +1176,42 @@ def _cfgv2_db_upsert(machine_id: str, cfg_v2: dict):
         except Exception:
             pass
 
+
+def _cfgv2_db_load(machine_id: str) -> dict | None:
+    """Carrega config_v2 persistida (machine_config.config_json)."""
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+    conn = sqlite3.connect(_cfgv2_db_path(), check_same_thread=False)
+    try:
+        cur = conn.execute("SELECT config_json FROM machine_config WHERE machine_id = ? LIMIT 1", (mid,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        raw = row[0]
+        if not raw:
+            return None
+        try:
+            return json.loads(raw)
+        except Exception:
+            return None
+    except Exception:
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _cfgv2_load_apply(m: dict, machine_id: str) -> None:
+    """Recarrega do banco e aplica em memoria. Necessario apos deploy (memoria zera)."""
+    try:
+        _cfgv2_db_init()
+        cfg = _cfgv2_db_load(machine_id)
+        if cfg:
+            _cfgv2_apply_to_memory(m, cfg)
+    except Exception:
+        pass
+
 def _cfgv2_hhmm_to_min(hhmm: str) -> int:
     s = str(hhmm or "").strip()
     m = re.match(r"^(\d{1,2}):(\d{2})$", s)
@@ -1746,6 +1782,9 @@ def update_machine():
     m = get_machine(machine_id)
 
     m["cliente_id"] = cliente_id
+
+    # Recarrega config persistida (pos-deploy)
+    _cfgv2_load_apply(m, machine_id)
 
     verificar_reset_diario(m, machine_id)
 
@@ -2610,6 +2649,9 @@ def machine_status():
     machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
     m = get_machine(machine_id)
 
+    # Recarrega config persistida (pos-deploy)
+    _cfgv2_load_apply(m, machine_id)
+
     cid_req = None
     try:
         cid_req = _get_cliente_id_for_request()
@@ -2885,6 +2927,10 @@ def historico_producao_api():
         return jsonify([])
 
     m = get_machine(machine_id)
+
+    # Recarrega config persistida (pos-deploy)
+    _cfgv2_load_apply(m, machine_id)
+
     meta_default = _safe_int(m.get("meta_turno"), 0)
     conn = get_db()
 
@@ -2947,4 +2993,4 @@ def historico_producao_api():
 # - Mantem logica de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
-# git pus
+# git push
