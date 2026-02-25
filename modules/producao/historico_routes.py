@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:35 America/Bahia
-# MOTIVO: Corrigir produzido por hora no detalhe-dia usando pulsos reais (producao_evento) por intervalo HH:00-HH+1:00; evita hora zerada e heranca de acumulado; corrigir validacoes de sintaxe/indentacao.
+# LAST_RECODE: 2026-02-25 07:49 America/Bahia
+# MOTIVO: Alinhar produzido por hora no detalhe-dia com o card (delta do contador do ESP) e remover contagem por eventos; corrigir indentacao que quebrava o bloco.
 
 
 from __future__ import annotations
@@ -1051,7 +1051,7 @@ def api_producao_detalhe_dia():
                     stop_start_naive = None
 
 
-# Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
+            # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
             # Tabela horaria (meta/produzido/refugo)
@@ -1162,19 +1162,6 @@ def api_producao_detalhe_dia():
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
 
-                # Produzido por hora: fonte principal = pulsos reais (producao_evento) no intervalo da hora.
-                # Isso evita hora zerada quando ha RUN/STOP e o dashboard mostra producao, e evita herdar acumulado.
-                try:
-                    start_ms = _naive_bahia_to_ms(hs)
-                    end_limit = he
-                    if now_naive is not None and now_naive < he:
-                        end_limit = now_naive
-                    end_ms = _naive_bahia_to_ms(end_limit)
-                    pulses = _count_pulses_producao_evento(conn, machine_id, eff_mid, start_ms, end_ms)
-                    if pulses > 0:
-                        produzido = int(pulses)
-                except Exception:
-                    pass
 
 
                 is_np = meta <= 0
