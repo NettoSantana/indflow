@@ -1546,3 +1546,4 @@ def api_producao_backfill_horaria():
 @historico_bp.route("/historico", methods=["GET"])
 def historico_page():
     return render_template("historico.html")
+###
