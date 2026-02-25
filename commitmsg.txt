@@ -1,5 +1,5 @@
-﻿fix(historico): hora atual do detalhe-dia usa producao_hora em memoria (igual card)
+﻿fix(historico): detalhe-dia usa producao_horaria como fonte da verdade (opcao A)
 
-- Para o dia atual, a hora corrente (HH:00-HH+1) usa machine_state.producao_hora
-- Remove sobrescrita de produzido por contagem de eventos (producao_evento) que gerava valores baixos
-- Garante horas futuras zeradas no detalhe-dia
+- Produzido/meta/refugo por hora vem somente de producao_horaria/refugo_horaria
+- Remove recalculo por ESP/machine_state para nao afetar o card
+- Zera horas futuras no dia atual para evitar herdar acumulado
