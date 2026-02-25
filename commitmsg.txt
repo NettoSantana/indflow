@@ -1,4 +1,3 @@
-﻿fix(admin): recolocar acesso a Clientes no portal /admin
+﻿fix(admin): adicionar cards de Clientes no painel /admin
 
-- Adiciona rotas /admin/clientes e /admin/clientes/novo
-- Renderiza clientes_list.html e clientes_form.html dentro do ADMIN (admin_required)
+- Inclui links para /admin/clientes e /admin/clientes/novo

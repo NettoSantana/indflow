@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\routes.py
-# LAST_RECODE: 2026-02-25 04:56 America/Bahia
-# MOTIVO: Recolocar acesso a Clientes no /admin via rotas /admin/clientes e /admin/clientes/novo (telas clientes_list.html e clientes_form.html).
+# LAST_RECODE: 2026-02-25 22:05 America/Bahia
+# MOTIVO: Recolocar rotas de Clientes dentro do portal /admin (lista e novo), mantendo templates existentes.
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, render_template_string
 from datetime import datetime
 import uuid
@@ -534,20 +534,80 @@ def home():
     return render_template("admin_home.html")
 
 
+# ============================================================
+# CLIENTES (no ADMIN)
+# ============================================================
+def _clientes_rows():
+    """Carrega lista de clientes para a tela de listagem (defensivo para schema)."""
+    db = get_db()
+
+    # Descobrir colunas existentes
+    cols = []
+    try:
+        cur = db.execute("PRAGMA table_info(clientes)")
+        cols = [r[1] for r in cur.fetchall()]  # name
+    except Exception:
+        cols = []
+
+    # Mapear colunas (preferencia)
+    col_id = "id" if "id" in cols else None
+    col_nome = "nome" if "nome" in cols else ("razao_social" if "razao_social" in cols else None)
+    col_status = "status" if "status" in cols else ("ativo" if "ativo" in cols else None)
+    col_created = "created_at" if "created_at" in cols else ("created_at_utc" if "created_at_utc" in cols else None)
+
+    if not col_id or not col_nome:
+        return []
+
+    select_cols = [col_id, col_nome]
+    if col_status:
+        select_cols.append(col_status)
+    if col_created:
+        select_cols.append(col_created)
+
+    q = "SELECT " + ", ".join(select_cols) + " FROM clientes"
+    if col_created:
+        q += " ORDER BY " + col_created + " DESC"
+    else:
+        q += " ORDER BY " + col_id + " DESC"
+
+    try:
+        cur = db.execute(q)
+        raw = cur.fetchall()
+    except Exception:
+        return []
+
+    rows = []
+    for r in raw:
+        d = dict(r)
+        nome = d.get(col_nome) or ""
+        status_val = ""
+        if col_status:
+            sv = d.get(col_status)
+            if col_status == "ativo":
+                status_val = "active" if int(sv or 0) == 1 else "inactive"
+            else:
+                status_val = (sv or "")
+        created_val = d.get(col_created) if col_created else ""
+        rows.append({
+            "id": d.get(col_id),
+            "nome": nome,
+            "status": status_val,
+            "created_at": created_val,
+        })
+    return rows
 
 
 @admin_bp.route("/clientes", methods=["GET"])
 @admin_required
-def clientes_list_admin():
-    # Renderiza a lista de clientes dentro do portal /admin
-    return render_template("clientes_list.html")
+def admin_clientes_list():
+    rows = _clientes_rows()
+    return render_template("clientes_list.html", rows=rows)
 
 
 @admin_bp.route("/clientes/novo", methods=["GET"])
 @admin_required
-def clientes_form_admin():
-    # Renderiza o formulario de cadastro/edicao de cliente dentro do portal /admin
-    return render_template("clientes_form.html")
+def admin_clientes_novo():
+    return render_template("clientes_form.html", mode="create")
 
 @admin_bp.route("/usuarios", methods=["GET"])
 @admin_required
