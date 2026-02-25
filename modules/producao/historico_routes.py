@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-24 21:10 America/Bahia
-# MOTIVO: Corrigir erro de datetime naive/aware no detalhe-dia; intervalos RUN agora sao naive (Bahia) para comparar com hs/he e estabilizar o endpoint.
+# LAST_RECODE: 2026-02-25 04:31 America/Bahia
+# MOTIVO: Ajustar meta por hora no endpoint detalhe-dia para refletir distribuicao inteira da tela de configuracao, garantindo soma exata com a meta do dia.
 
 
 from __future__ import annotations
@@ -934,11 +934,59 @@ def api_producao_detalhe_dia():
 # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
-
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria(conn, eff_mid, data_ref)
 
+            # ============================================================
+            # FIX: Meta por Hora deve refletir exatamente a tela de configuracao
+            # Regra:
+            # - Meta do Dia vem de producao_diaria (meta)
+            # - Distribui meta do dia em inteiros pelas horas ATIVAS, garantindo soma exata
+            # - Horas inativas permanecem com meta=0
+            #
+            # Observacao:
+            # - Mantemos produzido/refugo do banco sem recalcular
+            # - Horas ativas sao inferidas pela meta_hora existente (quando houver)
+            # ============================================================
+            try:
+                diaria_cfg = _diaria_do_dia(conn, eff_mid, data_ref.isoformat())
+                meta_dia_cfg = diaria_cfg.get("meta")
+                if meta_dia_cfg is not None:
+                    meta_dia_int = _safe_int(meta_dia_cfg, 0)
+
+                    # Horas ativas: as que ja possuem meta > 0 no banco
+                    active_hours = []
+                    for hh in range(24):
+                        try:
+                            if _safe_int(hor.get(hh, {}).get("meta", 0), 0) > 0:
+                                active_hours.append(hh)
+                        except Exception:
+                            continue
+
+                    # Fallback: se nao houver nenhuma hora ativa, distribui nas 24 horas
+                    if not active_hours and meta_dia_int > 0:
+                        active_hours = list(range(24))
+
+                    if active_hours:
+                        base = meta_dia_int // len(active_hours) if meta_dia_int > 0 else 0
+                        rem = meta_dia_int - (base * len(active_hours)) if meta_dia_int > 0 else 0
+
+                        meta_map = {hh: base for hh in active_hours}
+                        for i in range(rem):
+                            hh = active_hours[i % len(active_hours)]
+                            meta_map[hh] = _safe_int(meta_map.get(hh, 0), 0) + 1
+
+                        # aplica no hor (somente meta)
+                        for hh in range(24):
+                            if hh in meta_map:
+                                hor[hh]["meta"] = _safe_int(meta_map.get(hh, 0), 0)
+                            else:
+                                hor[hh]["meta"] = 0
+            except Exception:
+                pass
+
             # Monta resposta hora a hora
+
             horas = []
             for h in range(24):
                 hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
