@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-24 22:20 America/Bahia
-# MOTIVO: Corrigir persistencia da config_v2 no SQLite apos deploy. (1) Migracao defensiva da tabela machine_config para incluir config_json/updated_at quando a tabela ja existe com schema legado; (2) Parar de engolir erro de banco no POST /machine/config; (3) Fix de variavel indefinida em /machine/status.
+# LAST_RECODE: 2026-02-25 15:20 America/Bahia
+# MOTIVO: Corrigir meta do dia no /machine/status (evitar multiplicar meta_hora por horas indevidas), expondo meta_dia (soma dos turnos) e usando meta_turno_ativo apenas para meta_por_hora do turno atual.
 
 import os
 import json
@@ -1469,6 +1469,15 @@ def _cfgv2_apply_to_memory(m: dict, cfg_v2: dict):
     m["active_days"] = cfg_v2.get("active_days") or [1, 2, 3, 4, 5, 6, 7]
     m["shifts"] = cfg_v2.get("shifts") or []
 
+    # Meta do dia: soma das metas (pcs) de todos os turnos configurados
+    meta_dia = 0
+    for s in (m.get("shifts") or []):
+        try:
+            meta_dia += int(s.get("meta_pcs", s.get("meta_turno", 0)) or 0)
+        except Exception:
+            continue
+    m["meta_dia"] = int(meta_dia)
+
     oee = cfg_v2.get("oee") or {}
     m["ideal_sec_per_piece"] = oee.get("ideal_sec_per_piece")
     if oee.get("no_count_stop_sec") is not None:
@@ -1491,9 +1500,19 @@ def _cfgv2_apply_to_memory(m: dict, cfg_v2: dict):
 
     # Campos legados: usa turno ativo (ou primeiro)
     if not shift:
+        # Sem turno ativo: ainda expõe meta_dia e mantém listas vazias
+        m["meta_turno_ativo"] = 0
+        m["meta_turno"] = int(m.get("meta_dia", 0) or 0)
+        m["turno_inicio"] = None
+        m["turno_fim"] = None
+        m["horas_turno"] = []
+        m["meta_por_hora"] = []
         return
 
-    m["meta_turno"] = int(shift.get("meta_pcs", 0) or 0)
+    active_meta = int(shift.get("meta_pcs", 0) or 0)
+    m["meta_turno_ativo"] = active_meta
+    # Legado: meta_turno representa a meta do DIA (soma dos turnos) para o card e para producao_diaria
+    m["meta_turno"] = int(m.get("meta_dia", 0) or 0) if int(m.get("meta_dia", 0) or 0) > 0 else active_meta
     m["turno_inicio"] = shift.get("start")
     m["turno_fim"] = shift.get("end")
 
@@ -1536,7 +1555,7 @@ def _cfgv2_apply_to_memory(m: dict, cfg_v2: dict):
     prod_slots = [i for i, isb in enumerate(slot_is_break) if not isb]
     metas = [0 for _ in horas_turno]
 
-    meta_turno = int(m.get("meta_turno", 0) or 0)
+    meta_turno = int(m.get("meta_turno_ativo", m.get("meta_turno", 0)) or 0)
     if meta_turno > 0 and prod_slots:
         ramp = int(m.get("rampa_percentual", 0) or 0)
         if ramp < 0:
