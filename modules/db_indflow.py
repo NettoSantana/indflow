@@ -1,5 +1,5 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\db_indflow.py
-# LAST_RECODE: 2026-02-24 21:10 America/Bahia
+# LAST_RECODE: 2026-02-24 21:35 America/Bahia
 # MOTIVO: Garantir persistência da configuração V2 adicionando coluna machine_config.config_json no SQLite (migração defensiva), evitando perda após deploy.
 
 import os
@@ -150,6 +150,7 @@ def init_db():
         )
     """)
     _add_column_if_missing(conn, "machine_config", "cliente_id", "TEXT")
+    _add_column_if_missing(conn, "machine_config", "config_json", "TEXT")
     cur.execute("CREATE INDEX IF NOT EXISTS ix_machine_config_cliente_id ON machine_config(cliente_id)")
 
     # -------------------- producao_horaria --------------------
@@ -268,4 +269,3 @@ def init_db():
 
     conn.commit()
     conn.close()
-##
