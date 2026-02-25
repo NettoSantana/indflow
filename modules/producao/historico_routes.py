@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:10 America/Bahia
-# MOTIVO: Corrigir produzido por hora no detalhe-dia quando producao_horaria armazena acumulado (ESP), convertendo para delta por hora com baseline/esp_last; evita herdar de outra hora (ex.: 07:00-08:00).
+# LAST_RECODE: 2026-02-25 07:11 America/Bahia
+# MOTIVO: Corrigir SyntaxError (bloco except sem conteudo) em _fetch_horaria; manter logica de delta por hora.
 
 
 from __future__ import annotations
@@ -674,7 +674,6 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
                         try:
                             out[h]["esp_last"] = _safe_int(r[esp_col] if isinstance(r, sqlite3.Row) else r[sel_cols.index(esp_col)], 0)
                         except Exception:
-                            pass
                             pass
             except Exception:
                 pass
