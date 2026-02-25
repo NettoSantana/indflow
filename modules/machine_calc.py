@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-25 22:00 America/Bahia
-# MOTIVO: garantir persistencia por hora em producao_horaria sem mexer no card; compatibilidade entre machine_id scoped e plain (multi-tenant).
+# LAST_RECODE: 2026-02-21 00:00 America/Bahia
+# MOTIVO: ajustar meta do dia para multi-turno (soma das metas dos turnos) e refletir no card (Meta do Dia).
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -229,50 +229,6 @@ def carregar_baseline_diario(m, machine_id):
 # ============================================================
 # PRODUÇÃO POR HORA (REPO)
 # ============================================================
-
-def _upsert_hora_dual(
-    *,
-    upsert_hora,
-    machine_id_primary: str | None,
-    machine_id_secondary: str | None,
-    data_ref: str,
-    hora_idx: int,
-    baseline_esp: int,
-    esp_last: int,
-    produzido: int,
-    meta: int,
-    percentual: int,
-):
-    """Grava a mesma hora em dois ids quando necessario:
-    - primary: scoped (cliente_id::machine_id) quando existir
-    - secondary: plain (machine_id) para compatibilidade com consultas antigas
-    """
-    if not machine_id_primary:
-        return
-
-    upsert_hora(
-        machine_id=machine_id_primary,
-        data_ref=data_ref,
-        hora_idx=hora_idx,
-        baseline_esp=baseline_esp,
-        esp_last=esp_last,
-        produzido=produzido,
-        meta=meta,
-        percentual=percentual,
-    )
-
-    if machine_id_secondary:
-        upsert_hora(
-            machine_id=machine_id_secondary,
-            data_ref=data_ref,
-            hora_idx=hora_idx,
-            baseline_esp=baseline_esp,
-            esp_last=esp_last,
-            produzido=produzido,
-            meta=meta,
-            percentual=percentual,
-        )
-
 def _get_machine_id_from_m(m):
     nome = (m.get("nome") or "").strip()
     if not nome:
@@ -447,16 +403,8 @@ def atualizar_producao_hora(m):
                 except Exception:
                     pass
 
-                _upsert_hora_dual(
-
-
-                    upsert_hora=upsert_hora,
-
-
-                    machine_id_primary=machine_id_primary,
-
-
-                    machine_id_secondary=machine_id_secondary,
+                upsert_hora(
+                    machine_id=machine_id,
                     data_ref=data_ref,
                     hora_idx=prev_idx,
                     baseline_esp=base_prev,
@@ -495,16 +443,10 @@ def atualizar_producao_hora(m):
         m["producao_por_hora"] = [None] * horas_len
         m["_ph_loaded"] = False
 
-    if machine_id_primary and not m.get("_ph_loaded"):
+    if machine_id and not m.get("_ph_loaded"):
         try:
             ensure_producao_horaria_table()
-            m["producao_por_hora"] = load_producao_por_hora(machine_id_primary, data_ref, horas_len)
-            # fallback: se historico antigo consultar pelo id plain
-            if machine_id_secondary and all(v is None for v in (m.get("producao_por_hora") or [])):
-                try:
-                    m["producao_por_hora"] = load_producao_por_hora(machine_id_secondary, data_ref, horas_len)
-                except Exception:
-                    pass
+            m["producao_por_hora"] = load_producao_por_hora(machine_id, data_ref, horas_len)
             m["_ph_loaded"] = True
         except Exception:
             m["_ph_loaded"] = False
@@ -531,17 +473,12 @@ def atualizar_producao_hora(m):
                 except Exception:
                     pass
 
-                if machine_id_primary:
+                if machine_id:
                     try:
                         ensure_producao_horaria_table()
                         meta_h = _meta_by_idx(m, h)
-                        _upsert_hora_dual(
-
-                            upsert_hora=upsert_hora,
-
-                            machine_id_primary=machine_id_primary,
-
-                            machine_id_secondary=machine_id_secondary,
+                        upsert_hora(
+                            machine_id=machine_id,
                             data_ref=data_ref,
                             hora_idx=h,
                             baseline_esp=base_prev,
@@ -573,16 +510,11 @@ def atualizar_producao_hora(m):
             except Exception:
                 pass
 
-            if machine_id_primary:
+            if machine_id:
                 try:
                     ensure_producao_horaria_table()
-                    _upsert_hora_dual(
-
-                        upsert_hora=upsert_hora,
-
-                        machine_id_primary=machine_id_primary,
-
-                        machine_id_secondary=machine_id_secondary,
+                    upsert_hora(
+                        machine_id=machine_id,
                         data_ref=data_ref,
                         hora_idx=idx,
                         baseline_esp=int(m["baseline_hora"]),
@@ -624,16 +556,11 @@ def atualizar_producao_hora(m):
             except Exception:
                 pass
 
-            if machine_id_primary:
+            if machine_id:
                 try:
                     ensure_producao_horaria_table()
-                    _upsert_hora_dual(
-
-                        upsert_hora=upsert_hora,
-
-                        machine_id_primary=machine_id_primary,
-
-                        machine_id_secondary=machine_id_secondary,
+                    upsert_hora(
+                        machine_id=machine_id,
                         data_ref=data_ref,
                         hora_idx=prev_idx,
                         baseline_esp=base_prev,
@@ -649,10 +576,10 @@ def atualizar_producao_hora(m):
         m["ultima_hora"] = idx
 
         baseline_db = None
-        if machine_id_primary:
+        if machine_id:
             try:
                 ensure_producao_horaria_table()
-                baseline_db = get_baseline_for_hora(machine_id_primary, data_ref, idx)
+                baseline_db = get_baseline_for_hora(machine_id, data_ref, idx)
             except Exception:
                 baseline_db = None
 
@@ -696,18 +623,13 @@ def atualizar_producao_hora(m):
         m["_ph_acc"] = 0
         m["_ph_esp_last_seen"] = esp_abs
 
-        if machine_id_primary:
+        if machine_id:
             try:
                 meta_now = _meta_by_idx(m, idx)
                 ensure_producao_horaria_table()
                 # IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
-                _upsert_hora_dual(
-
-                    upsert_hora=upsert_hora,
-
-                    machine_id_primary=machine_id_primary,
-
-                    machine_id_secondary=machine_id_secondary,
+                upsert_hora(
+                    machine_id=machine_id,
                     data_ref=data_ref,
                     hora_idx=idx,
                     baseline_esp=int(baseline),
@@ -795,16 +717,11 @@ def atualizar_producao_hora(m):
     except Exception:
         pass
 
-    if machine_id_primary:
+    if machine_id:
         try:
             ensure_producao_horaria_table()
-            _upsert_hora_dual(
-
-                upsert_hora=upsert_hora,
-
-                machine_id_primary=machine_id_primary,
-
-                machine_id_secondary=machine_id_secondary,
+            upsert_hora(
+                machine_id=machine_id,
                 data_ref=data_ref,
                 hora_idx=idx,
                 baseline_esp=int(m.get("baseline_hora", base_h) or base_h),
