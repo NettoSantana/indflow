@@ -1,5 +1,4 @@
-﻿fix(machine/config): recarregar config_v2 do SQLite apos deploy
+﻿fix(db): adicionar coluna machine_config.config_json para persistir config_v2 apos deploy
 
-- Aplica config_v2 persistida (machine_config.config_json) na memoria em:
-  /machine/status, /machine/update e /api/producao/historico
-- Garante que a tela de configuracao e calculos usem a config salva mesmo apos restart/deploy
+- Migração defensiva: ALTER TABLE machine_config ADD COLUMN config_json TEXT quando faltar
+- Evita perda de configuração V2 após restart/deploy no Railway (SQLite em /data)
