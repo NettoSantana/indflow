@@ -1,4 +1,5 @@
-﻿fix(historico): hora atual do detalhe-dia alinhada ao card (ESP - baseline_esp)
+﻿fix(historico): evitar produzido acumulado por hora (delta via baseline_esp/esp_last)
 
-- Para o dia atual, recalcula produzido da hora corrente como (snapshot ESP - baseline_esp da hora)
-- Evita detalhe-dia ficar "atrasado" em relacao ao dashboard
+- No detalhe-dia do dia atual, converte acumulado do ESP em delta por hora quando colunas existem
+- Hora corrente usa esp_agora - baseline_da_hora (alinha com card)
+- Zera horas futuras para nao herdar acumulado
