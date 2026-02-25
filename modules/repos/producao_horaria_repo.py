@@ -1,4 +1,6 @@
 # modules/repos/producao_horaria_repo.py
+# LAST_RECODE: 2026-02-25 14:35 America/Bahia
+# MOTIVO: Corrigir divergencia de cliente_id na persistencia de producao_horaria: ignorar cid de machine_id scoped e resolver cliente_id consistente por consulta ao DB antes do upsert/leitura.
 
 from modules.db_indflow import get_db
 from modules.machine_calc import now_bahia
@@ -7,6 +9,103 @@ from modules.machine_calc import now_bahia
 # ============================================================
 # HELPERS
 # ============================================================
+_CLIENTE_CACHE = {}  # mid_lower -> cliente_id or None
+_SCHEMA_CACHE = None  # list of (table, machine_col, cliente_col)
+
+def _resolve_cliente_id(conn, mid: str, fallback_cid: str | None):
+    """
+    Resolve cliente_id consistente para um machine_id (mid) consultando o SQLite.
+    - Tenta tabelas que tenham colunas de machine_id e cliente_id.
+    - Cacheia o schema encontrado para evitar custo em chamadas repetidas.
+    - Se nao encontrar, usa fallback_cid (quando veio no formato scoped) ou None.
+    """
+    mid_norm = (mid or "").strip().lower()
+    if not mid_norm:
+        return fallback_cid or None
+
+    if mid_norm in _CLIENTE_CACHE:
+        return _CLIENTE_CACHE[mid_norm] if _CLIENTE_CACHE[mid_norm] else (fallback_cid or None)
+
+    global _SCHEMA_CACHE
+    if _SCHEMA_CACHE is None:
+        tables = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall() or []
+        schema = []
+        for (tname,) in tables:
+            try:
+                cols = conn.execute(f"PRAGMA table_info({tname})").fetchall() or []
+                colnames = [c[1] for c in cols]
+                if "cliente_id" not in colnames:
+                    continue
+
+                machine_col = None
+                for cand in ("machine_id", "maquina_id", "id_maquina", "machine"):
+                    if cand in colnames:
+                        machine_col = cand
+                        break
+
+                if not machine_col:
+                    continue
+
+                schema.append((tname, machine_col, "cliente_id"))
+            except Exception:
+                continue
+
+        # prioriza tabelas mais provaveis
+        def _score(item):
+            tname = item[0].lower()
+            score = 0
+            for key in ("config", "maquina", "machine", "device", "vinc", "binding", "producao"):
+                if key in tname:
+                    score += 1
+            return -score, tname
+
+        schema.sort(key=_score)
+        _SCHEMA_CACHE = schema
+
+    resolved = None
+    for (tname, machine_col, cliente_col) in (_SCHEMA_CACHE or [])[:30]:
+        try:
+            row = conn.execute(
+                f"SELECT {cliente_col} FROM {tname} WHERE {machine_col} = ? LIMIT 1",
+                (mid_norm,),
+            ).fetchone()
+            if row and row[0]:
+                resolved = str(row[0]).strip()
+                break
+        except Exception:
+            continue
+
+    # fallback: tenta match sem lower (algumas tabelas podem guardar case)
+    if not resolved:
+        for (tname, machine_col, cliente_col) in (_SCHEMA_CACHE or [])[:30]:
+            try:
+                row = conn.execute(
+                    f"SELECT {cliente_col} FROM {tname} WHERE {machine_col} = ? LIMIT 1",
+                    (mid,),
+                ).fetchone()
+                if row and row[0]:
+                    resolved = str(row[0]).strip()
+                    break
+            except Exception:
+                continue
+
+    _CLIENTE_CACHE[mid_norm] = resolved or ""
+    return resolved or (fallback_cid or None)
+
+
+def _normalize_machine_cliente(conn, machine_id: str):
+    """
+    Normaliza machine_id e resolve cliente_id.
+    - Sempre retorna (cliente_id_resolvido_ou_fallback, raw_mid_normalizado).
+    """
+    cid_scoped, mid = _split_scoped_machine_id(machine_id)
+    if not mid:
+        return (None, "")
+    cid = _resolve_cliente_id(conn, mid, cid_scoped)
+    return (cid, mid)
+
 
 def _split_scoped_machine_id(machine_id: str):
     """
@@ -109,12 +208,16 @@ def upsert_hora(
     try:
         ensure_producao_horaria_table()
 
-        cid, mid = _split_scoped_machine_id(machine_id)
-        if not mid:
-            return False
-
         conn = get_db()
         cur = conn.cursor()
+
+        cid, mid = _normalize_machine_cliente(conn, machine_id)
+        if not mid:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return False
 
         if cid:
             cur.execute("""
@@ -182,9 +285,6 @@ def get_baseline_for_hora(machine_id: str, data_ref: str, hora_idx: int):
         if not mid:
             return None
 
-        conn = get_db()
-        cur = conn.cursor()
-
         if cid:
             cur.execute("""
                 SELECT baseline_esp
@@ -221,9 +321,6 @@ def load_producao_por_hora(machine_id: str, data_ref: str, n_horas: int):
         cid, mid = _split_scoped_machine_id(machine_id)
         if not mid:
             return out
-
-        conn = get_db()
-        cur = conn.cursor()
 
         if cid:
             cur.execute("""
