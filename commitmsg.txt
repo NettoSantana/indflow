@@ -1,5 +1,5 @@
-﻿fix(historico): calcular produzido por hora via eventos reais (producao_evento)
+﻿fix(producao): corrigir erros de sintaxe/indentacao em historico_routes e calcular produzido por hora via producao_evento
 
-- Detalhe-dia passa a sobrescrever produzido por hora com delta real dentro do intervalo HH:00-HH+1:00
-- Evita hora zerada (ex 07-08) quando dashboard mostra producao na hora
-- Mantem compatibilidade: se nao houver eventos, usa producao_horaria como fallback
+- Remove try sem except/finally e corrige indentacao que quebrava import
+- Garante import de os
+- No detalhe-dia, produzido por hora vem de pulsos reais em producao_evento no intervalo da hora (hora atual corta no minuto atual)

@@ -1,12 +1,12 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:31 America/Bahia
-# MOTIVO: Detalhe-dia: calcular produzido por hora a partir de eventos reais (producao_evento) para evitar hora zerada/herdada; manter compatibilidade.
+# LAST_RECODE: 2026-02-25 07:35 America/Bahia
+# MOTIVO: Corrigir produzido por hora no detalhe-dia usando pulsos reais (producao_evento) por intervalo HH:00-HH+1:00; evita hora zerada e heranca de acumulado; corrigir validacoes de sintaxe/indentacao.
 
 
 from __future__ import annotations
 
-import json
 import os
+import json
 import sqlite3
 import traceback
 from datetime import date, datetime, timedelta
@@ -111,6 +111,44 @@ def _ms_to_naive_bahia(ms: int) -> datetime | None:
         return datetime.fromtimestamp(ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
     except Exception:
         return None
+
+
+def _naive_bahia_to_ms(dt_naive: datetime) -> int:
+    """Converte datetime naive (assumido TZ_BAHIA) para epoch ms."""
+    try:
+        dt = dt_naive.replace(tzinfo=TZ_BAHIA)
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return 0
+
+def _count_pulses_producao_evento(
+    conn: sqlite3.Connection,
+    machine_id: str,
+    effective_machine_id: str,
+    start_ms: int,
+    end_ms: int,
+) -> int:
+    """Conta pulsos (linhas) em producao_evento no intervalo [start_ms, end_ms).
+    Usa effective_machine_id primeiro e faz fallback para machine_id original quando necessario.
+    """
+    if start_ms <= 0 or end_ms <= 0 or end_ms <= start_ms:
+        return 0
+    if not _table_exists(conn, "producao_evento"):
+        return 0
+    sql = "SELECT COUNT(1) AS c FROM producao_evento WHERE machine_id = ? AND ts_ms >= ? AND ts_ms < ?"
+    def _count(mid: str) -> int:
+        try:
+            row = conn.execute(sql, (mid, int(start_ms), int(end_ms))).fetchone()
+            if not row:
+                return 0
+            return _safe_int(row[0] if not isinstance(row, sqlite3.Row) else row["c"], 0)
+        except Exception:
+            return 0
+    # prefer effective (scoped) quando existe
+    c = _count(effective_machine_id) if effective_machine_id else 0
+    if c == 0 and machine_id and machine_id != effective_machine_id:
+        c = _count(machine_id)
+    return int(c) if c and c > 0 else 0
 
 def _extract_esp_counter(machine_state: dict | None) -> int | None:
     """Extrai o contador absoluto do ESP a partir do estado da maquina (best-effort)."""
@@ -708,150 +746,6 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
 
     return out
 
-def _fetch_produzido_por_hora_from_eventos(conn: sqlite3.Connection, effective_machine_id: str, data_ref: date) -> dict[int, int]:
-    """
-    Opcao 1 (fonte real):
-    Calcula produzido por hora somando eventos dentro de cada faixa [HH:00, HH+1:00).
-
-    Estrategias (best-effort, pois schema pode variar):
-    - Se existir coluna de delta (qtd/delta/produzido/pcs), soma direto.
-    - Senao, se existir coluna de contador absoluto (esp_abs/contador/counter), usa MAX - MIN por hora.
-    - Se faltar ts_ms, tenta ts_iso (ISO/texto) convertendo para datetime via SQLite.
-      Obs: nesse fallback, o fuso pode depender do formato gravado; preferir ts_ms.
-
-    Retorna dict {hora_idx: produzido_delta} apenas para horas com eventos.
-    """
-    table = None
-    for tname in ("producao_evento", "producao_eventos", "producao_event"):
-        if _table_exists(conn, tname):
-            table = tname
-            break
-    if not table:
-        return {}
-
-    cols = _get_columns(conn, table)
-    if not cols:
-        return {}
-
-    # coluna de machine id
-    mid_col = None
-    for c in ("effective_machine_id", "machine_id", "maquina", "id_maquina"):
-        if c in cols:
-            mid_col = c
-            break
-    if not mid_col:
-        return {}
-
-    # coluna data_ref (opcional)
-    data_col = None
-    for c in ("data_ref", "data", "dia"):
-        if c in cols:
-            data_col = c
-            break
-
-    # coluna timestamp
-    ts_ms_col = "ts_ms" if "ts_ms" in cols else ("timestamp_ms" if "timestamp_ms" in cols else None)
-    ts_iso_col = None
-    for c in ("ts_iso", "timestamp", "ts", "created_at", "data_hora", "datahora"):
-        if c in cols:
-            ts_iso_col = c
-            break
-
-    # coluna delta (se existir)
-    delta_col = None
-    for c in ("delta", "qtd", "quantidade", "produzido", "pcs", "inc", "incremento"):
-        if c in cols:
-            delta_col = c
-            break
-
-    # coluna contador absoluto
-    abs_col = None
-    for c in ("esp_abs", "contador", "counter", "count_abs", "esp", "esp_last"):
-        if c in cols:
-            abs_col = c
-            break
-
-    # precisa ter pelo menos delta_col OU abs_col
-    if not delta_col and not abs_col:
-        return {}
-
-    # Monta where base
-    where = [f"{mid_col} = ?"]
-    params_base = [effective_machine_id]
-
-    if data_col:
-        where.append(f"{data_col} = ?")
-        params_base.append(data_ref.isoformat())
-
-    out: dict[int, int] = {}
-
-    # Preferir ts_ms (mais seguro)
-    if ts_ms_col:
-        for h in range(24):
-            hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0, tzinfo=TZ_BAHIA)
-            he = hs + timedelta(hours=1)
-            hs_ms = int(hs.timestamp() * 1000)
-            he_ms = int(he.timestamp() * 1000)
-
-            where_h = where + [f"{ts_ms_col} >= ?", f"{ts_ms_col} < ?"]
-            params = params_base + [hs_ms, he_ms]
-
-            try:
-                if delta_col:
-                    sql = f"SELECT COALESCE(SUM(CAST({delta_col} AS INTEGER)), 0) FROM {table} WHERE " + " AND ".join(where_h)
-                    s = _fetch_scalar(conn, sql, tuple(params), default=0)
-                    val = _safe_int(s, 0)
-                else:
-                    sql = f"SELECT COALESCE(MAX(CAST({abs_col} AS INTEGER)) - MIN(CAST({abs_col} AS INTEGER)), 0) FROM {table} WHERE " + " AND ".join(where_h)
-                    s = _fetch_scalar(conn, sql, tuple(params), default=0)
-                    val = _safe_int(s, 0)
-
-                if val < 0:
-                    val = 0
-                if val > 0:
-                    out[h] = val
-            except Exception:
-                continue
-
-        return out
-
-    # Fallback por ts_iso/texto (menos confiavel)
-    if ts_iso_col:
-        # Janela do dia
-        d0 = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0)
-        d1 = d0 + timedelta(days=1)
-        start_s = _to_sql_dt(d0)
-        end_s = _to_sql_dt(d1)
-
-        where_day = where + [f"datetime(replace({ts_iso_col}, 'T', ' ')) >= datetime(?)", f"datetime(replace({ts_iso_col}, 'T', ' ')) < datetime(?)"]
-        params_day = params_base + [start_s, end_s]
-
-        for h in range(24):
-            # hora no dia (HH:00)
-            hh_start = f"{data_ref.isoformat()} {h:02d}:00:00"
-            hh_end = f"{data_ref.isoformat()} {(h+1)%24:02d}:00:00"
-            where_h = where_day + [f"datetime(replace({ts_iso_col}, 'T', ' ')) >= datetime(?)", f"datetime(replace({ts_iso_col}, 'T', ' ')) < datetime(?)"]
-            params = params_day + [hh_start, hh_end]
-
-            try:
-                if delta_col:
-                    sql = f"SELECT COALESCE(SUM(CAST({delta_col} AS INTEGER)), 0) FROM {table} WHERE " + " AND ".join(where_h)
-                    s = _fetch_scalar(conn, sql, tuple(params), default=0)
-                    val = _safe_int(s, 0)
-                else:
-                    sql = f"SELECT COALESCE(MAX(CAST({abs_col} AS INTEGER)) - MIN(CAST({abs_col} AS INTEGER)), 0) FROM {table} WHERE " + " AND ".join(where_h)
-                    s = _fetch_scalar(conn, sql, tuple(params), default=0)
-                    val = _safe_int(s, 0)
-
-                if val < 0:
-                    val = 0
-                if val > 0:
-                    out[h] = val
-            except Exception:
-                continue
-
-    return out
-
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
     col = _resolve_data_col(conn, "refugo_horaria")
     tentativas = [
@@ -1203,46 +1097,9 @@ def api_producao_detalhe_dia():
                             last_esp = max(_safe_int(hor.get(hh, {}).get("esp_last", 0), 0), last_esp)
                         except Exception:
                             pass
-            except Exception:
-                pass
 
-            # ============================================================
-            # Produzido por Hora (fonte real: eventos)
-            # Regra:
-            # - Se houver eventos no intervalo da hora, sobrescreve hor[hh]["produzido"] com delta real.
-            # - Aplica apenas para horas <= hora atual no dia atual; para dias passados aplica todas.
-            # - Nao altera horas de NP (meta <= 0).
-            # ============================================================
-            try:
-                eventos_prod = _fetch_produzido_por_hora_from_eventos(conn, eff_mid, data_ref)
-                if eventos_prod:
-                    limit_hour = 23
-                    if now_naive is not None:
-                        try:
-                            limit_hour = int(now_naive.hour)
-                        except Exception:
-                            limit_hour = 23
-                    for hh, val in eventos_prod.items():
-                        try:
-                            hh_int = int(hh)
-                        except Exception:
-                            continue
-                        if hh_int < 0 or hh_int > 23:
-                            continue
-                        if now_naive is not None and hh_int > limit_hour:
-                            continue
-                        # respeita NP
-                        if _safe_int(hor.get(hh_int, {}).get("meta", 0), 0) <= 0:
-                            continue
-                        v = _safe_int(val, 0)
-                        if v < 0:
-                            v = 0
-                        hor[hh_int]["produzido"] = v
-            except Exception:
-                pass
-
-            prev_esp = 0
-            for hh in range(24):
+                    prev_esp = 0
+                    for hh in range(24):
                         base = _safe_int(hor.get(hh, {}).get("baseline_esp", 0), 0)
                         esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
                         if base <= 0 and hh > 0:
@@ -1258,31 +1115,30 @@ def api_producao_detalhe_dia():
 
                         hor[hh]["_baseline_calc"] = base
 
-            # Ajusta produzido por hora usando esp_last/baseline quando disponivel
-            try:
-                for hh in range(24):
-                    if hh > now_hour:
-                        # Futuro no dia atual: zera para nao herdar acumulado
-                        hor[hh]["produzido"] = 0
-                        continue
+                    # Ajusta produzido por hora usando esp_last/baseline quando disponivel
+                    for hh in range(24):
+                        if hh > now_hour:
+                            # Futuro no dia atual: zera para nao herdar acumulado
+                            hor[hh]["produzido"] = 0
+                            continue
 
-                    base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
-                    esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                    if hh == now_hour and esp_now is not None:
-                        # Hora corrente: usa o contador atual do ESP
-                        delta = _safe_int(esp_now, 0) - base
-                    else:
-                        # Horas passadas: se houver esp_last, calcula delta
-                        if esp_h > 0:
-                            delta = esp_h - base
+                        base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
+                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
+                        if hh == now_hour and esp_now is not None:
+                            # Hora corrente: usa o contador atual do ESP
+                            delta = _safe_int(esp_now, 0) - base
                         else:
-                            delta = None
+                            # Horas passadas: se houver esp_last, calcula delta
+                            if esp_h > 0:
+                                delta = esp_h - base
+                            else:
+                                delta = None
 
-                    if delta is None:
-                        continue
-                    if delta < 0:
-                        delta = 0
-                    hor[hh]["produzido"] = int(delta)
+                        if delta is None:
+                            continue
+                        if delta < 0:
+                            delta = 0
+                        hor[hh]["produzido"] = int(delta)
             except Exception:
                 pass
 
@@ -1305,6 +1161,21 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
+
+                # Produzido por hora: fonte principal = pulsos reais (producao_evento) no intervalo da hora.
+                # Isso evita hora zerada quando ha RUN/STOP e o dashboard mostra producao, e evita herdar acumulado.
+                try:
+                    start_ms = _naive_bahia_to_ms(hs)
+                    end_limit = he
+                    if now_naive is not None and now_naive < he:
+                        end_limit = now_naive
+                    end_ms = _naive_bahia_to_ms(end_limit)
+                    pulses = _count_pulses_producao_evento(conn, machine_id, eff_mid, start_ms, end_ms)
+                    if pulses > 0:
+                        produzido = int(pulses)
+                except Exception:
+                    pass
+
 
                 is_np = meta <= 0
 
