@@ -1,5 +1,5 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-24 22:05 America/Bahia
+# LAST_RECODE: 2026-02-24 22:20 America/Bahia
 # MOTIVO: Corrigir persistencia da config_v2 no SQLite apos deploy. (1) Migracao defensiva da tabela machine_config para incluir config_json/updated_at quando a tabela ja existe com schema legado; (2) Parar de engolir erro de banco no POST /machine/config; (3) Fix de variavel indefinida em /machine/status.
 
 import os
@@ -40,6 +40,14 @@ from modules.machine.device_helpers import (
 )
 
 machine_bp = Blueprint("machine_bp", __name__)
+
+
+def _get_tz():
+    """
+    Retorna tzinfo padrao do projeto (Bahia).
+    Evita NameError em rotas que geram timestamps.
+    """
+    return TZ_BAHIA
 
 def _norm_machine_id(v):
     v = (v or "").strip().lower()
