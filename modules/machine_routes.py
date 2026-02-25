@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-24 21:03 America/Bahia
-# MOTIVO: Persistir e recarregar configuracao V2 (shifts/breaks) do SQLite em /data, aplicando na memoria ao iniciar (pos-deploy).
+# LAST_RECODE: 2026-02-24 22:05 America/Bahia
+# MOTIVO: Corrigir persistencia da config_v2 no SQLite apos deploy. (1) Migracao defensiva da tabela machine_config para incluir config_json/updated_at quando a tabela ja existe com schema legado; (2) Parar de engolir erro de banco no POST /machine/config; (3) Fix de variavel indefinida em /machine/status.
 
 import os
 import json
@@ -1134,19 +1134,45 @@ def _cfgv2_db_init():
     global _MACHINE_CFG_JSON_READY
     if _MACHINE_CFG_JSON_READY:
         return
+
     conn = sqlite3.connect(_cfgv2_db_path(), check_same_thread=False)
     try:
+        # Tabela pode existir com schema legado (sem config_json). Nao recriamos; apenas garantimos colunas.
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS machine_config (
-                machine_id TEXT PRIMARY KEY,
-                config_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                machine_id TEXT PRIMARY KEY
             )
             """
         )
+
+        # Migracao defensiva: adiciona colunas se estiverem faltando.
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(machine_config)").fetchall()]
+        except Exception:
+            cols = []
+
+        if "config_json" not in cols:
+            try:
+                conn.execute("ALTER TABLE machine_config ADD COLUMN config_json TEXT")
+            except Exception:
+                pass
+
+        if "updated_at" not in cols:
+            try:
+                conn.execute("ALTER TABLE machine_config ADD COLUMN updated_at TEXT")
+            except Exception:
+                pass
+
         conn.commit()
-        _MACHINE_CFG_JSON_READY = True
+
+        # Marca pronto apenas quando a coluna existe (ou foi criada).
+        try:
+            cols2 = [r[1] for r in conn.execute("PRAGMA table_info(machine_config)").fetchall()]
+        except Exception:
+            cols2 = cols
+
+        _MACHINE_CFG_JSON_READY = ("config_json" in cols2 and "updated_at" in cols2)
     finally:
         try:
             conn.close()
@@ -1570,8 +1596,8 @@ def configurar_maquina():
     try:
         _cfgv2_db_init()
         _cfgv2_db_upsert(machine_id, cfg_v2)
-    except Exception:
-        pass
+    except Exception as e:
+        return jsonify({"error": "Falha ao persistir config_v2 no SQLite", "detail": str(e)}), 500
 
     # Memoria (compatibilidade com calculos atuais)
     try:
@@ -1940,7 +1966,7 @@ def update_machine():
             meta_abs = int(m.get("meta_turno", 0) or 0)
         except Exception:
             meta_abs = 0
-        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=cliente_id, dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
+        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=(m.get("cliente_id") or cid_req), dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
     except Exception:
         pass
 
@@ -2708,7 +2734,7 @@ def machine_status():
             meta_abs = int(m.get("meta_turno", 0) or 0)
         except Exception:
             meta_abs = 0
-        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=cliente_id, dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
+        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=(m.get("cliente_id") or cid_req), dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
     except Exception:
         pass
 
