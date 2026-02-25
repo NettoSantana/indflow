@@ -1,6 +1,4 @@
-﻿fix(detalhe-dia): meta por hora deve vir do estado da maquina (meta_por_hora + turno_inicio)
+﻿fix(admin): recolocar acesso a Clientes no portal /admin
 
-- Converte meta_por_hora do turno para vetor 24h do relogio
-- Aplica em hours[].meta no endpoint detalhe-dia
-- Mantem produzido/refugo do banco
-- Fallback: se nao houver meta_por_hora/turno_inicio, usa meta do banco
+- Adiciona rotas /admin/clientes e /admin/clientes/novo
+- Renderiza clientes_list.html e clientes_form.html dentro do ADMIN (admin_required)

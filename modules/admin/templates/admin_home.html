@@ -1,7 +1,7 @@
 {# 
 PATH: modules/admin/templates/admin_home.html
-LAST_RECODE: 2026-02-20 20:50 America/Bahia
-MOTIVO: Remover cards Clientes, Producao e Sair do painel admin.
+LAST_RECODE: 2026-02-25 22:00 America/Bahia
+MOTIVO: Recolocar cards de Clientes no painel /admin (lista e novo cadastro).
 #}
 {% extends "base.html" %}
 {% block title %}Admin — IndFlow{% endblock %}
@@ -45,6 +45,22 @@ MOTIVO: Remover cards Clientes, Producao e Sair do painel admin.
       <div class="card">
         <h2>Devices</h2>
         <p>Visualizar devices, associacoes e informacoes de comunicacao.</p>
+        <span class="pill">Abrir</span>
+      </div>
+    </a>
+
+    <a class="card-link" href="/admin/clientes">
+      <div class="card">
+        <h2>Clientes (Lista)</h2>
+        <p>Listar, pesquisar e acessar os cadastros de clientes.</p>
+        <span class="pill">Abrir</span>
+      </div>
+    </a>
+
+    <a class="card-link" href="/admin/clientes/novo">
+      <div class="card">
+        <h2>Clientes (Novo)</h2>
+        <p>Cadastrar um novo cliente no sistema.</p>
         <span class="pill">Abrir</span>
       </div>
     </a>
