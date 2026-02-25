@@ -1,5 +1,4 @@
-﻿fix(producao_horaria_repo): fixar cliente_id e impedir mistura entre tenants
+﻿fix(admin): endpoint para limpar producao_horaria com cliente_id errado (token)
 
-- Ignora cliente_id vindo de machine_id scoped
-- Resolve cliente_id por tabelas de config/vinculo no SQLite
-- Fallback seguro pelo cliente_id mais recente em producao_horaria
+- Adiciona POST /admin/db-fix-producao-horaria protegido por ADMIN_RESET_TOKEN/INDFLOW_ADMIN_TOKEN
+- Remove linhas por data_ref/machine_id/cliente_id incorreto e retorna contagens before/after
