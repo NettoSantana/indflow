@@ -1,5 +1,5 @@
-﻿fix(historico): alinhar produzido por hora no detalhe-dia com o card (delta ESP)
+﻿fix(historico): hora atual do detalhe-dia usa producao_hora em memoria (igual card)
 
-- Remove sobrescrita de produzido por hora via contagem de eventos (producao_evento) que gerava valores baixos (ex 72)
-- Produzido por hora passa a usar delta do contador do ESP (mesma logica do dashboard)
-- Corrige indentacao que deixava comentario fora do bloco try e podia quebrar import/execucao
+- Para o dia atual, a hora corrente (HH:00-HH+1) usa machine_state.producao_hora
+- Remove sobrescrita de produzido por contagem de eventos (producao_evento) que gerava valores baixos
+- Garante horas futuras zeradas no detalhe-dia
