@@ -1,4 +1,5 @@
-﻿fix(producao): corrigir SyntaxError em historico_routes (_fetch_horaria)
+﻿fix(historico): calcular produzido por hora via eventos reais (producao_evento)
 
-- Adiciona bloco no except que estava vazio (pass)
-- Mantem a logica existente sem alterar escopo
+- Detalhe-dia passa a sobrescrever produzido por hora com delta real dentro do intervalo HH:00-HH+1:00
+- Evita hora zerada (ex 07-08) quando dashboard mostra producao na hora
+- Mantem compatibilidade: se nao houver eventos, usa producao_horaria como fallback

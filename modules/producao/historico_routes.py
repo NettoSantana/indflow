@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import traceback
 from datetime import date, datetime, timedelta
@@ -1202,6 +1203,9 @@ def api_producao_detalhe_dia():
                             last_esp = max(_safe_int(hor.get(hh, {}).get("esp_last", 0), 0), last_esp)
                         except Exception:
                             pass
+            except Exception:
+                pass
+
             # ============================================================
             # Produzido por Hora (fonte real: eventos)
             # Regra:
@@ -1237,9 +1241,8 @@ def api_producao_detalhe_dia():
             except Exception:
                 pass
 
-
-                    prev_esp = 0
-                    for hh in range(24):
+            prev_esp = 0
+            for hh in range(24):
                         base = _safe_int(hor.get(hh, {}).get("baseline_esp", 0), 0)
                         esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
                         if base <= 0 and hh > 0:
@@ -1255,30 +1258,31 @@ def api_producao_detalhe_dia():
 
                         hor[hh]["_baseline_calc"] = base
 
-                    # Ajusta produzido por hora usando esp_last/baseline quando disponivel
-                    for hh in range(24):
-                        if hh > now_hour:
-                            # Futuro no dia atual: zera para nao herdar acumulado
-                            hor[hh]["produzido"] = 0
-                            continue
+            # Ajusta produzido por hora usando esp_last/baseline quando disponivel
+            try:
+                for hh in range(24):
+                    if hh > now_hour:
+                        # Futuro no dia atual: zera para nao herdar acumulado
+                        hor[hh]["produzido"] = 0
+                        continue
 
-                        base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if hh == now_hour and esp_now is not None:
-                            # Hora corrente: usa o contador atual do ESP
-                            delta = _safe_int(esp_now, 0) - base
+                    base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
+                    esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
+                    if hh == now_hour and esp_now is not None:
+                        # Hora corrente: usa o contador atual do ESP
+                        delta = _safe_int(esp_now, 0) - base
+                    else:
+                        # Horas passadas: se houver esp_last, calcula delta
+                        if esp_h > 0:
+                            delta = esp_h - base
                         else:
-                            # Horas passadas: se houver esp_last, calcula delta
-                            if esp_h > 0:
-                                delta = esp_h - base
-                            else:
-                                delta = None
+                            delta = None
 
-                        if delta is None:
-                            continue
-                        if delta < 0:
-                            delta = 0
-                        hor[hh]["produzido"] = int(delta)
+                    if delta is None:
+                        continue
+                    if delta < 0:
+                        delta = 0
+                    hor[hh]["produzido"] = int(delta)
             except Exception:
                 pass
 
