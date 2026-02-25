@@ -1,8 +1,8 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\routes.py
-# LAST_RECODE: 2026-02-25 22:05 America/Bahia
-# MOTIVO: Recolocar rotas de Clientes dentro do portal /admin (lista e novo), mantendo templates existentes.
+# LAST_RECODE: 2026-02-25 12:20 America/Bahia
+# MOTIVO: Adicionar rota temporaria de diagnostico do SQLite (producao_horaria) protegida por token, para validar persistencia no MAIN sem Shell.
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, render_template_string
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import secrets
 import hashlib
@@ -831,3 +831,126 @@ def dev_reset_admin():
         return jsonify({"status": "ok", **result}), 200
     except Exception as e:
         return jsonify({"error": "Falha ao resetar admin", "details": str(e)}), 400
+
+
+@admin_bp.route("/db-dump-producao-horaria", methods=["POST"])
+def db_dump_producao_horaria():
+    expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
+    if not expected:
+        return jsonify({"error": "ADMIN_RESET_TOKEN nao configurado"}), 403
+
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+    if token != expected:
+        return jsonify({"error": "Token invalido"}), 403
+
+    machine_id = (data.get("machine_id") or "").strip()
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    out = {
+        "ok": True,
+        "now_utc": datetime.utcnow().isoformat(),
+        "env": {
+            "INDFLOW_DB_PATH": (os.getenv("INDFLOW_DB_PATH") or "").strip() or None,
+            "is_railway": bool((os.getenv("RAILWAY_PROJECT_ID") or "").strip()),
+        },
+        "limits": {"top_refs": 10, "top_machines": 50, "sample_rows": 50},
+    }
+
+    try:
+        row = cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='producao_horaria'"
+        ).fetchone()
+        out["table_exists"] = bool(row)
+        if not out["table_exists"]:
+            return jsonify(out), 200
+
+        top_refs = []
+        for r in cur.execute(
+            """
+            SELECT data_ref, COUNT(*) AS qtd
+            FROM producao_horaria
+            GROUP BY data_ref
+            ORDER BY qtd DESC
+            LIMIT 10
+            """
+        ):
+            top_refs.append({"data_ref": r[0], "qtd": int(r[1] or 0)})
+        out["top_data_ref"] = top_refs
+
+        today = datetime.utcnow().date().isoformat()
+        yest = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
+
+        def _count_for(dref: str) -> int:
+            r = cur.execute(
+                "SELECT COUNT(*) FROM producao_horaria WHERE data_ref = ?",
+                (dref,),
+            ).fetchone()
+            return int(r[0] or 0) if r else 0
+
+        out["count_today_utc"] = {"data_ref": today, "qtd": _count_for(today)}
+        out["count_yesterday_utc"] = {"data_ref": yest, "qtd": _count_for(yest)}
+
+        def _top_machines(dref: str):
+            rows = []
+            for r in cur.execute(
+                """
+                SELECT COALESCE(cliente_id,'__NULL__') AS cliente_id, machine_id, COUNT(*) AS qtd
+                FROM producao_horaria
+                WHERE data_ref = ?
+                GROUP BY COALESCE(cliente_id,'__NULL__'), machine_id
+                ORDER BY qtd DESC
+                LIMIT 50
+                """,
+                (dref,),
+            ):
+                rows.append({"cliente_id": r[0], "machine_id": r[1], "qtd": int(r[2] or 0)})
+            return rows
+
+        out["top_machines_today_utc"] = _top_machines(today)
+        out["top_machines_yesterday_utc"] = _top_machines(yest)
+
+        if machine_id:
+            sample = []
+            for r in cur.execute(
+                """
+                SELECT COALESCE(cliente_id,'__NULL__') AS cliente_id,
+                       machine_id, data_ref, hora_idx,
+                       baseline_esp, esp_last, produzido, meta, percentual, updated_at
+                FROM producao_horaria
+                WHERE machine_id = ?
+                ORDER BY data_ref DESC, hora_idx DESC
+                LIMIT 50
+                """,
+                (machine_id,),
+            ):
+                sample.append(
+                    {
+                        "cliente_id": r[0],
+                        "machine_id": r[1],
+                        "data_ref": r[2],
+                        "hora_idx": int(r[3] or 0),
+                        "baseline_esp": int(r[4] or 0),
+                        "esp_last": int(r[5] or 0),
+                        "produzido": int(r[6] or 0),
+                        "meta": int(r[7] or 0),
+                        "percentual": int(r[8] or 0),
+                        "updated_at": r[9],
+                    }
+                )
+            out["sample_by_machine_id"] = {"machine_id": machine_id, "rows": sample}
+
+    except Exception as e:
+        out["ok"] = False
+        out["error"] = "Falha ao consultar producao_horaria"
+        out["details"] = str(e)
+        return jsonify(out), 500
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    return jsonify(out), 200
