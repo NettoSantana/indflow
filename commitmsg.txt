@@ -1,4 +1,4 @@
-﻿fix(db): adicionar coluna machine_config.config_json para persistir config_v2 apos deploy
+﻿fix(db): adicionar machine_config.config_json para persistir config_v2 apos deploy
 
 - Migração defensiva: ALTER TABLE machine_config ADD COLUMN config_json TEXT quando faltar
-- Evita perda de configuração V2 após restart/deploy no Railway (SQLite em /data)
+- Corrige perda de configuração V2 após restart/deploy no Railway (SQLite em /data)
