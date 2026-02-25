@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-25 22:00 America/Bahia
-# MOTIVO: restaurar persistência write-only em producao_horaria por hora (cliente_id/machine_id) sem alterar o card.
+# LAST_RECODE: 2026-02-21 00:00 America/Bahia
+# MOTIVO: ajustar meta do dia para multi-turno (soma das metas dos turnos) e refletir no card (Meta do Dia).
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -301,7 +301,7 @@ def atualizar_producao_hora(m):
         ensure_producao_horaria_table,
         load_producao_por_hora,
         get_baseline_for_hora,
-        upsert_hora as _upsert_hora_db,
+        upsert_hora,
     )
 
     # ============================================================
@@ -355,76 +355,6 @@ def atualizar_producao_hora(m):
     # CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
 
-    # ============================================================
-    # PERSISTÊNCIA (WRITE-ONLY) EM producao_horaria
-    # Objetivo: garantir que, a cada /machine/update, a produção da hora
-    # seja gravada no banco para alimentar o histórico (sem mudar o card).
-    #
-    # Regra:
-    # - tenta gravar com cliente_id (se o repo suportar)
-    # - grava com o machine_id usado no cálculo (scoped) E também com o
-    #   machine_id "efetivo" (quando existir), para evitar divergência
-    #   entre card/histórico em cenários multi-tenant.
-    # ============================================================
-    cliente_id = (m.get("cliente_id") or "").strip()
-    effective_mid = (m.get("effective_machine_id") or "").strip().lower()
-    raw_mid_norm = (raw_machine_id or "").strip().lower() if raw_machine_id else ""
-    machine_id_history = effective_mid or raw_mid_norm
-
-    machine_ids_write = []
-    if machine_id:
-        machine_ids_write.append(machine_id)
-    if machine_id_history and machine_id_history != machine_id:
-        machine_ids_write.append(machine_id_history)
-
-    def _persist_hora(*, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual):
-        if not machine_ids_write:
-            return
-        try:
-            ensure_producao_horaria_table()
-        except Exception:
-            return
-
-        for mid in machine_ids_write:
-            try:
-                if cliente_id:
-                    try:
-                        _upsert_hora_db(
-                            cliente_id=cliente_id,
-                            machine_id=mid,
-                            data_ref=data_ref,
-                            hora_idx=hora_idx,
-                            baseline_esp=baseline_esp,
-                            esp_last=esp_last,
-                            produzido=produzido,
-                            meta=meta,
-                            percentual=percentual,
-                        )
-                    except TypeError:
-                        _upsert_hora_db(
-                            machine_id=mid,
-                            data_ref=data_ref,
-                            hora_idx=hora_idx,
-                            baseline_esp=baseline_esp,
-                            esp_last=esp_last,
-                            produzido=produzido,
-                            meta=meta,
-                            percentual=percentual,
-                        )
-                else:
-                    _upsert_hora_db(
-                        machine_id=mid,
-                        data_ref=data_ref,
-                        hora_idx=hora_idx,
-                        baseline_esp=baseline_esp,
-                        esp_last=esp_last,
-                        produzido=produzido,
-                        meta=meta,
-                        percentual=percentual,
-                    )
-            except Exception:
-                pass
-
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
     prev_idx = m.get("ultima_hora")
 
@@ -473,7 +403,8 @@ def atualizar_producao_hora(m):
                 except Exception:
                     pass
 
-                _persist_hora(
+                upsert_hora(
+                    machine_id=machine_id,
                     data_ref=data_ref,
                     hora_idx=prev_idx,
                     baseline_esp=base_prev,
@@ -546,7 +477,8 @@ def atualizar_producao_hora(m):
                     try:
                         ensure_producao_horaria_table()
                         meta_h = _meta_by_idx(m, h)
-                        _persist_hora(
+                        upsert_hora(
+                            machine_id=machine_id,
                             data_ref=data_ref,
                             hora_idx=h,
                             baseline_esp=base_prev,
@@ -581,7 +513,8 @@ def atualizar_producao_hora(m):
             if machine_id:
                 try:
                     ensure_producao_horaria_table()
-                    _persist_hora(
+                    upsert_hora(
+                        machine_id=machine_id,
                         data_ref=data_ref,
                         hora_idx=idx,
                         baseline_esp=int(m["baseline_hora"]),
@@ -626,7 +559,8 @@ def atualizar_producao_hora(m):
             if machine_id:
                 try:
                     ensure_producao_horaria_table()
-                    _persist_hora(
+                    upsert_hora(
+                        machine_id=machine_id,
                         data_ref=data_ref,
                         hora_idx=prev_idx,
                         baseline_esp=base_prev,
@@ -694,7 +628,8 @@ def atualizar_producao_hora(m):
                 meta_now = _meta_by_idx(m, idx)
                 ensure_producao_horaria_table()
                 # IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
-                _persist_hora(
+                upsert_hora(
+                    machine_id=machine_id,
                     data_ref=data_ref,
                     hora_idx=idx,
                     baseline_esp=int(baseline),
@@ -785,7 +720,8 @@ def atualizar_producao_hora(m):
     if machine_id:
         try:
             ensure_producao_horaria_table()
-            _persist_hora(
+            upsert_hora(
+                machine_id=machine_id,
                 data_ref=data_ref,
                 hora_idx=idx,
                 baseline_esp=int(m.get("baseline_hora", base_h) or base_h),
