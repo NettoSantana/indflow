@@ -1,3 +1,5 @@
-﻿fix(admin): adicionar cards de Clientes no painel /admin
+﻿fix(admin): rotas corretas para Clientes no /admin (lista e novo)
 
-- Inclui links para /admin/clientes e /admin/clientes/novo
+- Cria /admin/clientes (lista) carregando rows do banco de forma defensiva
+- Cria /admin/clientes/novo (novo) renderizando clientes_form.html (modo create)
+- Evita Clientes (Novo) cair na lista por rota incorreta

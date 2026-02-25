@@ -1,7 +1,7 @@
 {# 
 PATH: modules/admin/templates/admin_home.html
-LAST_RECODE: 2026-02-25 22:00 America/Bahia
-MOTIVO: Recolocar cards de Clientes no painel /admin (lista e novo cadastro).
+LAST_RECODE: 2026-02-25 22:20 America/Bahia
+MOTIVO: Padronizar cards do painel admin com botoes internos (Novo/Listar), usando um unico card por modulo.
 #}
 {% extends "base.html" %}
 {% block title %}Admin — IndFlow{% endblock %}
@@ -13,14 +13,17 @@ MOTIVO: Recolocar cards de Clientes no painel /admin (lista e novo cadastro).
   .admin-title h1{margin:0 0 6px 0;}
   .admin-title p{margin:0;color:#64748b;}
   .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;}
-  .card-link{grid-column:span 12;display:block;text-decoration:none;color:inherit;}
-  @media (min-width: 720px){ .card-link{grid-column:span 6;} }
-  @media (min-width: 980px){ .card-link{grid-column:span 4;} }
-  .card{background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;min-height:120px;transition:transform .05s ease, box-shadow .05s ease;}
-  .card:hover{transform:translateY(-1px);box-shadow:0 10px 25px rgba(0,0,0,.06);}
+  .card{grid-column:span 12;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;min-height:120px;}
+  @media (min-width: 720px){ .card{grid-column:span 6;} }
+  @media (min-width: 980px){ .card{grid-column:span 4;} }
+
   .card h2{margin:0 0 8px 0;font-size:18px;}
   .card p{margin:0;color:#64748b;font-size:14px;line-height:1.35;}
-  .pill{display:inline-block;margin-top:10px;padding:6px 10px;border-radius:999px;background:#2563eb;color:#ffffff;border:1px solid #2563eb;font-size:12px;font-weight:700;}
+
+  .actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;}
+  .btn{display:inline-block;text-decoration:none;font-size:12px;font-weight:700;padding:7px 12px;border-radius:999px;border:1px solid #2563eb;}
+  .btn-primary{background:#2563eb;color:#ffffff;}
+  .btn-outline{background:#ffffff;color:#2563eb;}
   .note{margin-top:14px;color:#64748b;font-size:13px;}
 </style>
 
@@ -33,37 +36,34 @@ MOTIVO: Recolocar cards de Clientes no painel /admin (lista e novo cadastro).
   </div>
 
   <div class="grid">
-    <a class="card-link" href="/admin/usuarios">
-      <div class="card">
-        <h2>Usuarios</h2>
-        <p>Criar, ativar/desativar, trocar role e redefinir senha. Limite de 5 usuarios ativos por cliente.</p>
-        <span class="pill">Abrir</span>
-      </div>
-    </a>
 
-    <a class="card-link" href="/devices/">
-      <div class="card">
-        <h2>Devices</h2>
-        <p>Visualizar devices, associacoes e informacoes de comunicacao.</p>
-        <span class="pill">Abrir</span>
+    <div class="card">
+      <h2>Usuarios</h2>
+      <p>Criar, ativar/desativar, trocar role e redefinir senha. Limite de 5 usuarios ativos por cliente.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/admin/usuarios/novo">Novo</a>
+        <a class="btn btn-outline" href="/admin/usuarios">Listar</a>
       </div>
-    </a>
+    </div>
 
-    <a class="card-link" href="/admin/clientes">
-      <div class="card">
-        <h2>Clientes (Lista)</h2>
-        <p>Listar, pesquisar e acessar os cadastros de clientes.</p>
-        <span class="pill">Abrir</span>
+    <div class="card">
+      <h2>Devices</h2>
+      <p>Visualizar devices, associacoes e informacoes de comunicacao.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/devices/novo">Novo</a>
+        <a class="btn btn-outline" href="/devices/">Listar</a>
       </div>
-    </a>
+    </div>
 
-    <a class="card-link" href="/admin/clientes/novo">
-      <div class="card">
-        <h2>Clientes (Novo)</h2>
-        <p>Cadastrar um novo cliente no sistema.</p>
-        <span class="pill">Abrir</span>
+    <div class="card">
+      <h2>Clientes</h2>
+      <p>Gerenciar cadastros de clientes do sistema.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/admin/clientes/novo">Novo</a>
+        <a class="btn btn-outline" href="/admin/clientes">Listar</a>
       </div>
-    </a>
+    </div>
+
   </div>
 
   <div class="note">
