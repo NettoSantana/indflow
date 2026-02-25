@@ -1,5 +1,6 @@
-﻿feat(dashboard): indicador de internet no card (wifi 45s)
+﻿fix(detalhe-dia): meta por hora igual tela de configuracao (soma exata)
 
-- Adiciona ícone WiFi no canto inferior esquerdo
-- Regra ONLINE/OFFLINE baseada em last_seen (45s)
-- Não altera backend nem percentuais
+- Meta do Dia vem de producao_diaria.meta
+- Distribui em inteiros nas horas ativas e zera horas inativas
+- Garante soma das 24h igual a meta do dia
+- Mantem produzido/refugo do banco

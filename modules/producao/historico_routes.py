@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 04:31 America/Bahia
-# MOTIVO: Ajustar meta por hora no endpoint detalhe-dia para refletir distribuicao inteira da tela de configuracao, garantindo soma exata com a meta do dia.
+# LAST_RECODE: 2026-02-25 07:43 America/Bahia
+# MOTIVO: Ajustar meta por hora no endpoint detalhe-dia para usar meta_por_hora do estado/config da maquina (turno), refletindo exatamente a tela de configuracao.
 
 
 from __future__ import annotations
@@ -357,6 +357,43 @@ def _load_machine_config_json(conn: sqlite3.Connection, machine_id: str) -> dict
         return json.loads(raw)
     except Exception:
         return {}
+
+
+
+def _build_meta_24_from_machine_state(machine_state: dict | None) -> list[int] | None:
+    """Monta meta[24] a partir do estado/config da maquina.
+
+    Esperado no machine_state:
+    - turno_inicio: "HH:MM"
+    - meta_por_hora: lista (tipicamente do tamanho do turno, ex. 8 itens)
+
+    Regra:
+    - meta_por_hora[i] aplica na hora do relogio (turno_inicio + i) modulo 24
+    - demais horas ficam 0
+    """
+    if not isinstance(machine_state, dict):
+        return None
+
+    mph = machine_state.get("meta_por_hora")
+    if not isinstance(mph, list) or not mph:
+        return None
+
+    turno_inicio = str(machine_state.get("turno_inicio") or "").strip()
+    if not turno_inicio:
+        return None
+
+    try:
+        hh = int(turno_inicio.split(":")[0])
+    except Exception:
+        return None
+
+    meta24 = [0] * 24
+    for i, v in enumerate(mph):
+        h = (hh + i) % 24
+        meta24[h] = _safe_int(v, 0)
+
+    return meta24
+
 
 def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
     if not intervals:
@@ -905,14 +942,15 @@ def api_producao_detalhe_dia():
                 120,
             )
 
+            machine_state = None
             stop_start_naive = None
             if now_naive is not None and callable(get_machine):
                 try:
-                    st = get_machine(eff_mid) or get_machine(machine_id)
-                    if isinstance(st, dict):
-                        stopped_ms = st.get("stopped_since_ms") or st.get("stopped_since")
-                        status_ui = str(st.get("status_ui") or "").strip().upper()
-                        run_flag = st.get("run")
+                    machine_state = get_machine(eff_mid) or get_machine(machine_id)
+                    if isinstance(machine_state, dict):
+                        stopped_ms = machine_state.get("stopped_since_ms") or machine_state.get("stopped_since")
+                        status_ui = str(machine_state.get("status_ui") or "").strip().upper()
+                        run_flag = machine_state.get("run")
                         is_stopped = False
                         if status_ui in ("PARADA", "PARADO", "STOP", "STOPPED"):
                             is_stopped = True
@@ -938,52 +976,24 @@ def api_producao_detalhe_dia():
             hor = _fetch_horaria(conn, eff_mid, data_ref)
 
             # ============================================================
-            # FIX: Meta por Hora deve refletir exatamente a tela de configuracao
+            # Meta por Hora (fonte da verdade: estado/config da maquina)
             # Regra:
-            # - Meta do Dia vem de producao_diaria (meta)
-            # - Distribui meta do dia em inteiros pelas horas ATIVAS, garantindo soma exata
-            # - Horas inativas permanecem com meta=0
+            # - Usa meta_por_hora + turno_inicio do estado retornado por get_machine()
+            # - Converte para vetor de 24h do relogio (00..23)
+            # - Aplica no JSON hours[].meta (sem recalcular em banco)
             #
             # Observacao:
             # - Mantemos produzido/refugo do banco sem recalcular
-            # - Horas ativas sao inferidas pela meta_hora existente (quando houver)
+            # - Se nao houver meta_por_hora/turno_inicio, mantem meta do banco (compatibilidade)
             # ============================================================
             try:
-                diaria_cfg = _diaria_do_dia(conn, eff_mid, data_ref.isoformat())
-                meta_dia_cfg = diaria_cfg.get("meta")
-                if meta_dia_cfg is not None:
-                    meta_dia_int = _safe_int(meta_dia_cfg, 0)
-
-                    # Horas ativas: as que ja possuem meta > 0 no banco
-                    active_hours = []
+                meta24 = _build_meta_24_from_machine_state(machine_state)
+                if meta24 is not None:
                     for hh in range(24):
-                        try:
-                            if _safe_int(hor.get(hh, {}).get("meta", 0), 0) > 0:
-                                active_hours.append(hh)
-                        except Exception:
-                            continue
-
-                    # Fallback: se nao houver nenhuma hora ativa, distribui nas 24 horas
-                    if not active_hours and meta_dia_int > 0:
-                        active_hours = list(range(24))
-
-                    if active_hours:
-                        base = meta_dia_int // len(active_hours) if meta_dia_int > 0 else 0
-                        rem = meta_dia_int - (base * len(active_hours)) if meta_dia_int > 0 else 0
-
-                        meta_map = {hh: base for hh in active_hours}
-                        for i in range(rem):
-                            hh = active_hours[i % len(active_hours)]
-                            meta_map[hh] = _safe_int(meta_map.get(hh, 0), 0) + 1
-
-                        # aplica no hor (somente meta)
-                        for hh in range(24):
-                            if hh in meta_map:
-                                hor[hh]["meta"] = _safe_int(meta_map.get(hh, 0), 0)
-                            else:
-                                hor[hh]["meta"] = 0
+                        hor[hh]["meta"] = _safe_int(meta24[hh], 0)
             except Exception:
                 pass
+
 
             # Monta resposta hora a hora
 
