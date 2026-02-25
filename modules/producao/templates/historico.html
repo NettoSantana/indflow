@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-24 19:40 America/Bahia
-MOTIVO: Ajustar Tempo Prod/Parado para ler *_sec do backend e exibir em minutos no layout.
+LAST_RECODE: 2026-02-25 05:58 America/Bahia
+MOTIVO: Corrigir hora atual e horas futuras no Historico usando timezone America/Bahia (evita marcar 07:00 quando sao 05:50).
 -->
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
@@ -721,6 +721,79 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 (function(){
   "use strict";
 
+  const IND_TZ = "America/Bahia";
+
+  function nowPartsInTz(tz, utcMs){
+    const dtf = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour12: false,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+    const parts = dtf.formatToParts(new Date(utcMs));
+    const obj = {};
+    for(const p of parts){
+      if(p.type !== "literal"){
+        obj[p.type] = p.value;
+      }
+    }
+    return {
+      year: Number(obj.year),
+      month: Number(obj.month),
+      day: Number(obj.day),
+      hour: Number(obj.hour),
+      minute: Number(obj.minute),
+      second: Number(obj.second)
+    };
+  }
+
+  function tzOffsetMs(tz, utcMs){
+    const p = nowPartsInTz(tz, utcMs);
+    const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    return asUtc - utcMs;
+  }
+
+  function tzWallToUtcMs(tz, isoDay, hour, minute, second){
+    const s = String(isoDay || "").trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if(!m) return NaN;
+
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+
+    const hh = Number(hour || 0);
+    const mm = Number(minute || 0);
+    const ss = Number(second || 0);
+
+    const guess = Date.UTC(y, mo - 1, d, hh, mm, ss);
+
+    const off1 = tzOffsetMs(tz, guess);
+    const utc1 = guess - off1;
+    const off2 = tzOffsetMs(tz, utc1);
+
+    return guess - off2;
+  }
+
+  function nowInTzDate(tz){
+    const ms = Date.now();
+    const p = nowPartsInTz(tz, ms);
+    return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  }
+
+  function todayIsoLocal(){
+    const d = nowInTzDate(IND_TZ);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return y + "-" + m + "-" + day;
+  }
+
+
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
     const s = value.trim();
@@ -732,14 +805,6 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     if(m) return `${m[3]}/${m[2]}/${m[1]}`;
 
     return s;
-  }
-
-  function todayIsoLocal(){
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return y + "-" + m + "-" + day;
   }
 
 
@@ -813,27 +878,26 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   function isFutureHour(isoDay, hourIdx){
     const day = String(isoDay);
-    const now = new Date();
     const today = todayIsoLocal();
 
     if(day > today) return true;
     if(day < today) return false;
 
-    // same day
     const h = Number(hourIdx);
     if(!Number.isFinite(h)) return false;
-    return h > now.getHours();
+
+    const nowTz = nowInTzDate(IND_TZ);
+    return h > nowTz.getHours();
   }
 
   function toDayStartMsLocal(isoDay){
-    const d = String(isoDay);
-    return new Date(d + "T00:00:00").getTime();
+    return tzWallToUtcMs(IND_TZ, isoDay, 0, 0, 0);
   }
 
   function toHourStartMsLocal(isoDay, hourIdx){
-    const d = String(isoDay);
-    const h = String(hourIdx).padStart(2, "0");
-    return new Date(d + "T" + h + ":00:00").getTime();
+    const h = Number(hourIdx);
+    if(!Number.isFinite(h)) return NaN;
+    return tzWallToUtcMs(IND_TZ, isoDay, h, 0, 0);
   }
 
   function segmentsForHour(isoDay, hourIdx){
@@ -871,7 +935,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     const now = Date.now();
     const today = todayIsoLocal();
     if(String(isoDay) === today){
-      const nowHourStart = toHourStartMsLocal(today, new Date().getHours());
+      const nowHourStart = toHourStartMsLocal(today, nowInTzDate(IND_TZ).getHours());
       if(startMs == nowHourStart){
         capEnd = Math.min(endMs, now);
       }
@@ -1418,22 +1482,32 @@ function safeText(v){
     bar.className = "tbar";
 
     const day = isoDay;
-    const hh = String(hourIdx).padStart(2, "0");
-    const hourStart = new Date(day + "T" + hh + ":00:00");
-    const hourEnd = new Date(day + "T" + hh + ":59:59");
 
-    const now = new Date();
+    const hourStartMs = tzWallToUtcMs(IND_TZ, day, hourIdx, 0, 0);
+    const hourEndMs = hourStartMs + (60 * 60 * 1000) - 1;
+
+    const hourStart = new Date(hourStartMs);
+    const hourEnd = new Date(hourEndMs);
+
+    const nowTz = nowInTzDate(IND_TZ);
     const isToday = (day === todayIsoLocal());
-    const isCurrentHour = isToday && (now.getHours() === hourIdx);
-    const capEnd = (isCurrentHour && now < hourEnd) ? now : hourEnd;
+    const isCurrentHour = isToday && (nowTz.getHours() === Number(hourIdx));
 
-    const totalMs = Math.max(1, hourEnd.getTime() - hourStart.getTime());
+    const nowMs = Date.now();
+    const capEndMs = (isCurrentHour && nowMs < (hourEndMs + 1)) ? nowMs : (hourEndMs + 1);
+    const capEnd = new Date(capEndMs);
+
+    const totalMs = Math.max(1, (hourEndMs + 1) - hourStartMs);
 
     function parseInDay(dayIso, value){
       if(value === null || value === undefined) return null;
       if(typeof value === "string" && /^\d{2}:\d{2}(:\d{2})?$/.test(value)){
         const t = value.length === 5 ? (value + ":00") : value;
-        return new Date(dayIso + "T" + t);
+        const hh = Number(t.slice(0,2));
+        const mm = Number(t.slice(3,5));
+        const ss = Number(t.slice(6,8));
+        const ms = tzWallToUtcMs(IND_TZ, dayIso, hh, mm, ss);
+        return new Date(ms);
       }
       return parseTs(value);
     }
