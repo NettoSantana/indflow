@@ -664,6 +664,7 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
                         try:
                             out[h]["meta"] = _safe_int(r[meta_col] if isinstance(r, sqlite3.Row) else r[sel_cols.index(meta_col)], 0)
                         except Exception:
+                            pass
                     if base_col:
                         try:
                             out[h]["baseline_esp"] = _safe_int(r[base_col] if isinstance(r, sqlite3.Row) else r[sel_cols.index(base_col)], 0)
