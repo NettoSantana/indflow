@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\db_indflow.py
-# LAST_RECODE: 2026-02-24 00:00 America/Bahia
-# MOTIVO: Ajustar schema de machine_state_event para bater com machine_routes (persistência RUN/STOP sem falha silenciosa).
+# LAST_RECODE: 2026-02-24 21:10 America/Bahia
+# MOTIVO: Garantir persistência da configuração V2 adicionando coluna machine_config.config_json no SQLite (migração defensiva), evitando perda após deploy.
 
 import os
 import sqlite3
