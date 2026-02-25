@@ -1,5 +1,5 @@
-﻿fix(producao_horaria_repo): resolver cliente_id consistente e ignorar scoped cid
+﻿fix(producao_horaria_repo): fixar cliente_id e impedir mistura entre tenants
 
-- Antes: cliente_id vinha do machine_id no formato cliente_id::machine_id, podendo partir dados entre clientes
-- Agora: resolve cliente_id consultando o SQLite por machine_id e usa scoped apenas como fallback
-- Aplica a mesma normalizacao em upsert e leituras (baseline/load) para manter historico consistente
+- Ignora cliente_id vindo de machine_id scoped
+- Resolve cliente_id por tabelas de config/vinculo no SQLite
+- Fallback seguro pelo cliente_id mais recente em producao_horaria

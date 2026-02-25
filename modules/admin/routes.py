@@ -1,8 +1,8 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\admin\routes.py
-# LAST_RECODE: 2026-02-25 12:20 America/Bahia
-# MOTIVO: Adicionar rota temporaria de diagnostico do SQLite (producao_horaria) protegida por token, para validar persistencia no MAIN sem Shell.
+# LAST_RECODE: 2026-02-25 15:20 America/Bahia
+# MOTIVO: Adicionar endpoint admin token-protegido para limpar registros incorretos em producao_horaria (um machine_id/data_ref/cliente_id), permitindo corrigir historico em ambiente sem Shell.
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, render_template_string
-from datetime import datetime, timedelta
+from datetime import datetime
 import uuid
 import secrets
 import hashlib
@@ -812,9 +812,30 @@ def bootstrap():
     ), 201
 
 
+
+def _expected_admin_reset_token() -> str:
+    # Aceita ADMIN_RESET_TOKEN (preferencial) e, como fallback, INDFLOW_ADMIN_TOKEN.
+    # Isso permite reutilizar o mesmo token ja configurado no Railway.
+    expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
+    if expected:
+        return expected
+    return (os.getenv("INDFLOW_ADMIN_TOKEN") or "").strip()
+
+
+def _require_admin_token_from_json() -> tuple[bool, str]:
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+    expected = _expected_admin_reset_token()
+    if not expected:
+        return False, "ADMIN_RESET_TOKEN/INDFLOW_ADMIN_TOKEN nao configurado"
+    if not token or token != expected:
+        return False, "token invalido"
+    return True, ""
+
+
 @admin_bp.route("/dev-reset-admin", methods=["POST"])
 def dev_reset_admin():
-    expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
+    expected = _expected_admin_reset_token()
     if not expected:
         return jsonify({"error": "ADMIN_RESET_TOKEN nao configurado"}), 403
 
@@ -833,124 +854,91 @@ def dev_reset_admin():
         return jsonify({"error": "Falha ao resetar admin", "details": str(e)}), 400
 
 
-@admin_bp.route("/db-dump-producao-horaria", methods=["POST"])
-def db_dump_producao_horaria():
-    expected = (os.getenv("ADMIN_RESET_TOKEN") or "").strip()
-    if not expected:
-        return jsonify({"error": "ADMIN_RESET_TOKEN nao configurado"}), 403
+@admin_bp.route("/db-fix-producao-horaria", methods=["POST"])
+def db_fix_producao_horaria():
+    ok, err = _require_admin_token_from_json()
+    if not ok:
+        return jsonify({"ok": False, "error": err}), 403
 
     data = request.get_json(silent=True) or {}
-    token = (data.get("token") or "").strip()
-    if token != expected:
-        return jsonify({"error": "Token invalido"}), 403
-
     machine_id = (data.get("machine_id") or "").strip()
+    data_ref = (data.get("data_ref") or "").strip()
+    wrong_cliente_id = (data.get("wrong_cliente_id") or "").strip()
+    correct_cliente_id = (data.get("correct_cliente_id") or "").strip()
 
-    conn = get_db()
-    cur = conn.cursor()
-
-    out = {
-        "ok": True,
-        "now_utc": datetime.utcnow().isoformat(),
-        "env": {
-            "INDFLOW_DB_PATH": (os.getenv("INDFLOW_DB_PATH") or "").strip() or None,
-            "is_railway": bool((os.getenv("RAILWAY_PROJECT_ID") or "").strip()),
-        },
-        "limits": {"top_refs": 10, "top_machines": 50, "sample_rows": 50},
-    }
+    if not machine_id:
+        return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
+    if not data_ref:
+        return jsonify({"ok": False, "error": "data_ref obrigatorio (YYYY-MM-DD)"}), 400
+    if not wrong_cliente_id:
+        return jsonify({"ok": False, "error": "wrong_cliente_id obrigatorio"}), 400
 
     try:
-        row = cur.execute(
+        conn = get_db()
+        cur = conn.cursor()
+
+        exists = cur.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='producao_horaria'"
         ).fetchone()
-        out["table_exists"] = bool(row)
-        if not out["table_exists"]:
-            return jsonify(out), 200
+        if not exists:
+            return jsonify({"ok": False, "error": "tabela producao_horaria nao existe"}), 404
 
-        top_refs = []
-        for r in cur.execute(
-            """
-            SELECT data_ref, COUNT(*) AS qtd
-            FROM producao_horaria
-            GROUP BY data_ref
-            ORDER BY qtd DESC
-            LIMIT 10
-            """
-        ):
-            top_refs.append({"data_ref": r[0], "qtd": int(r[1] or 0)})
-        out["top_data_ref"] = top_refs
+        before = cur.execute(
+            "SELECT COUNT(*) FROM producao_horaria WHERE data_ref=? AND machine_id=? AND cliente_id=?",
+            (data_ref, machine_id, wrong_cliente_id),
+        ).fetchone()[0]
 
-        today = datetime.utcnow().date().isoformat()
-        yest = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
+        if before == 0:
+            return jsonify(
+                {
+                    "ok": True,
+                    "deleted": 0,
+                    "before": 0,
+                    "after": 0,
+                    "data_ref": data_ref,
+                    "machine_id": machine_id,
+                    "wrong_cliente_id": wrong_cliente_id,
+                    "correct_cliente_id": correct_cliente_id or None,
+                    "note": "nenhuma linha para remover",
+                }
+            )
 
-        def _count_for(dref: str) -> int:
-            r = cur.execute(
-                "SELECT COUNT(*) FROM producao_horaria WHERE data_ref = ?",
-                (dref,),
-            ).fetchone()
-            return int(r[0] or 0) if r else 0
+        cur.execute(
+            "DELETE FROM producao_horaria WHERE data_ref=? AND machine_id=? AND cliente_id=?",
+            (data_ref, machine_id, wrong_cliente_id),
+        )
+        conn.commit()
 
-        out["count_today_utc"] = {"data_ref": today, "qtd": _count_for(today)}
-        out["count_yesterday_utc"] = {"data_ref": yest, "qtd": _count_for(yest)}
+        after_wrong = cur.execute(
+            "SELECT COUNT(*) FROM producao_horaria WHERE data_ref=? AND machine_id=? AND cliente_id=?",
+            (data_ref, machine_id, wrong_cliente_id),
+        ).fetchone()[0]
 
-        def _top_machines(dref: str):
-            rows = []
-            for r in cur.execute(
-                """
-                SELECT COALESCE(cliente_id,'__NULL__') AS cliente_id, machine_id, COUNT(*) AS qtd
-                FROM producao_horaria
-                WHERE data_ref = ?
-                GROUP BY COALESCE(cliente_id,'__NULL__'), machine_id
-                ORDER BY qtd DESC
-                LIMIT 50
-                """,
-                (dref,),
-            ):
-                rows.append({"cliente_id": r[0], "machine_id": r[1], "qtd": int(r[2] or 0)})
-            return rows
+        after_correct = None
+        if correct_cliente_id:
+            after_correct = cur.execute(
+                "SELECT COUNT(*) FROM producao_horaria WHERE data_ref=? AND machine_id=? AND cliente_id=?",
+                (data_ref, machine_id, correct_cliente_id),
+            ).fetchone()[0]
 
-        out["top_machines_today_utc"] = _top_machines(today)
-        out["top_machines_yesterday_utc"] = _top_machines(yest)
-
-        if machine_id:
-            sample = []
-            for r in cur.execute(
-                """
-                SELECT COALESCE(cliente_id,'__NULL__') AS cliente_id,
-                       machine_id, data_ref, hora_idx,
-                       baseline_esp, esp_last, produzido, meta, percentual, updated_at
-                FROM producao_horaria
-                WHERE machine_id = ?
-                ORDER BY data_ref DESC, hora_idx DESC
-                LIMIT 50
-                """,
-                (machine_id,),
-            ):
-                sample.append(
-                    {
-                        "cliente_id": r[0],
-                        "machine_id": r[1],
-                        "data_ref": r[2],
-                        "hora_idx": int(r[3] or 0),
-                        "baseline_esp": int(r[4] or 0),
-                        "esp_last": int(r[5] or 0),
-                        "produzido": int(r[6] or 0),
-                        "meta": int(r[7] or 0),
-                        "percentual": int(r[8] or 0),
-                        "updated_at": r[9],
-                    }
-                )
-            out["sample_by_machine_id"] = {"machine_id": machine_id, "rows": sample}
+        return jsonify(
+            {
+                "ok": True,
+                "deleted": int(before),
+                "before": int(before),
+                "after_wrong": int(after_wrong),
+                "after_correct": int(after_correct) if after_correct is not None else None,
+                "data_ref": data_ref,
+                "machine_id": machine_id,
+                "wrong_cliente_id": wrong_cliente_id,
+                "correct_cliente_id": correct_cliente_id or None,
+            }
+        )
 
     except Exception as e:
-        out["ok"] = False
-        out["error"] = "Falha ao consultar producao_horaria"
-        out["details"] = str(e)
-        return jsonify(out), 500
-    finally:
         try:
-            conn.close()
+            conn.rollback()
         except Exception:
             pass
+        return jsonify({"ok": False, "error": "erro ao limpar producao_horaria", "details": str(e)}), 500
 
-    return jsonify(out), 200
