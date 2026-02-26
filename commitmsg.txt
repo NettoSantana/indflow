@@ -1,9 +1,4 @@
-﻿fix(a11y): associar labels aos campos no config_maquina_for
+﻿feat(admin): rota temporaria de diagnostico producao_horaria (token)
 
-Corrige avisos "No label associated with a form field" no DevTools/Lighthouse
-
-Adiciona for/id nos campos fixos (ideal, rampa, inatividade, conversao, OP)
-
-Ajusta seções (labels de título viram div) para evitar label sem input
-
-No JS: adiciona id + htmlFor nos inputs de turnos; aria-label em pausas/bobinas/refugo
+- Adiciona POST /admin/db-dump-producao-horaria protegido por ADMIN_RESET_TOKEN
+- Retorna contagens e agrupamentos para validar persistencia no SQLite do MAIN sem Shell

@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-25 15:20 America/Bahia
-# MOTIVO: Corrigir meta do dia no /machine/status (evitar multiplicar meta_hora por horas indevidas), expondo meta_dia (soma dos turnos) e usando meta_turno_ativo apenas para meta_por_hora do turno atual.
+# LAST_RECODE: 2026-02-26 16:30 America/Bahia
+# MOTIVO: Persistir producao_horaria por hora (congelar hora fechada mesmo sem novos eventos), sem alterar logica do card (hora atual zera na virada).
 
 import os
 import json
@@ -1684,6 +1684,159 @@ def _sum_prev_hours_produzido(conn, machine_id: str, cliente_id: str, dia_ref: s
         return total
     except Exception:
         return 0
+
+def _finalizar_hora_anterior_por_eventos(machine_id: str, cliente_id: str) -> None:
+    """Garante persistencia da hora anterior na producao_horaria.
+
+    Regra:
+    - O card da hora atual pode zerar na virada (isso continua).
+    - A hora que terminou (hora anterior) precisa ficar congelada no historico.
+    - Mesmo que nao chegue mais nenhum evento depois, se existirem eventos naquela hora,
+      gravamos o total (SUM(delta)) em producao_horaria caso ainda esteja 0/NULL.
+    """
+    try:
+        agora = now_bahia()
+        prev_dt = agora - timedelta(hours=1)
+
+        dia_ref_prev = dia_operacional_ref_str(prev_dt)
+        hora_idx_prev = int(prev_dt.hour)
+
+        # Janela exata da hora anterior
+        start_dt = prev_dt.replace(minute=0, second=0, microsecond=0)
+        end_dt = start_dt + timedelta(hours=1)
+
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(end_dt.timestamp() * 1000)
+
+        mid = str(machine_id or "").strip()
+        cid = str(cliente_id or "").strip()
+
+        if not mid:
+            return
+
+        conn = get_db()
+        try:
+            # 1) Soma eventos de producao (delta) daquela hora
+            try:
+                _ensure_producao_evento_table(conn)
+            except Exception:
+                pass
+
+            pe_cols = []
+            try:
+                pe_cols = [r[1] for r in conn.execute("PRAGMA table_info(producao_evento)").fetchall()]
+            except Exception:
+                pe_cols = []
+
+            has_pe_cliente = "cliente_id" in pe_cols
+
+            sql_evt = "SELECT COALESCE(SUM(CAST(delta AS INTEGER)), 0) FROM producao_evento WHERE machine_id = ? AND ts_ms >= ? AND ts_ms < ?"
+            params_evt = [mid, start_ms, end_ms]
+
+            if has_pe_cliente and cid:
+                sql_evt += " AND cliente_id = ?"
+                params_evt.append(cid)
+
+            row_evt = conn.execute(sql_evt, params_evt).fetchone()
+            total_evt = int(row_evt[0] or 0) if row_evt else 0
+
+            if total_evt <= 0:
+                return
+
+            # 2) Atualiza/insere producao_horaria apenas se estiver 0/NULL
+            ph_cols = []
+            try:
+                ph_cols = [r[1] for r in conn.execute("PRAGMA table_info(producao_horaria)").fetchall()]
+            except Exception:
+                ph_cols = []
+
+            if not ph_cols:
+                return
+
+            has_ph_cliente = "cliente_id" in ph_cols
+
+            sql_sel = "SELECT produzido FROM producao_horaria WHERE data_ref = ? AND hora_idx = ? AND machine_id = ?"
+            params_sel = [dia_ref_prev, hora_idx_prev, mid]
+
+            if has_ph_cliente and cid:
+                sql_sel += " AND cliente_id = ?"
+                params_sel.append(cid)
+
+            row_ph = conn.execute(sql_sel, params_sel).fetchone()
+            produzido_atual = None
+            if row_ph is not None:
+                try:
+                    produzido_atual = int(row_ph[0] or 0)
+                except Exception:
+                    produzido_atual = 0
+
+            now_db = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
+
+            if produzido_atual is not None:
+                if produzido_atual > 0:
+                    return
+
+                set_parts = []
+                params_up = []
+
+                if "produzido" in ph_cols:
+                    set_parts.append("produzido = ?")
+                    params_up.append(int(total_evt))
+
+                if "updated_at" in ph_cols:
+                    set_parts.append("updated_at = ?")
+                    params_up.append(now_db)
+                elif "created_at" in ph_cols:
+                    # fallback minimo, para nao deixar sem timestamp em schemas antigos
+                    set_parts.append("created_at = ?")
+                    params_up.append(now_db)
+
+                if not set_parts:
+                    return
+
+                sql_up = "UPDATE producao_horaria SET " + ", ".join(set_parts) + " WHERE data_ref = ? AND hora_idx = ? AND machine_id = ?"
+                params_up.extend([dia_ref_prev, hora_idx_prev, mid])
+
+                if has_ph_cliente and cid:
+                    sql_up += " AND cliente_id = ?"
+                    params_up.append(cid)
+
+                conn.execute(sql_up, params_up)
+                conn.commit()
+                return
+
+            # Nao existe registro: cria um
+            fields = ["data_ref", "hora_idx", "machine_id"]
+            values = [dia_ref_prev, int(hora_idx_prev), mid]
+
+            if has_ph_cliente and cid:
+                fields.append("cliente_id")
+                values.append(cid)
+
+            if "produzido" in ph_cols:
+                fields.append("produzido")
+                values.append(int(total_evt))
+
+            if "created_at" in ph_cols:
+                fields.append("created_at")
+                values.append(now_db)
+            elif "updated_at" in ph_cols:
+                fields.append("updated_at")
+                values.append(now_db)
+
+            placeholders = ",".join(["?"] * len(fields))
+            sql_ins = "INSERT INTO producao_horaria (" + ", ".join(fields) + ") VALUES (" + placeholders + ")"
+
+            conn.execute(sql_ins, values)
+            conn.commit()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        return
+
 def _sync_producao_diaria_absoluta(machine_id: str, cliente_id: str | None, dia_ref: str, produzido_abs: int, meta: int | None = None) -> None:
     """
     Garante que producao_diaria reflita o valor absoluto (producao_turno) e nao um acumulado incremental.
@@ -1907,6 +2060,9 @@ def update_machine():
                 )
         except Exception:
             pass
+
+        # Persistencia: congela a hora anterior no historico (producao_horaria)
+        _finalizar_hora_anterior_por_eventos(machine_id=machine_id, cliente_id=cliente_id)
 
         if delta_evt > 0:
             m["_last_count_ts_ms"] = int(effective_ts_ms)
@@ -2747,6 +2903,9 @@ def machine_status():
             pass
 
     carregar_baseline_diario(m, machine_id)
+
+    # Persistencia: congela a hora anterior no historico (producao_horaria)
+    _finalizar_hora_anterior_por_eventos(machine_id=machine_id, cliente_id=cid_req or m.get("cliente_id") or "")
 
     atualizar_producao_hora(m)
 
