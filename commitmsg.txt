@@ -1,4 +1,4 @@
-﻿feat(admin): rota temporaria de diagnostico producao_horaria (token)
+﻿fix(historico): corrigir blocos try/indentacao no historico_routes
 
-- Adiciona POST /admin/db-dump-producao-horaria protegido por ADMIN_RESET_TOKEN
-- Retorna contagens e agrupamentos para validar persistencia no SQLite do MAIN sem Shell
+- Remove erro do Pylance: try sem except/finally
+- Corrige indentacao quebrada no detalhe-dia
