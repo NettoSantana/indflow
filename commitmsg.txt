@@ -1,5 +1,5 @@
-﻿fix(historico): detalhe-dia refletir producao correta por hora
+﻿fix(historico): mostrar Prod por hora no detalhe-dia usando producao_exibicao_24 do status
 
-- Ajusta busca de producao_horaria para evitar divergencia de machine_id (scoped/unscoped)
-- Garante que detalhe-dia bata com tela 24h
-- Corrige blocos try/indentacao quebrados
+- No dia atual, hours[].produzido vem de producao_exibicao_24 (24h)
+- hours[].refugo vem de refugo_por_hora (24h)
+- Mantem barra RUN/STOP como esta
