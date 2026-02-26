@@ -1,1 +1,4 @@
-﻿fix(historico): detalhe-dia refletir producao por hora da tela 24h
+﻿fix(historico): detalhe-dia bater com tela 24h (/status)
+
+- Carrega config_v2 mesmo quando machine_id vier escopado (tenta id sem scope)
+- Usa producao_exibicao_24/refugo_por_hora do machine_state como fonte de verdade no detalhe-dia
