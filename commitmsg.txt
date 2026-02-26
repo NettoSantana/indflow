@@ -1,4 +1,5 @@
-﻿fix(historico): detalhe-dia usar producao_exibicao_24 no dia atual sem zerar tudo
+﻿fix(historico): Prod por hora no detalhe-dia sem herdar valor acumulado
 
-- Remove normalizacao por esp_last/baseline que estava zerando produzido
-- Para hoje, hours[].produzido vem do array producao_exibicao_24 (24h), evitando herdar hora anterior
+- Converte producao_exibicao_24 (possivelmente acumulado) em delta por hora
+- Reancora em horas NP/break (meta==0) para nao carregar para a proxima hora
+- Mantem barra RUN/STOP como esta
