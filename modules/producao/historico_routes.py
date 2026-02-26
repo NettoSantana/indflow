@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 08:13 America/Bahia
-# MOTIVO: Detalhe-dia deve refletir a configuração (config_v2) e buscar produzido/meta na producao_horaria mesmo quando o banco gravou com machine_id diferente (scoped vs unscoped).
+# LAST_RECODE: 2026-02-26 09:00 America/Bahia
+# MOTIVO: Detalhe-dia deve mostrar produzido por hora do status (producao_exibicao_24/refugo_por_hora) quando disponível, mantendo barra RUN/STOP como está.
 
 
 from __future__ import annotations
@@ -1293,6 +1293,40 @@ def api_producao_detalhe_dia():
                         if delta < 0:
                             delta = 0
                         hor[hh]["produzido"] = int(delta)
+            except Exception:
+                pass
+
+
+            # ============================================================
+            # Fonte preferencial de "Prod" no detalhe-dia (dia atual):
+            # - Se o /status já tem producao_exibicao_24/refugo_por_hora (24h),
+            #   usamos esses arrays para preencher "produzido/refugo" por hora.
+            # - Isso garante que o "Prod" exibido no modal bata com o status,
+            #   mesmo quando producao_horaria não está persistindo/consultando certo.
+            # ============================================================
+            try:
+                if now_naive is not None and isinstance(machine_state, dict):
+                    prod24 = machine_state.get("producao_exibicao_24")
+                    if isinstance(prod24, list) and len(prod24) == 24:
+                        for hh in range(24):
+                            try:
+                                v = prod24[hh]
+                                if v is None:
+                                    continue
+                                hor[hh]["produzido"] = _safe_int(v, 0)
+                            except Exception:
+                                continue
+
+                    ref24 = machine_state.get("refugo_por_hora")
+                    if isinstance(ref24, list) and len(ref24) == 24:
+                        for hh in range(24):
+                            try:
+                                v = ref24[hh]
+                                if v is None:
+                                    continue
+                                hor[hh]["refugo"] = _safe_int(v, 0)
+                            except Exception:
+                                continue
             except Exception:
                 pass
 

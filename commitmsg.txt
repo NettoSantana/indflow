@@ -1,4 +1,5 @@
-﻿fix(historico): corrigir blocos try/indentacao no historico_routes
+﻿fix(historico): detalhe-dia refletir producao correta por hora
 
-- Remove erro do Pylance: try sem except/finally
-- Corrige indentacao quebrada no detalhe-dia
+- Ajusta busca de producao_horaria para evitar divergencia de machine_id (scoped/unscoped)
+- Garante que detalhe-dia bata com tela 24h
+- Corrige blocos try/indentacao quebrados
