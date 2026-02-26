@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 07:00 America/Bahia
-# MOTIVO: Fazer detalhe-dia refletir a meta por hora da tela 24h usando config_v2.shifts (turnos+breaks) como fonte de verdade; manter fallback de compatibilidade.
+# LAST_RECODE: 2026-02-26 09:00 America/Bahia
+# MOTIVO: Detalhe-dia deve mostrar produzido por hora do status (producao_exibicao_24/refugo_por_hora) quando disponível, mantendo barra RUN/STOP como está.
 
 
 from __future__ import annotations
@@ -774,6 +774,22 @@ def _fetch_run_intervals_from_state_events(
     return _merge_intervals(intervals)
 
 
+def _fetch_run_intervals_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: date) -> list[tuple[datetime, datetime]]:
+    """Busca intervals RUN/STOP tentando múltiplos IDs (scoped/unscoped)."""
+    tried: set[str] = set()
+    for mid in machine_ids:
+        mid = (mid or "").strip()
+        if not mid or mid in tried:
+            continue
+        tried.add(mid)
+        try:
+            itv = _fetch_run_intervals_from_state_events(conn, mid, data_ref)
+            if itv:
+                return itv
+        except Exception:
+            continue
+    return []
+
 def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
     out: dict[int, dict] = {h: {"meta": 0, "produzido": 0, "refugo": 0, "baseline_esp": 0, "esp_last": 0} for h in range(24)}
 
@@ -1183,9 +1199,17 @@ def api_producao_detalhe_dia():
 
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
-            run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
+            # Tenta IDs alternativos para resolver divergência scoped/unscoped
+            cand_ids = [eff_mid, machine_id]
+            if "::" in (machine_id or ""):
+                try:
+                    cand_ids.append((machine_id.split("::", 1)[1] or "").strip())
+                except Exception:
+                    pass
+
+            run_intervals = _fetch_run_intervals_multi(conn, cand_ids, data_ref)
             # Tabela horaria (meta/produzido/refugo)
-            hor = _fetch_horaria(conn, eff_mid, data_ref)
+            hor = _fetch_horaria_multi(conn, cand_ids, data_ref)
 
             # ============================================================
             # ============================================================
@@ -1269,6 +1293,40 @@ def api_producao_detalhe_dia():
                         if delta < 0:
                             delta = 0
                         hor[hh]["produzido"] = int(delta)
+            except Exception:
+                pass
+
+
+            # ============================================================
+            # Fonte preferencial de "Prod" no detalhe-dia (dia atual):
+            # - Se o /status já tem producao_exibicao_24/refugo_por_hora (24h),
+            #   usamos esses arrays para preencher "produzido/refugo" por hora.
+            # - Isso garante que o "Prod" exibido no modal bata com o status,
+            #   mesmo quando producao_horaria não está persistindo/consultando certo.
+            # ============================================================
+            try:
+                if now_naive is not None and isinstance(machine_state, dict):
+                    prod24 = machine_state.get("producao_exibicao_24")
+                    if isinstance(prod24, list) and len(prod24) == 24:
+                        for hh in range(24):
+                            try:
+                                v = prod24[hh]
+                                if v is None:
+                                    continue
+                                hor[hh]["produzido"] = _safe_int(v, 0)
+                            except Exception:
+                                continue
+
+                    ref24 = machine_state.get("refugo_por_hora")
+                    if isinstance(ref24, list) and len(ref24) == 24:
+                        for hh in range(24):
+                            try:
+                                v = ref24[hh]
+                                if v is None:
+                                    continue
+                                hor[hh]["refugo"] = _safe_int(v, 0)
+                            except Exception:
+                                continue
             except Exception:
                 pass
 
@@ -1431,6 +1489,26 @@ def _distribute_int_total(total: int, weights: list[int] | None = None, n: int =
                 k += 1
     return out
 
+
+def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: str) -> dict[int, dict]:
+    """Tenta carregar producao_horaria para múltiplos machine_id.
+    Retorna o primeiro conjunto não-vazio. Isso resolve casos onde:
+    - producao_horaria foi gravada com machine_id unscoped (maquina005)
+    - a UI chama o endpoint com scoped (<cliente>::maquina005) ou vice-versa
+    """
+    tried: set[str] = set()
+    for mid in machine_ids:
+        mid = (mid or "").strip()
+        if not mid or mid in tried:
+            continue
+        tried.add(mid)
+        try:
+            hor = _fetch_horaria(conn, mid, data_ref)
+            if isinstance(hor, dict) and len(hor) > 0:
+                return hor
+        except Exception:
+            continue
+    return {}
 
 def _backfill_horaria_for_day(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
     """
@@ -1677,3 +1755,4 @@ def api_producao_backfill_horaria():
 def historico_page():
     return render_template("historico.html")
 ###
+
