@@ -1,5 +1,5 @@
-﻿fix(producao_horaria): persistir producao por hora no /machine/update
+﻿fix(producao): persistir producao por hora no SQLite (baseline_hora + producao_horaria)
 
-- Faz upsert em producao_horaria para a hora atual (hora_idx) a cada pacote do ESP
-- Mantem card zerando a cada virada de hora, mas historico fica gravado e sobrevive a deploy/restart
-- Usa timestamp do ultimo pacote do ESP quando disponivel para evitar drift do server
+- Grava baseline por hora no primeiro evento da hora
+- Atualiza snapshot de producao_horaria a cada update do ESP e no polling do status
+- Mantem horas anteriores congeladas e nao perde historico apos deploy
