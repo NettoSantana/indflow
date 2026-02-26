@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 07:55 America/Bahia
-# MOTIVO: Ajustar detalhe-dia para bater com a tela 24h (/status): carregar config_v2 mesmo quando machine_id vier escopado e usar producao_exibicao_24/refugo_por_hora como fonte de verdade quando disponivel.
+# LAST_RECODE: 2026-02-26 07:00 America/Bahia
+# MOTIVO: Fazer detalhe-dia refletir a meta por hora da tela 24h usando config_v2.shifts (turnos+breaks) como fonte de verdade; manter fallback de compatibilidade.
 
 
 from __future__ import annotations
@@ -1143,28 +1143,11 @@ def api_producao_detalhe_dia():
             # Resolve machine_id efetivo (scoped) para evitar "horas zeradas" quando o dia foi gravado como <cliente>::<maquina>.
             eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref.isoformat())
 
-            # Carrega config (tenta variacoes de machine_id para cobrir legacy vs scoped).
+            # Carrega config (tenta primeiro pelo machine_id recebido; se nao existir, tenta pelo efetivo).
             cfg = _load_machine_config_json(conn, machine_id)
-
-            # Se vier scoped (ex.: "<cliente>::<maquina>"), tente tambem o id sem scope para achar a config gravada como "maquina".
-            if (not cfg) and machine_id and "::" in str(machine_id):
-                try:
-                    mid_uns = str(machine_id).split("::", 1)[1]
-                except Exception:
-                    mid_uns = None
-                if mid_uns:
-                    cfg = _load_machine_config_json(conn, mid_uns)
-
-            # Se ainda nao achou, tenta pelo efetivo resolvido e, por ultimo, o efetivo sem scope.
             if (not cfg) and eff_mid and eff_mid != machine_id:
                 cfg = _load_machine_config_json(conn, eff_mid)
-            if (not cfg) and eff_mid and "::" in str(eff_mid):
-                try:
-                    eff_uns = str(eff_mid).split("::", 1)[1]
-                except Exception:
-                    eff_uns = None
-                if eff_uns:
-                    cfg = _load_machine_config_json(conn, eff_uns)
+
             # stop_sec e dias ativos (se existir)
             stop_sec = _safe_int(
                 ((cfg.get("oee") or {}).get("no_count_stop_sec") if isinstance(cfg.get("oee"), dict) else None),
@@ -1186,25 +1169,6 @@ def api_producao_detalhe_dia():
                         else:
                             try:
                                 if run_flag is not None and int(run_flag) == 0:
-
-            # ============================================================
-            # Fonte de verdade para "Produzido Hora" (tela 24h / /status):
-            # - Se machine_state trouxer producao_exibicao_24[24], usa isso no detalhe-dia.
-            # - Se trouxer refugo_por_hora[24], usa isso tambem.
-            # Isso evita divergencia quando o banco esta com machine_id diferente (scoped vs legacy) ou com schema antigo.
-            # ============================================================
-            try:
-                if isinstance(machine_state, dict):
-                    pe24 = machine_state.get("producao_exibicao_24")
-                    if isinstance(pe24, list) and len(pe24) == 24:
-                        for hh in range(24):
-                            hor[hh]["produzido"] = _safe_int(pe24[hh], 0)
-                    rf24 = machine_state.get("refugo_por_hora")
-                    if isinstance(rf24, list) and len(rf24) == 24:
-                        for hh in range(24):
-                            hor[hh]["refugo"] = _safe_int(rf24[hh], 0)
-            except Exception:
-                pass
                                     is_stopped = True
                             except Exception:
                                 is_stopped = False

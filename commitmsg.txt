@@ -1,4 +1,4 @@
-﻿fix(historico): detalhe-dia bater com tela 24h (/status)
+﻿fix(historico): corrigir blocos try/indentacao no historico_routes
 
-- Carrega config_v2 mesmo quando machine_id vier escopado (tenta id sem scope)
-- Usa producao_exibicao_24/refugo_por_hora do machine_state como fonte de verdade no detalhe-dia
+- Remove erro do Pylance: try sem except/finally
+- Corrige indentacao quebrada no detalhe-dia
