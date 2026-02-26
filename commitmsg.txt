@@ -1,4 +1,6 @@
-﻿feat(admin): rota temporaria de diagnostico producao_horaria (token)
+﻿fix(producao_horaria): congelar hora anterior no historico
 
-- Adiciona POST /admin/db-dump-producao-horaria protegido por ADMIN_RESET_TOKEN
-- Retorna contagens e agrupamentos para validar persistencia no SQLite do MAIN sem Shell
+- Grava producao_horaria da hora anterior via soma de eventos (producao_evento)
+- So preenche quando a hora estiver 0/NULL (nao sobrescreve horas ja salvas)
+- Aplica em /machine/update e /machine/status
+- Nao altera logica/visual do card (hora atual continua zerando na virada)
