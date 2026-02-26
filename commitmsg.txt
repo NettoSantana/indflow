@@ -1,5 +1,6 @@
-﻿fix(historico): renomear campo de bobina para Retrabalho
+﻿fix(producao_horaria): congelar hora anterior no historico
 
-- Troca label "Qtd. saco ou caixa" por "Retrabalho" no modal
-- Troca texto no resumo/print da bobina para "Retrabalho"
-- Mantém backend/campo qtd_saco_caixa (somente visual)
+- Grava producao_horaria da hora anterior via soma de eventos (producao_evento)
+- So preenche quando a hora estiver 0/NULL (nao sobrescreve horas ja salvas)
+- Aplica em /machine/update e /machine/status
+- Nao altera logica/visual do card (hora atual continua zerando na virada)
