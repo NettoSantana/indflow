@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-26 19:59:03
-# RECODE_REASON: Corrigir persistencia da producao_horaria evitando reset de baseline_hora/producao_hora ao aplicar config_v2
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
+# LAST_RECODE: 2026-02-26 22:21:14
+# RECODE_REASON: Persistir producao_horaria no /machine/update para congelar horas e sobreviver a deploy/restart
 # LAST_RECODE: 2026-02-25 15:20 America/Bahia
 # MOTIVO: Corrigir meta do dia no /machine/status (evitar multiplicar meta_hora por horas indevidas), expondo meta_dia (soma dos turnos) e usando meta_turno_ativo apenas para meta_por_hora do turno atual.
 
@@ -1688,6 +1688,175 @@ def _sum_prev_hours_produzido(conn, machine_id: str, cliente_id: str, dia_ref: s
         return total
     except Exception:
         return 0
+
+def _persist_producao_horaria_from_state(machine_id: str, cliente_id: str | None, m: dict) -> None:
+    """
+    Persiste a producao da hora atual em producao_horaria.
+
+    Objetivo:
+      - O card (tempo real) pode zerar a cada virada de hora normalmente.
+      - O historico deve ficar registrado por hora no banco (ex: 14-15 produziu 1000) e sobreviver a deploy/restart.
+
+    Regra:
+      - Sempre faz upsert apenas da HORA ATUAL (hora_idx calculada).
+      - Horas anteriores ficam congeladas automaticamente (nao sao mais atualizadas quando a hora muda).
+    """
+    try:
+        mid = _norm_machine_id(_unscope_machine_id(machine_id))
+        cid = (str(cliente_id).strip() if cliente_id else "") or None
+
+        # Usa o timestamp do ultimo pacote do ESP (se existir), para evitar drift do server.
+        try:
+            ts_ms = int(m.get("_last_esp_ts_ms_seen") or 0)
+        except Exception:
+            ts_ms = 0
+
+        if ts_ms > 0:
+            try:
+                dt_evt = datetime.fromtimestamp(ts_ms / 1000, TZ_BAHIA)
+            except Exception:
+                dt_evt = now_bahia()
+        else:
+            dt_evt = now_bahia()
+
+        dia_ref = dia_operacional_ref_str(dt_evt)
+        hora_idx = None
+        try:
+            hora_idx = int(m.get("ultima_hora"))
+        except Exception:
+            hora_idx = None
+        if hora_idx is None:
+            try:
+                hora_idx = int(calcular_ultima_hora_idx(m))
+            except Exception:
+                hora_idx = int(dt_evt.hour)
+
+        if hora_idx < 0 or hora_idx > 23:
+            return
+
+        try:
+            baseline_diario = int(m.get("baseline_diario", 0) or 0)
+        except Exception:
+            baseline_diario = 0
+        try:
+            baseline_hora = int(m.get("baseline_hora", 0) or 0)
+        except Exception:
+            baseline_hora = 0
+
+        baseline_esp = int(baseline_diario + baseline_hora)
+
+        try:
+            esp_last = int(m.get("esp_absoluto", 0) or 0)
+        except Exception:
+            esp_last = 0
+
+        try:
+            produzido = int(m.get("producao_hora", 0) or 0)
+        except Exception:
+            produzido = 0
+        if produzido < 0:
+            produzido = 0
+
+        meta = 0
+        try:
+            mph = m.get("meta_por_hora")
+            if isinstance(mph, list) and len(mph) >= 24:
+                meta = int(mph[hora_idx] or 0)
+        except Exception:
+            meta = 0
+        if meta < 0:
+            meta = 0
+
+        percentual = 0
+        try:
+            percentual = int(m.get("percentual_hora", 0) or 0)
+        except Exception:
+            percentual = 0
+        if percentual < 0:
+            percentual = 0
+
+        updated_at = dt_evt.strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = get_db()
+        try:
+            # Detecta se existe cliente_id na tabela (migração defensiva)
+            cols = []
+            try:
+                cols = [r[1] for r in conn.execute("PRAGMA table_info(producao_horaria)").fetchall()]
+            except Exception:
+                cols = []
+
+            has_cliente_col = "cliente_id" in cols
+
+            if has_cliente_col and cid:
+                # Upsert multi-tenant
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO producao_horaria
+                        (machine_id, cliente_id, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(cliente_id, machine_id, data_ref, hora_idx)
+                        DO UPDATE SET
+                            baseline_esp=excluded.baseline_esp,
+                            esp_last=excluded.esp_last,
+                            produzido=excluded.produzido,
+                            meta=excluded.meta,
+                            percentual=excluded.percentual,
+                            updated_at=excluded.updated_at
+                        """,
+                        (mid, cid, dia_ref, int(hora_idx), int(baseline_esp), int(esp_last), int(produzido), int(meta), int(percentual), updated_at),
+                    )
+                except Exception:
+                    # Fallback: UPDATE depois INSERT
+                    cur = conn.execute(
+                        "UPDATE producao_horaria SET baseline_esp=?, esp_last=?, produzido=?, meta=?, percentual=?, updated_at=? WHERE cliente_id=? AND machine_id=? AND data_ref=? AND hora_idx=?",
+                        (int(baseline_esp), int(esp_last), int(produzido), int(meta), int(percentual), updated_at, cid, mid, dia_ref, int(hora_idx)),
+                    )
+                    if not cur or getattr(cur, "rowcount", 0) == 0:
+                        conn.execute(
+                            "INSERT INTO producao_horaria (machine_id, cliente_id, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (mid, cid, dia_ref, int(hora_idx), int(baseline_esp), int(esp_last), int(produzido), int(meta), int(percentual), updated_at),
+                        )
+            else:
+                # Legado (sem cliente_id)
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO producao_horaria
+                        (machine_id, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(machine_id, data_ref, hora_idx)
+                        DO UPDATE SET
+                            baseline_esp=excluded.baseline_esp,
+                            esp_last=excluded.esp_last,
+                            produzido=excluded.produzido,
+                            meta=excluded.meta,
+                            percentual=excluded.percentual,
+                            updated_at=excluded.updated_at
+                        """,
+                        (mid, dia_ref, int(hora_idx), int(baseline_esp), int(esp_last), int(produzido), int(meta), int(percentual), updated_at),
+                    )
+                except Exception:
+                    cur = conn.execute(
+                        "UPDATE producao_horaria SET baseline_esp=?, esp_last=?, produzido=?, meta=?, percentual=?, updated_at=? WHERE machine_id=? AND data_ref=? AND hora_idx=?",
+                        (int(baseline_esp), int(esp_last), int(produzido), int(meta), int(percentual), updated_at, mid, dia_ref, int(hora_idx)),
+                    )
+                    if not cur or getattr(cur, "rowcount", 0) == 0:
+                        conn.execute(
+                            "INSERT INTO producao_horaria (machine_id, data_ref, hora_idx, baseline_esp, esp_last, produzido, meta, percentual, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (mid, dia_ref, int(hora_idx), int(baseline_esp), int(esp_last), int(produzido), int(meta), int(percentual), updated_at),
+                        )
+
+            conn.commit()
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        return
+
 def _sync_producao_diaria_absoluta(machine_id: str, cliente_id: str | None, dia_ref: str, produzido_abs: int, meta: int | None = None) -> None:
     """
     Garante que producao_diaria reflita o valor absoluto (producao_turno) e nao um acumulado incremental.
@@ -1985,6 +2154,12 @@ def update_machine():
 
 
     atualizar_producao_hora(m)
+    # Persistencia da hora (producao_horaria) para sobreviver a deploy/restart
+    try:
+        _persist_producao_horaria_from_state(machine_id=str(machine_id), cliente_id=str(cliente_id), m=m)
+    except Exception:
+        pass
+
 
     # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
     try:
