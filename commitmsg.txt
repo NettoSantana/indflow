@@ -1,4 +1,5 @@
-﻿fix(producao_horaria): evitar reset de baseline_hora/producao_hora ao aplicar config_v2
+﻿fix(producao_horaria): persistir producao por hora no /machine/update
 
-- Nao sobrescreve baseline_hora/ultima_hora durante _cfgv2_apply_to_memory
-- Evita historico da hora anterior voltar zerado apos reload/deploy
+- Faz upsert em producao_horaria para a hora atual (hora_idx) a cada pacote do ESP
+- Mantem card zerando a cada virada de hora, mas historico fica gravado e sobrevive a deploy/restart
+- Usa timestamp do ultimo pacote do ESP quando disponivel para evitar drift do server
