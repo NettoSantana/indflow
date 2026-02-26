@@ -1,4 +1,4 @@
-﻿fix(historico): detalhe-dia bater com tela 24h (/status)
+﻿feat(admin): rota temporaria de diagnostico producao_horaria (token)
 
-- Carrega config_v2 mesmo quando machine_id vier escopado (tenta id sem scope)
-- Usa producao_exibicao_24/refugo_por_hora do machine_state como fonte de verdade no detalhe-dia
+- Adiciona POST /admin/db-dump-producao-horaria protegido por ADMIN_RESET_TOKEN
+- Retorna contagens e agrupamentos para validar persistencia no SQLite do MAIN sem Shell
