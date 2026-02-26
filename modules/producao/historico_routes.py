@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-25 07:49 America/Bahia
-# MOTIVO: Alinhar produzido por hora no detalhe-dia com o card (delta do contador do ESP) e remover contagem por eventos; corrigir indentacao que quebrava o bloco.
+# LAST_RECODE: 2026-02-26 07:00 America/Bahia
+# MOTIVO: Fazer detalhe-dia refletir a meta por hora da tela 24h usando config_v2.shifts (turnos+breaks) como fonte de verdade; manter fallback de compatibilidade.
 
 
 from __future__ import annotations
@@ -452,6 +452,136 @@ def _build_meta_24_from_machine_state(machine_state: dict | None) -> list[int] |
     for i, v in enumerate(mph):
         h = (hh + i) % 24
         meta24[h] = _safe_int(v, 0)
+
+    return meta24
+
+def _parse_hhmm_to_min(hhmm: str) -> int | None:
+    s = (hhmm or '').strip()
+    if not s or ':' not in s:
+        return None
+    try:
+        hh = int(s.split(':')[0])
+        mm = int(s.split(':')[1])
+        if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+            return None
+        return hh * 60 + mm
+    except Exception:
+        return None
+
+def _intervals_intersect(a_s: int, a_e: int, b_s: int, b_e: int) -> bool:
+    return (a_s < b_e) and (b_s < a_e)
+
+def _build_meta_24_from_config_v2(cfg: dict | None, data_ref: date) -> list[int] | None:
+    """Monta meta[24] a partir do config_v2 (shifts + breaks).
+
+    Fonte da verdade: cfg['config_v2'].
+    Regras:
+    - Se active_days existir e data_ref nao estiver ativa: meta 0 para 24h
+    - Para cada shift: horas dentro do shift e fora dos breaks recebem meta constante (meta_pcs / horas_planejadas)
+    - Horas dentro de breaks recebem 0
+    - Turnos que cruzam meia-noite sao suportados (ex.: 22:00-06:00)
+    """
+    if not isinstance(cfg, dict):
+        return None
+
+    cv2 = cfg.get('config_v2') if isinstance(cfg.get('config_v2'), dict) else None
+    if cv2 is None:
+        # compat: algumas bases podem armazenar shifts no root
+        cv2 = cfg if isinstance(cfg.get('shifts'), list) else None
+    if cv2 is None:
+        return None
+
+    active_days = cv2.get('active_days')
+    if isinstance(active_days, list) and active_days:
+        try:
+            dow = int(data_ref.isoweekday())
+            if dow not in [int(x) for x in active_days if isinstance(x, (int, float, str)) and str(x).strip() != '']:
+                return [0] * 24
+        except Exception:
+            pass
+
+    shifts = cv2.get('shifts')
+    if not isinstance(shifts, list) or not shifts:
+        return None
+
+    meta24 = [0] * 24
+
+    for sh in shifts:
+        if not isinstance(sh, dict):
+            continue
+        s_min = _parse_hhmm_to_min(str(sh.get('start') or ''))
+        e_min = _parse_hhmm_to_min(str(sh.get('end') or ''))
+        if s_min is None or e_min is None:
+            continue
+        if e_min <= s_min:
+            e_min += 1440  # vira o dia
+
+        # breaks (mapear para o mesmo timeline do shift)
+        br_intervals: list[tuple[int, int]] = []
+        brs = sh.get('breaks')
+        if isinstance(brs, list):
+            for br in brs:
+                if not isinstance(br, dict):
+                    continue
+                bs = _parse_hhmm_to_min(str(br.get('start') or ''))
+                be = _parse_hhmm_to_min(str(br.get('end') or ''))
+                if bs is None or be is None:
+                    continue
+                if be <= bs:
+                    be += 1440
+                # se o break estiver antes do inicio e o shift virar, joga pro dia seguinte
+                if bs < s_min and e_min > 1440:
+                    bs += 1440
+                    be += 1440
+                br_intervals.append((bs, be))
+
+        meta_pcs = _safe_int(sh.get('meta_pcs'), 0)
+        planned_min = None
+        calc = sh.get('calc')
+        if isinstance(calc, dict):
+            planned_min = _safe_int(calc.get('planned_min'), 0)
+        if planned_min is None or planned_min <= 0:
+            # fallback: duracao - breaks
+            dur = e_min - s_min
+            br_total = 0
+            for bs, be in br_intervals:
+                br_total += max(0, be - bs)
+            planned_min = max(0, dur - br_total)
+
+        planned_hours = planned_min / 60.0 if planned_min else 0.0
+        if meta_pcs <= 0 or planned_hours <= 0:
+            meta_h = 0
+        else:
+            # manter o mesmo comportamento da tela 24h: meta constante arredondada
+            try:
+                meta_h = int(round(float(meta_pcs) / float(planned_hours)))
+            except Exception:
+                meta_h = int(round(meta_pcs / max(planned_hours, 1.0)))
+
+        # aplicar nas 24 horas do relogio (considerar timeline dia0 e dia1)
+        for hh in range(24):
+            h0_s = hh * 60
+            h0_e = (hh + 1) * 60
+            h1_s = h0_s + 1440
+            h1_e = h0_e + 1440
+
+            inside = _intervals_intersect(h0_s, h0_e, s_min, e_min) or _intervals_intersect(h1_s, h1_e, s_min, e_min)
+            if not inside:
+                continue
+
+            in_break = False
+            for bs, be in br_intervals:
+                if _intervals_intersect(h0_s, h0_e, bs, be) or _intervals_intersect(h1_s, h1_e, bs, be):
+                    in_break = True
+                    break
+
+            if in_break:
+                # se outro turno ja colocou meta positiva, nao derruba; mas break do turno atual zera a hora dele
+                # como os turnos nao deveriam se sobrepor, podemos zerar direto
+                meta24[hh] = 0
+            else:
+                if meta_h > meta24[hh]:
+                    meta24[hh] = meta_h
 
     return meta24
 
@@ -1058,18 +1188,18 @@ def api_producao_detalhe_dia():
             hor = _fetch_horaria(conn, eff_mid, data_ref)
 
             # ============================================================
-            # Meta por Hora (fonte da verdade: estado/config da maquina)
+            # ============================================================
+            # Meta por Hora (fonte da verdade: config_v2.shifts)
             # Regra:
-            # - Usa meta_por_hora + turno_inicio do estado retornado por get_machine()
-            # - Converte para vetor de 24h do relogio (00..23)
-            # - Aplica no JSON hours[].meta (sem recalcular em banco)
-            #
-            # Observacao:
-            # - Mantemos produzido/refugo do banco sem recalcular
-            # - Se nao houver meta_por_hora/turno_inicio, mantem meta do banco (compatibilidade)
+            # - Deriva meta[24] a partir de config_v2 (shifts + breaks + active_days)
+            # - Breaks zeram a meta na(s) hora(s) afetada(s)
+            # - Turnos que cruzam meia-noite sao suportados (ex.: 22:00-06:00)
+            # - Se config_v2 nao existir, cai para compatibilidade (meta_por_hora + turno_inicio no estado)
             # ============================================================
             try:
-                meta24 = _build_meta_24_from_machine_state(machine_state)
+                meta24 = _build_meta_24_from_config_v2(cfg, data_ref)
+                if meta24 is None:
+                    meta24 = _build_meta_24_from_machine_state(machine_state)
                 if meta24 is not None:
                     for hh in range(24):
                         hor[hh]["meta"] = _safe_int(meta24[hh], 0)

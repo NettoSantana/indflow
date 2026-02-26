@@ -1,4 +1,5 @@
-﻿fix(admin): endpoint para limpar producao_horaria com cliente_id errado (token)
+﻿fix(machine_routes): meta do dia correta no /machine/status
 
-- Adiciona POST /admin/db-fix-producao-horaria protegido por ADMIN_RESET_TOKEN/INDFLOW_ADMIN_TOKEN
-- Remove linhas por data_ref/machine_id/cliente_id incorreto e retorna contagens before/after
+- Calcula meta_dia como soma das metas de todos os turnos (config_v2.shifts)
+- meta_turno passa a representar a meta do dia (para card/producao_diaria)
+- meta_por_hora usa apenas meta_turno_ativo (turno atual), evitando multiplicacoes indevidas
