@@ -1,5 +1,4 @@
-﻿fix(historico): mostrar Prod por hora no detalhe-dia usando producao_exibicao_24 do status
+﻿fix(historico): zerar produzido na virada de hora no detalhe-dia
 
-- No dia atual, hours[].produzido vem de producao_exibicao_24 (24h)
-- hours[].refugo vem de refugo_por_hora (24h)
-- Mantem barra RUN/STOP como esta
+- Hora futura inicia produzido/refugo em 0
+- Hora atual, nos primeiros 120s sem RUN, nao herda produzido da hora anterior
