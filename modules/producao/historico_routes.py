@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 07:00 America/Bahia
-# MOTIVO: Fazer detalhe-dia refletir a meta por hora da tela 24h usando config_v2.shifts (turnos+breaks) como fonte de verdade; manter fallback de compatibilidade.
+# LAST_RECODE: 2026-02-26 07:35 America/Bahia
+# MOTIVO: detalhe-dia deve refletir Meta/Producao por Hora da tela 24h; meta vem de config_v2.shifts e produzido faz fallback via producao_evento quando producao_horaria ainda nao tem o valor.
 
 
 from __future__ import annotations
@@ -1348,6 +1348,21 @@ def api_producao_detalhe_dia():
                         pass
 
                 tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
+
+                # Fallback de produzido: se a hora teve RUN (tempo_produzindo_sec > 0) mas 'produzido' veio 0,
+                # tenta contar pulsos diretamente de producao_evento no intervalo da hora.
+                # Objetivo: detalhe-dia refletir o mesmo valor exibido na tela 24h/status (ex.: 866),
+                # mesmo quando producao_horaria ainda nao foi atualizada.
+                try:
+                    if (not is_np) and (_safe_int(produzido, 0) <= 0) and (_safe_int(tempo_produzindo_sec, 0) > 0):
+                        start_ms = _naive_bahia_to_ms(hs)
+                        end_ms = _naive_bahia_to_ms(he_calc)
+                        if start_ms > 0 and end_ms > start_ms:
+                            pulses = _count_pulses_producao_evento(conn, machine_id, eff_mid, start_ms, end_ms)
+                            if pulses and pulses > 0:
+                                produzido = int(pulses)
+                except Exception:
+                    pass
 
                 horas.append(
                     {
