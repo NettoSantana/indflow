@@ -520,4 +520,4 @@ app.register_blueprint(clientes_bp, url_prefix="/clientes")
 app.register_blueprint(api_bp, url_prefix="/api")
 app.register_blueprint(devices_bp, url_prefix="/devices")
 app.register_blueprint(utilidades_bp, url_prefix="/utilidades")
-###
+###ddd

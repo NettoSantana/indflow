@@ -1,6 +1,4 @@
-﻿fix(producao_horaria): congelar hora anterior no historico
+﻿fix(producao_horaria): evitar reset de baseline_hora/producao_hora ao aplicar config_v2
 
-- Grava producao_horaria da hora anterior via soma de eventos (producao_evento)
-- So preenche quando a hora estiver 0/NULL (nao sobrescreve horas ja salvas)
-- Aplica em /machine/update e /machine/status
-- Nao altera logica/visual do card (hora atual continua zerando na virada)
+- Nao sobrescreve baseline_hora/ultima_hora durante _cfgv2_apply_to_memory
+- Evita historico da hora anterior voltar zerado apos reload/deploy
