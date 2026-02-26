@@ -1,9 +1,8 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
-LAST_RECODE: 2026-02-21 20:15 (America/Bahia)
-MOTIVO: Corrigir salvamento de unidades e conversao (metro linear) garantindo compatibilidade no payload.
+LAST_RECODE: 2026-02-26 13:46 (America/Bahia)
+MOTIVO: Corrigir acessibilidade (labels associados a campos) para remover avisos no DevTools/Lighthouse.
 -->
-
 {% extends "base.html" %}
 
 {% block title %}Configuracao da Maquina{% endblock %}
@@ -45,18 +44,18 @@ MOTIVO: Corrigir salvamento de unidades e conversao (metro linear) garantindo co
 
   <div class="card">
     <form id="config-form">
-      <label class="mt-20">Dias ativos da maquina:</label>
+      <div class="mt-20" id="sec-dias-ativos">Dias ativos da maquina:</div>
       <div class="days-box" id="dias-ativos"></div>
       <div class="help-text">Usado para planejamento. Por enquanto, nao bloqueia a contagem automaticamente.</div>
 
-      <label class="mt-20">Turnos (ate 3) com pausas planejadas (almoco, cafe, setup):</label>
+      <div class="mt-20" id="sec-turnos">Turnos (ate 3) com pausas planejadas (almoco, cafe, setup):</div>
       <div id="shifts-container" style="display:flex;flex-direction:column;gap:12px;margin-top:10px;"></div>
       <div style="display:flex;justify-content:flex-start;gap:10px;margin-top:10px;flex-wrap:wrap;">
         <button id="btnAddShift" type="button" class="btn btn-secondary">Adicionar turno</button>
       </div>
 
       <div class="mt-20" id="shifts-summary-wrap" style="display:none;">
-        <label>Resumo (tempo planejado e metas):</label>
+        <div id="sec-resumo" style="font-weight:900;color:#0f172a;">Resumo (tempo planejado e metas):</div>
         <div class="card" style="margin-top:10px;padding:0;">
           <table class="summary-table" style="width:100%;border-collapse:collapse;">
             <thead>
@@ -74,32 +73,34 @@ MOTIVO: Corrigir salvamento de unidades e conversao (metro linear) garantindo co
         </div>
       </div>
 
-      <label class="mt-20">Tempo ideal por peca (segundos):</label>
+      <label class="mt-20" for="ideal_sec_per_piece">Tempo ideal por peca (segundos):</label>
       <input type="number" id="ideal_sec_per_piece" class="input" step="0.01" min="0.01" placeholder="Ex: 3.20" required>
       <div class="help-text">Necessario para Performance e OEE real.</div>
 
-      <label class="mt-20">Rampa Inicial (%):</label>
+      <label class="mt-20" for="rampa">Rampa Inicial (%):</label>
       <input type="number" id="rampa" min="0" max="100" required>
 
-      <label class="mt-20">Alerta de Parada por Inatividade (segundos sem producao):</label>
+      <label class="mt-20" for="no_count_stop_sec">Alerta de Parada por Inatividade (segundos sem producao):</label>
       <input type="number" id="no_count_stop_sec" class="input" min="5" step="1" placeholder="Ex: 60" required>
       <div class="help-text">Mesmo que a maquina esteja em AUTO/PRODUZINDO, se nao houver aumento de contagem por este tempo, o sistema considera PARADA.</div>
 
-      <label class="mt-20">Unidade de Producao (ate 2):</label>
+      <div class="mt-20" id="sec-unidades">Unidade de Producao (ate 2):</div>
       <div class="row">
         <div class="col">
+          <label for="unidade_1" style="display:block;margin-bottom:6px;">Unidade 1:</label>
           <select id="unidade_1" class="input">
             <option value="">-</option><option value="pcs">Unidade (pcs)</option><option value="m">Metro linear (m)</option><option value="m2">Metro quadrado (m2)</option>
           </select>
         </div>
         <div class="col">
+          <label for="unidade_2" style="display:block;margin-bottom:6px;">Unidade 2:</label>
           <select id="unidade_2" class="input">
             <option value="">-</option><option value="pcs">Unidade (pcs)</option><option value="m">Metro linear (m)</option><option value="m2">Metro quadrado (m2)</option>
           </select>
         </div>
       </div>
 
-      <label class="mt-20">Conversao (1 pcs = X metros) (use quando houver pcs e metros):</label>
+      <label class="mt-20" for="conv_m_por_pcs">Conversao (1 pcs = X metros) (use quando houver pcs e metros):</label>
       <input type="number" id="conv_m_por_pcs" class="input" step="0.001" min="0.001" placeholder="Ex: 0.85">
 
       <button class="btn btn-primary mt-20" type="submit">Salvar Configuracao</button>
@@ -114,16 +115,16 @@ MOTIVO: Corrigir salvamento de unidades e conversao (metro linear) garantindo co
       </div>
       <div class="modal-body">
         <form id="op-form">
-          <label>OS:</label><input type="text" id="op_os" class="input" required>
-          <label class="mt-20">Lote:</label><input type="text" id="op_lote" class="input" required>
-          <label class="mt-20">Operador:</label><input type="text" id="op_operador" class="input" required>
-          <label class="mt-20">Bobinas (opcional):</label>
+          <label for="op_os">OS:</label><input type="text" id="op_os" class="input" required>
+          <label class="mt-20" for="op_lote">Lote:</label><input type="text" id="op_lote" class="input" required>
+          <label class="mt-20" for="op_operador">Operador:</label><input type="text" id="op_operador" class="input" required>
+          <div class="mt-20" id="sec-bobinas" style="font-weight:900;color:#0f172a;">Bobinas (opcional):</div>
           <div class="help-text">Adicione uma ou mais bobinas em metros (somente numeros). Se ficar vazio, nenhuma bobina sera registrada.</div>
           <div id="op_bobinas_list" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;"></div>
           <button id="btnAddBobina" type="button" class="btn btn-secondary" style="margin-top:10px;">Adicionar bobina</button>
           <input type="hidden" id="op_bobina" value="">
-          <label class="mt-20">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
-          <label class="mt-20">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
+          <label class="mt-20" for="op_gr_fio">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
+          <label class="mt-20" for="op_obs">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
           <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px;">
             <button type="button" class="btn btn-secondary" id="btnCancelOp">Cancelar</button>
             <button type="submit" class="btn btn-primary" id="btnStartOp">Iniciar OP</button>
@@ -263,16 +264,22 @@ function renderShifts(){
 
     const lblName=document.createElement("label"); lblName.textContent="Nome do turno:";
     const inpName=document.createElement("input"); inpName.type="text"; inpName.className="input"; inpName.value=String(s.name||"");
+    inpName.id = `shift_${idx}_name`;
+    lblName.htmlFor = inpName.id;
     inpName.addEventListener("input",()=>{ markConfigDirty();  s.name = String(inpName.value||"").trim(); title.textContent = "Turno " + (s.name || shiftDefaultName(idx)); renderSummary(); atualizarTabelaLocal(); });
     col1.appendChild(lblName); col1.appendChild(inpName);
 
     const lblStart=document.createElement("label"); lblStart.textContent="Inicio:";
     const inpStart=document.createElement("input"); inpStart.type="time"; inpStart.className="input"; inpStart.value=String(s.start||"");
+    inpStart.id = `shift_${idx}_start`;
+    lblStart.htmlFor = inpStart.id;
     inpStart.addEventListener("change",()=>{ markConfigDirty();  s.start = String(inpStart.value||""); renderSummary(); atualizarTabelaLocal(); });
     col2.appendChild(lblStart); col2.appendChild(inpStart);
 
     const lblEnd=document.createElement("label"); lblEnd.textContent="Fim:";
     const inpEnd=document.createElement("input"); inpEnd.type="time"; inpEnd.className="input"; inpEnd.value=String(s.end||"");
+    inpEnd.id = `shift_${idx}_end`;
+    lblEnd.htmlFor = inpEnd.id;
     inpEnd.addEventListener("change",()=>{ markConfigDirty();  s.end = String(inpEnd.value||""); renderSummary(); atualizarTabelaLocal(); });
     col3.appendChild(lblEnd); col3.appendChild(inpEnd);
 
@@ -285,6 +292,8 @@ function renderShifts(){
     const cmeta=document.createElement("div"); cmeta.className="col";
     const lmeta=document.createElement("label"); lmeta.textContent="Meta do turno (pcs):";
     const imeta=document.createElement("input"); imeta.type="number"; imeta.className="input"; imeta.min="0"; imeta.step="1"; imeta.value=String(s.meta_pcs ?? 0);
+    imeta.id = `shift_${idx}_meta`;
+    lmeta.htmlFor = imeta.id;
     imeta.addEventListener("input",()=>{ markConfigDirty();  const v=Number(imeta.value); s.meta_pcs = (Number.isFinite(v) && v>=0) ? Math.floor(v) : 0; renderSummary(); atualizarTabelaLocal(); });
     cmeta.appendChild(lmeta); cmeta.appendChild(imeta);
     const cspacer=document.createElement("div"); cspacer.className="col";
@@ -309,14 +318,17 @@ function renderShifts(){
 
       const inName=document.createElement("input");
       inName.type="text"; inName.className="input"; inName.placeholder="Nome"; inName.value=String(b.name||"");
+      inName.setAttribute("aria-label","Nome da pausa");
       inName.addEventListener("input",()=>{ markConfigDirty();  b.name=String(inName.value||"").trim(); renderSummary(); atualizarTabelaLocal(); });
 
       const inStart=document.createElement("input");
       inStart.type="time"; inStart.className="input"; inStart.value=String(b.start||"");
+      inStart.setAttribute("aria-label","Inicio da pausa");
       inStart.addEventListener("change",()=>{ markConfigDirty();  b.start=String(inStart.value||""); renderSummary(); atualizarTabelaLocal(); });
 
       const inEnd=document.createElement("input");
       inEnd.type="time"; inEnd.className="input"; inEnd.value=String(b.end||"");
+      inEnd.setAttribute("aria-label","Fim da pausa");
       inEnd.addEventListener("change",()=>{ markConfigDirty();  b.end=String(inEnd.value||""); renderSummary(); atualizarTabelaLocal(); });
 
       const btnR=document.createElement("button");
@@ -480,6 +492,7 @@ function _setOpModalMode(mode){ opModalMode=(mode==="edit")?"edit":"new";
 function _createBobinaRow(value){
   const row=document.createElement("div"); row.style.display="flex"; row.style.gap="10px"; row.style.alignItems="center";
   const inp=document.createElement("input"); inp.type="number"; inp.min="0"; inp.step="1"; inp.className="input"; inp.placeholder="Metros"; inp.value=String(value||""); inp.style.flex="1";
+  inp.setAttribute("aria-label","Bobina (metros)");
   const btn=document.createElement("button"); btn.type="button"; btn.className="btn btn-secondary"; btn.textContent="Remover";
   btn.addEventListener("click",()=>{ row.remove(); _syncHiddenBobinaFirst(); });
   row.appendChild(inp); row.appendChild(btn); return row;
@@ -762,6 +775,7 @@ function atualizarTabelaLocal(){
     const tdRef=document.createElement("td");
     const input=document.createElement("input");
     input.type="number"; input.min="0"; input.step="1"; input.className="refugo-input"; input.value = ref;
+    input.setAttribute("aria-label", `Refugo da hora ${i}`);
     const podeEditar = (i < horaDiaAtual);
     input.disabled = !podeEditar;
 
