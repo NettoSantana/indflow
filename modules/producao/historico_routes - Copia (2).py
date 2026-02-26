@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 09:00 America/Bahia
-# MOTIVO: Detalhe-dia deve mostrar produzido por hora do status (producao_exibicao_24/refugo_por_hora) quando disponível, mantendo barra RUN/STOP como está.
+# LAST_RECODE: 2026-02-26 08:13 America/Bahia
+# MOTIVO: Detalhe-dia deve refletir a configuração (config_v2) e buscar produzido/meta na producao_horaria mesmo quando o banco gravou com machine_id diferente (scoped vs unscoped).
 
 
 from __future__ import annotations
@@ -1296,41 +1296,29 @@ def api_producao_detalhe_dia():
             except Exception:
                 pass
 
-
-            # ============================================================
-            # Fonte preferencial de "Prod" no detalhe-dia (dia atual):
-            # - Se o /status já tem producao_exibicao_24/refugo_por_hora (24h),
-            #   usamos esses arrays para preencher "produzido/refugo" por hora.
-            # - Isso garante que o "Prod" exibido no modal bata com o status,
-            #   mesmo quando producao_horaria não está persistindo/consultando certo.
-            # ============================================================
-            try:
-                if now_naive is not None and isinstance(machine_state, dict):
-                    prod24 = machine_state.get("producao_exibicao_24")
-                    if isinstance(prod24, list) and len(prod24) == 24:
-                        for hh in range(24):
-                            try:
-                                v = prod24[hh]
-                                if v is None:
-                                    continue
-                                hor[hh]["produzido"] = _safe_int(v, 0)
-                            except Exception:
-                                continue
-
-                    ref24 = machine_state.get("refugo_por_hora")
-                    if isinstance(ref24, list) and len(ref24) == 24:
-                        for hh in range(24):
-                            try:
-                                v = ref24[hh]
-                                if v is None:
-                                    continue
-                                hor[hh]["refugo"] = _safe_int(v, 0)
-                            except Exception:
-                                continue
-            except Exception:
-                pass
-
             # Monta resposta hora a hora
+
+            # ============================================================
+            # Override de produzido/refugo (dia atual)
+            # Fonte: machine_state (/status) -> producao_exibicao_24 e refugo_por_hora
+            #
+            # Observação:
+            # - Em alguns cenários, producao_exibicao_24 pode vir acumulado (turno ou dia).
+            #   Para evitar "herdar" na virada da hora, convertemos para delta por hora.
+            # - Meta (meta24) é usada para reancorar em horas NP/break (meta==0).
+            # ============================================================
+            produced_override = None
+            refugo_override = None
+            if now_naive is not None and isinstance(machine_state, dict):
+                v24 = machine_state.get("producao_exibicao_24")
+                if isinstance(v24, list) and len(v24) == 24:
+                    # Usa a meta atual do hor (já preenchida a partir da config) para ancorar NP/break
+                    meta_ref = [ _safe_int(hor.get(hh, {}).get("meta", 0), 0) for hh in range(24) ]
+                    produced_override = _deltaize_exibicao_24(v24, meta_ref)
+
+                r24 = machine_state.get("refugo_por_hora")
+                if isinstance(r24, list) and len(r24) == 24:
+                    refugo_override = [ _safe_int(x, 0) for x in r24 ]
 
             horas = []
             for h in range(24):
@@ -1349,6 +1337,17 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
+                # Override do dia atual: usa arrays do /status quando disponíveis
+                if produced_override is not None:
+                    try:
+                        produzido = _safe_int(produced_override[h], 0)
+                    except Exception:
+                        pass
+                if refugo_override is not None:
+                    try:
+                        refugo = _safe_int(refugo_override[h], 0)
+                    except Exception:
+                        pass
 
 
 
@@ -1446,6 +1445,43 @@ def api_producao_detalhe_dia():
                 pass
 
 
+
+
+
+def _deltaize_exibicao_24(values_24, meta24=None):
+    """Converte um array 24h possivelmente acumulado em valores por-hora (delta).
+
+    Regra:
+    - Se values_24 já for por-hora, o delta ainda funciona (mantém o mesmo na maior parte dos casos).
+    - Quando meta24[hh] == 0 (NP/break), zera e reancora para não "herdar" na hora seguinte.
+    """
+    out = [0] * 24
+    prev = None
+    for hh in range(24):
+        try:
+            cur = values_24[hh]
+        except Exception:
+            cur = None
+
+        cur_i = _safe_int(cur, 0) if cur is not None else 0
+
+        # Hora não programada / break: zera e reancora no valor atual
+        if isinstance(meta24, list) and len(meta24) == 24:
+            try:
+                if _safe_int(meta24[hh], 0) <= 0:
+                    out[hh] = 0
+                    prev = cur_i
+                    continue
+            except Exception:
+                pass
+
+        if prev is None:
+            out[hh] = cur_i if cur_i > 0 else 0
+        else:
+            d = cur_i - prev
+            out[hh] = d if d > 0 else 0
+        prev = cur_i
+    return out
 
 def _distribute_int_total(total: int, weights: list[int] | None = None, n: int = 24) -> list[int]:
     if n <= 0:
@@ -1755,4 +1791,3 @@ def api_producao_backfill_horaria():
 def historico_page():
     return render_template("historico.html")
 ###
-

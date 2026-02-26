@@ -1,5 +1,9 @@
-﻿fix(historico): Prod por hora no detalhe-dia sem herdar valor acumulado
+﻿fix(a11y): associar labels aos campos no config_maquina_for
 
-- Converte producao_exibicao_24 (possivelmente acumulado) em delta por hora
-- Reancora em horas NP/break (meta==0) para nao carregar para a proxima hora
-- Mantem barra RUN/STOP como esta
+Corrige avisos "No label associated with a form field" no DevTools/Lighthouse
+
+Adiciona for/id nos campos fixos (ideal, rampa, inatividade, conversao, OP)
+
+Ajusta seções (labels de título viram div) para evitar label sem input
+
+No JS: adiciona id + htmlFor nos inputs de turnos; aria-label em pausas/bobinas/refugo
