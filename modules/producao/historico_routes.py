@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 09:30 America/Bahia
-# MOTIVO: Mostrar produzido por hora no detalhe-dia sem carregar valor da hora anterior; na virada de hora, a nova hora deve iniciar zerada (até haver produção).
+# LAST_RECODE: 2026-02-26 09:00 America/Bahia
+# MOTIVO: Detalhe-dia deve mostrar produzido por hora do status (producao_exibicao_24/refugo_por_hora) quando disponível, mantendo barra RUN/STOP como está.
 
 
 from __future__ import annotations
@@ -455,6 +455,136 @@ def _build_meta_24_from_machine_state(machine_state: dict | None) -> list[int] |
 
     return meta24
 
+def _parse_hhmm_to_min(hhmm: str) -> int | None:
+    s = (hhmm or '').strip()
+    if not s or ':' not in s:
+        return None
+    try:
+        hh = int(s.split(':')[0])
+        mm = int(s.split(':')[1])
+        if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+            return None
+        return hh * 60 + mm
+    except Exception:
+        return None
+
+def _intervals_intersect(a_s: int, a_e: int, b_s: int, b_e: int) -> bool:
+    return (a_s < b_e) and (b_s < a_e)
+
+def _build_meta_24_from_config_v2(cfg: dict | None, data_ref: date) -> list[int] | None:
+    """Monta meta[24] a partir do config_v2 (shifts + breaks).
+
+    Fonte da verdade: cfg['config_v2'].
+    Regras:
+    - Se active_days existir e data_ref nao estiver ativa: meta 0 para 24h
+    - Para cada shift: horas dentro do shift e fora dos breaks recebem meta constante (meta_pcs / horas_planejadas)
+    - Horas dentro de breaks recebem 0
+    - Turnos que cruzam meia-noite sao suportados (ex.: 22:00-06:00)
+    """
+    if not isinstance(cfg, dict):
+        return None
+
+    cv2 = cfg.get('config_v2') if isinstance(cfg.get('config_v2'), dict) else None
+    if cv2 is None:
+        # compat: algumas bases podem armazenar shifts no root
+        cv2 = cfg if isinstance(cfg.get('shifts'), list) else None
+    if cv2 is None:
+        return None
+
+    active_days = cv2.get('active_days')
+    if isinstance(active_days, list) and active_days:
+        try:
+            dow = int(data_ref.isoweekday())
+            if dow not in [int(x) for x in active_days if isinstance(x, (int, float, str)) and str(x).strip() != '']:
+                return [0] * 24
+        except Exception:
+            pass
+
+    shifts = cv2.get('shifts')
+    if not isinstance(shifts, list) or not shifts:
+        return None
+
+    meta24 = [0] * 24
+
+    for sh in shifts:
+        if not isinstance(sh, dict):
+            continue
+        s_min = _parse_hhmm_to_min(str(sh.get('start') or ''))
+        e_min = _parse_hhmm_to_min(str(sh.get('end') or ''))
+        if s_min is None or e_min is None:
+            continue
+        if e_min <= s_min:
+            e_min += 1440  # vira o dia
+
+        # breaks (mapear para o mesmo timeline do shift)
+        br_intervals: list[tuple[int, int]] = []
+        brs = sh.get('breaks')
+        if isinstance(brs, list):
+            for br in brs:
+                if not isinstance(br, dict):
+                    continue
+                bs = _parse_hhmm_to_min(str(br.get('start') or ''))
+                be = _parse_hhmm_to_min(str(br.get('end') or ''))
+                if bs is None or be is None:
+                    continue
+                if be <= bs:
+                    be += 1440
+                # se o break estiver antes do inicio e o shift virar, joga pro dia seguinte
+                if bs < s_min and e_min > 1440:
+                    bs += 1440
+                    be += 1440
+                br_intervals.append((bs, be))
+
+        meta_pcs = _safe_int(sh.get('meta_pcs'), 0)
+        planned_min = None
+        calc = sh.get('calc')
+        if isinstance(calc, dict):
+            planned_min = _safe_int(calc.get('planned_min'), 0)
+        if planned_min is None or planned_min <= 0:
+            # fallback: duracao - breaks
+            dur = e_min - s_min
+            br_total = 0
+            for bs, be in br_intervals:
+                br_total += max(0, be - bs)
+            planned_min = max(0, dur - br_total)
+
+        planned_hours = planned_min / 60.0 if planned_min else 0.0
+        if meta_pcs <= 0 or planned_hours <= 0:
+            meta_h = 0
+        else:
+            # manter o mesmo comportamento da tela 24h: meta constante arredondada
+            try:
+                meta_h = int(round(float(meta_pcs) / float(planned_hours)))
+            except Exception:
+                meta_h = int(round(meta_pcs / max(planned_hours, 1.0)))
+
+        # aplicar nas 24 horas do relogio (considerar timeline dia0 e dia1)
+        for hh in range(24):
+            h0_s = hh * 60
+            h0_e = (hh + 1) * 60
+            h1_s = h0_s + 1440
+            h1_e = h0_e + 1440
+
+            inside = _intervals_intersect(h0_s, h0_e, s_min, e_min) or _intervals_intersect(h1_s, h1_e, s_min, e_min)
+            if not inside:
+                continue
+
+            in_break = False
+            for bs, be in br_intervals:
+                if _intervals_intersect(h0_s, h0_e, bs, be) or _intervals_intersect(h1_s, h1_e, bs, be):
+                    in_break = True
+                    break
+
+            if in_break:
+                # se outro turno ja colocou meta positiva, nao derruba; mas break do turno atual zera a hora dele
+                # como os turnos nao deveriam se sobrepor, podemos zerar direto
+                meta24[hh] = 0
+            else:
+                if meta_h > meta24[hh]:
+                    meta24[hh] = meta_h
+
+    return meta24
+
 
 def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
     if not intervals:
@@ -643,6 +773,22 @@ def _fetch_run_intervals_from_state_events(
 
     return _merge_intervals(intervals)
 
+
+def _fetch_run_intervals_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: date) -> list[tuple[datetime, datetime]]:
+    """Busca intervals RUN/STOP tentando múltiplos IDs (scoped/unscoped)."""
+    tried: set[str] = set()
+    for mid in machine_ids:
+        mid = (mid or "").strip()
+        if not mid or mid in tried:
+            continue
+        tried.add(mid)
+        try:
+            itv = _fetch_run_intervals_from_state_events(conn, mid, data_ref)
+            if itv:
+                return itv
+        except Exception:
+            continue
+    return []
 
 def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
     out: dict[int, dict] = {h: {"meta": 0, "produzido": 0, "refugo": 0, "baseline_esp": 0, "esp_last": 0} for h in range(24)}
@@ -1053,23 +1199,31 @@ def api_producao_detalhe_dia():
 
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
-            run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
+            # Tenta IDs alternativos para resolver divergência scoped/unscoped
+            cand_ids = [eff_mid, machine_id]
+            if "::" in (machine_id or ""):
+                try:
+                    cand_ids.append((machine_id.split("::", 1)[1] or "").strip())
+                except Exception:
+                    pass
+
+            run_intervals = _fetch_run_intervals_multi(conn, cand_ids, data_ref)
             # Tabela horaria (meta/produzido/refugo)
-            hor = _fetch_horaria(conn, eff_mid, data_ref)
+            hor = _fetch_horaria_multi(conn, cand_ids, data_ref)
 
             # ============================================================
-            # Meta por Hora (fonte da verdade: estado/config da maquina)
+            # ============================================================
+            # Meta por Hora (fonte da verdade: config_v2.shifts)
             # Regra:
-            # - Usa meta_por_hora + turno_inicio do estado retornado por get_machine()
-            # - Converte para vetor de 24h do relogio (00..23)
-            # - Aplica no JSON hours[].meta (sem recalcular em banco)
-            #
-            # Observacao:
-            # - Mantemos produzido/refugo do banco sem recalcular
-            # - Se nao houver meta_por_hora/turno_inicio, mantem meta do banco (compatibilidade)
+            # - Deriva meta[24] a partir de config_v2 (shifts + breaks + active_days)
+            # - Breaks zeram a meta na(s) hora(s) afetada(s)
+            # - Turnos que cruzam meia-noite sao suportados (ex.: 22:00-06:00)
+            # - Se config_v2 nao existir, cai para compatibilidade (meta_por_hora + turno_inicio no estado)
             # ============================================================
             try:
-                meta24 = _build_meta_24_from_machine_state(machine_state)
+                meta24 = _build_meta_24_from_config_v2(cfg, data_ref)
+                if meta24 is None:
+                    meta24 = _build_meta_24_from_machine_state(machine_state)
                 if meta24 is not None:
                     for hh in range(24):
                         hor[hh]["meta"] = _safe_int(meta24[hh], 0)
@@ -1142,6 +1296,40 @@ def api_producao_detalhe_dia():
             except Exception:
                 pass
 
+
+            # ============================================================
+            # Fonte preferencial de "Prod" no detalhe-dia (dia atual):
+            # - Se o /status já tem producao_exibicao_24/refugo_por_hora (24h),
+            #   usamos esses arrays para preencher "produzido/refugo" por hora.
+            # - Isso garante que o "Prod" exibido no modal bata com o status,
+            #   mesmo quando producao_horaria não está persistindo/consultando certo.
+            # ============================================================
+            try:
+                if now_naive is not None and isinstance(machine_state, dict):
+                    prod24 = machine_state.get("producao_exibicao_24")
+                    if isinstance(prod24, list) and len(prod24) == 24:
+                        for hh in range(24):
+                            try:
+                                v = prod24[hh]
+                                if v is None:
+                                    continue
+                                hor[hh]["produzido"] = _safe_int(v, 0)
+                            except Exception:
+                                continue
+
+                    ref24 = machine_state.get("refugo_por_hora")
+                    if isinstance(ref24, list) and len(ref24) == 24:
+                        for hh in range(24):
+                            try:
+                                v = ref24[hh]
+                                if v is None:
+                                    continue
+                                hor[hh]["refugo"] = _safe_int(v, 0)
+                            except Exception:
+                                continue
+            except Exception:
+                pass
+
             # Monta resposta hora a hora
 
             horas = []
@@ -1175,9 +1363,6 @@ def api_producao_detalhe_dia():
                         "state": zstate,
                     }]
                     tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = 0, 0, 0
-                    # FIX: hora futura/recem-iniciada nao deve herdar produzido/refugo da hora anterior
-                    produzido = 0
-                    refugo = 0
                     horas.append(
                         {
                             "hour": h,
@@ -1222,15 +1407,6 @@ def api_producao_detalhe_dia():
 
                 tempo_produzindo_sec, tempo_parado_sec, qtd_paradas = _calc_seg_metrics(segs)
 
-                # FIX: na virada de hora, a nova hora deve iniciar zerada ate haver producao/refugo.
-                # Evita carregar o valor acumulado da hora anterior por baseline ainda nao reancorado.
-                if now_naive is not None and hs <= now_naive < he:
-                    try:
-                        if (now_naive - hs).total_seconds() < 120 and int(tempo_produzindo_sec or 0) == 0:
-                            produzido = 0
-                            refugo = 0
-                    except Exception:
-                        pass
                 horas.append(
                     {
                         "hour": h,
@@ -1313,6 +1489,26 @@ def _distribute_int_total(total: int, weights: list[int] | None = None, n: int =
                 k += 1
     return out
 
+
+def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: str) -> dict[int, dict]:
+    """Tenta carregar producao_horaria para múltiplos machine_id.
+    Retorna o primeiro conjunto não-vazio. Isso resolve casos onde:
+    - producao_horaria foi gravada com machine_id unscoped (maquina005)
+    - a UI chama o endpoint com scoped (<cliente>::maquina005) ou vice-versa
+    """
+    tried: set[str] = set()
+    for mid in machine_ids:
+        mid = (mid or "").strip()
+        if not mid or mid in tried:
+            continue
+        tried.add(mid)
+        try:
+            hor = _fetch_horaria(conn, mid, data_ref)
+            if isinstance(hor, dict) and len(hor) > 0:
+                return hor
+        except Exception:
+            continue
+    return {}
 
 def _backfill_horaria_for_day(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
     """
@@ -1559,3 +1755,4 @@ def api_producao_backfill_horaria():
 def historico_page():
     return render_template("historico.html")
 ###
+
