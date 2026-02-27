@@ -1,5 +1,4 @@
-﻿fix(producao_horaria): impedir heranca entre turnos e restaurar carregamento
+﻿fix(producao_horaria): evitar zerar quando cliente_id muda
 
-- Mantem logica estavel de calculo e persistencia existente
-- Escopa a chave de producao_horaria por turno (nome + inicio/fim) para nao misturar A/B/C
-- Nao altera historico, rastro ou front
+- Resolve machine_id real do dia pela tabela producao_horaria (SUM/COUNT) antes de carregar/gravar
+- Mantem leitura e persistencia na mesma chave quando existe historico com outro cliente_id

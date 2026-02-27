@@ -1,6 +1,9 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-26 14:00:00 -0300
-# MOTIVO: evitar zerar producao_por_hora quando cliente_id muda; resolver carregamento/persistencia com fallback por dados existentes
+# LAST_RECODE: 2026-02-26 22:45:33 -0300
+# MOTIVO: corrigir imports ausentes (time, timedelta, datetime, ZoneInfo) para evitar zerar o backend por NameError
+
+from datetime import datetime, timedelta, time
+from zoneinfo import ZoneInfo
 
 UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 
