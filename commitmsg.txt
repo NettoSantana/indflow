@@ -1,6 +1,5 @@
-﻿fix(producao_horaria): persistir por hora do dia (0-23) e evitar heranca entre turnos
+﻿fix(producao_horaria): impedir heranca entre turnos e restaurar carregamento
 
-- Grava producao_horaria usando hora do relogio (0..23), nao indice do turno
-- Carrega do banco em 24h e mapeia para os slots do turno pelo inicio do slot (HH:MM - HH:MM)
-- Atualiza producao_exibicao_24 na hora correta
-- Ajusta recalc diaria (patch) para usar machine_id escopado e meta_dia
+- Mantem logica estavel de calculo e persistencia existente
+- Escopa a chave de producao_horaria por turno (nome + inicio/fim) para nao misturar A/B/C
+- Nao altera historico, rastro ou front
