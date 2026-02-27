@@ -1,4 +1,5 @@
-﻿fix(machine_calc): corrigir imports ausentes (time/timedelta) que zeravam o backend
+﻿fix(machine_calc): recalc diaria usa machine_id escopado para nao zerar
 
-- Adiciona imports de datetime/timedelta/time e ZoneInfo no topo do modulo
-- Mantem toda a logica de persistencia existente, sem mexer em historico/front
+- Ajusta hook de recalc diaria para usar cliente_id::machine_id
+- Evita ler/gravar em chaves diferentes entre producao_horaria e producao_diaria
+- Nao altera historico, front ou rastro
