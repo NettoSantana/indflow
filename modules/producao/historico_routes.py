@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 15:30 America/Bahia
-# MOTIVO: Detalhe-dia deve usar producao_horaria para horas fechadas e evitar override volatil do /status (producao_exibicao_24) que some em restart/deploy.
+# LAST_RECODE: 2026-02-26 23:16 America/Bahia
+# MOTIVO: Corrigir leitura da producao_horaria no detalhe-dia quando o machine_id do banco (scoped/unscoped) diverge do machine_id da URL; evita retornar 24 zeros e garante persistencia da hora anterior.
 
 
 from __future__ import annotations
@@ -1541,12 +1541,26 @@ def _distribute_int_total(total: int, weights: list[int] | None = None, n: int =
     return out
 
 
-def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: str) -> dict[int, dict]:
+def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: date) -> dict[int, dict]:
     """Tenta carregar producao_horaria para múltiplos machine_id.
-    Retorna o primeiro conjunto não-vazio. Isso resolve casos onde:
-    - producao_horaria foi gravada com machine_id unscoped (maquina005)
-    - a UI chama o endpoint com scoped (<cliente>::maquina005) ou vice-versa
+
+    Importante:
+    - _fetch_horaria() sempre retorna um dict com 24 chaves (0-23), mesmo quando não há linhas no banco.
+      Então, aqui só aceitamos o resultado quando houver pelo menos 1 campo != 0 (produzido/meta/refugo/baseline/esp).
     """
+    def _has_any_data(h: dict[int, dict]) -> bool:
+        try:
+            for _, row in (h or {}).items():
+                for k in ("produzido", "meta", "refugo", "baseline_esp", "esp_last"):
+                    try:
+                        if int(row.get(k, 0) or 0) != 0:
+                            return True
+                    except Exception:
+                        continue
+        except Exception:
+            return False
+        return False
+
     tried: set[str] = set()
     for mid in machine_ids:
         mid = (mid or "").strip()
@@ -1555,12 +1569,11 @@ def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_
         tried.add(mid)
         try:
             hor = _fetch_horaria(conn, mid, data_ref)
-            if isinstance(hor, dict) and len(hor) > 0:
+            if isinstance(hor, dict) and _has_any_data(hor):
                 return hor
         except Exception:
             continue
     return {}
-
 def _backfill_horaria_for_day(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
     """
     Gera 24 linhas em producao_horaria a partir de producao_diaria, quando nao existir horaria no dia.
