@@ -1,4 +1,4 @@
-﻿fix(producao_horaria): evitar zerar quando cliente_id muda
+﻿fix(machine_calc): corrigir imports ausentes (time/timedelta) que zeravam o backend
 
-- Resolve machine_id real do dia pela tabela producao_horaria (SUM/COUNT) antes de carregar/gravar
-- Mantem leitura e persistencia na mesma chave quando existe historico com outro cliente_id
+- Adiciona imports de datetime/timedelta/time e ZoneInfo no topo do modulo
+- Mantem toda a logica de persistencia existente, sem mexer em historico/front
