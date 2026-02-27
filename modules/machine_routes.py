@@ -1,6 +1,7 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
-# LAST_RECODE: 2026-02-26 21:00 America/Bahia
-# MOTIVO: Persistir producao por hora no SQLite (baseline_hora + producao_horaria) para manter horas anteriores congeladas e não perder após deploy.
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
+# LAST_RECODE: 2026-02-25 15:20 America/Bahia
+# MOTIVO: Corrigir meta do dia no /machine/status (evitar multiplicar meta_hora por horas indevidas), expondo meta_dia (soma dos turnos) e usando meta_turno_ativo apenas para meta_por_hora do turno atual.
+
 import os
 import json
 import sqlite3
@@ -97,165 +98,6 @@ def _ensure_machine_state_event_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_mse_cid_mid_day ON machine_state_event (cliente_id, effective_machine_id, data_ref, ts_ms)"
     )
 
-
-def _ensure_baseline_hora_schema(conn: sqlite3.Connection) -> None:
-    """Garante tabelas/colunas necessárias para persistência por hora."""
-    # Baseline por hora: permite calcular produzido_hora = esp_absoluto - baseline_hora
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS baseline_hora ("
-        "data_ref TEXT NOT NULL,"
-        "hora_idx INTEGER NOT NULL,"
-        "machine_id TEXT NOT NULL,"
-        "cliente_id TEXT,"
-        "baseline_esp INTEGER NOT NULL,"
-        "updated_at TEXT"
-        ")"
-    )
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_baseline_hora "
-        "ON baseline_hora(data_ref, hora_idx, machine_id, COALESCE(cliente_id,''))"
-    )
-
-    # Produção por hora (snapshot): usado pelo Histórico
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS producao_horaria ("
-        "data_ref TEXT NOT NULL,"
-        "hora_idx INTEGER NOT NULL,"
-        "machine_id TEXT NOT NULL,"
-        "cliente_id TEXT,"
-        "produzido INTEGER NOT NULL DEFAULT 0,"
-        "meta INTEGER NOT NULL DEFAULT 0,"
-        "updated_at TEXT"
-        ")"
-    )
-    conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_producao_horaria "
-        "ON producao_horaria(data_ref, hora_idx, machine_id, COALESCE(cliente_id,''))"
-    )
-
-    # Migrações defensivas: adiciona colunas se tabela já existia com schema antigo
-    try:
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(producao_horaria)").fetchall()]
-    except Exception:
-        cols = []
-    if "cliente_id" not in cols:
-        try:
-            conn.execute("ALTER TABLE producao_horaria ADD COLUMN cliente_id TEXT")
-        except Exception:
-            pass
-    if "meta" not in cols:
-        try:
-            conn.execute("ALTER TABLE producao_horaria ADD COLUMN meta INTEGER NOT NULL DEFAULT 0")
-        except Exception:
-            pass
-    if "updated_at" not in cols:
-        try:
-            conn.execute("ALTER TABLE producao_horaria ADD COLUMN updated_at TEXT")
-        except Exception:
-            pass
-
-    try:
-        bcols = [r[1] for r in conn.execute("PRAGMA table_info(baseline_hora)").fetchall()]
-    except Exception:
-        bcols = []
-    if "cliente_id" not in bcols:
-        try:
-            conn.execute("ALTER TABLE baseline_hora ADD COLUMN cliente_id TEXT")
-        except Exception:
-            pass
-    if "updated_at" not in bcols:
-        try:
-            conn.execute("ALTER TABLE baseline_hora ADD COLUMN updated_at TEXT")
-        except Exception:
-            pass
-
-
-def _persist_producao_horaria_snapshot(
-    machine_id: str,
-    cliente_id: str | None,
-    ts_ms: int,
-    esp_absoluto: int,
-    meta_hora: int = 0,
-) -> None:
-    """
-    Persistência forte por hora.
-    - Garante baseline por hora no primeiro evento da hora.
-    - Atualiza 'produzido' da hora como diff do ESP absoluto.
-    Isso garante que:
-    - A hora anterior fique registrada (não some com deploy).
-    - A hora atual continue atualizando.
-    """
-    try:
-        dt_evt = datetime.fromtimestamp(int(ts_ms) / 1000, TZ_BAHIA)
-        data_ref = dia_operacional_ref_str(dt_evt)
-        hora_idx = int(dt_evt.hour)
-        mid = _norm_machine_id(machine_id)
-        cid = str(cliente_id).strip() if cliente_id else None
-        updated_at = dt_evt.isoformat()
-
-        conn = get_db()
-        try:
-            _ensure_baseline_hora_schema(conn)
-
-            # Baseline da hora: se não existir, grava (primeiro evento da hora)
-            row = conn.execute(
-                "SELECT baseline_esp FROM baseline_hora "
-                "WHERE data_ref=? AND hora_idx=? AND machine_id=? AND COALESCE(cliente_id,'')=COALESCE(?, '')",
-                (data_ref, hora_idx, mid, cid),
-            ).fetchone()
-
-            if row and row[0] is not None:
-                base = int(row[0])
-            else:
-                base = int(esp_absoluto)
-                conn.execute(
-                    "INSERT OR REPLACE INTO baseline_hora(data_ref, hora_idx, machine_id, cliente_id, baseline_esp, updated_at) "
-                    "VALUES(?,?,?,?,?,?)",
-                    (data_ref, hora_idx, mid, cid, base, updated_at),
-                )
-
-            produzido = int(esp_absoluto) - int(base)
-            if produzido < 0:
-                produzido = 0
-
-            conn.execute(
-                "INSERT OR REPLACE INTO producao_horaria(data_ref, hora_idx, machine_id, cliente_id, produzido, meta, updated_at) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (data_ref, hora_idx, mid, cid, int(produzido), int(meta_hora or 0), updated_at),
-            )
-
-            conn.commit()
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
-def _persist_snapshot_from_machine(m: dict, machine_id: str, ts_ms: int) -> None:
-    """Wrapper seguro para persistir snapshot usando estado da máquina em memória."""
-    try:
-        esp_abs = m.get("esp_absoluto", None)
-        if esp_abs is None:
-            esp_abs = m.get("esp", None)
-        if esp_abs is None:
-            return
-        try:
-            esp_abs = int(esp_abs)
-        except Exception:
-            return
-
-        try:
-            meta_hora = int(m.get("meta_hora_pcs", m.get("meta_hora", m.get("meta_por_hora_atual", 0))) or 0)
-        except Exception:
-            meta_hora = 0
-
-        cid = m.get("cliente_id") or None
-        _persist_producao_horaria_snapshot(machine_id=str(machine_id), cliente_id=cid, ts_ms=int(ts_ms), esp_absoluto=int(esp_abs), meta_hora=int(meta_hora))
-    except Exception:
-        pass
 
 def _get_last_machine_state(conn: sqlite3.Connection, effective_machine_id: str, cliente_id: str | None = None) -> dict | None:
     try:
@@ -1747,15 +1589,13 @@ def _cfgv2_apply_to_memory(m: dict, cfg_v2: dict):
     m["meta_por_hora"] = metas
 
     # runtime
-    # Nao resetar baseline_hora/producao_hora ao aplicar config_v2.
-    # Esses campos sao controlados pelo fluxo de contagem e persistencia (evento/status).
-    if m.get("baseline_hora") is None:
-        m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
+    m["baseline_hora"] = int(m.get("esp_absoluto", 0) or 0)
     try:
-        if m.get("ultima_hora") is None:
-            m["ultima_hora"] = calcular_ultima_hora_idx(m)
+        m["ultima_hora"] = calcular_ultima_hora_idx(m)
     except Exception:
         pass
+    m["producao_hora"] = 0
+    m["percentual_hora"] = 0
 
 @machine_bp.route("/machine/config", methods=["POST"])
 def configurar_maquina():
@@ -2141,10 +1981,6 @@ def update_machine():
 
 
     atualizar_producao_hora(m)
-
-    # Persistencia por hora (Historico): grava snapshot no banco a cada update do ESP
-    _persist_snapshot_from_machine(m, machine_id=str(machine_id), ts_ms=int(effective_ts_ms))
-
 
     # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
     try:
@@ -2914,13 +2750,6 @@ def machine_status():
 
     atualizar_producao_hora(m)
 
-    # Persistencia por hora (Historico): polling do front ajuda a congelar horas mesmo sem novos eventos do ESP
-    try:
-        _persist_snapshot_from_machine(m, machine_id=str(machine_id), ts_ms=int(now_bahia().timestamp() * 1000))
-    except Exception:
-        pass
-
-
     # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
     try:
         dia_ref_pd = dia_operacional_ref_str(now_bahia())
@@ -3217,4 +3046,4 @@ def historico_producao_api():
 # - Mantem logica de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
-# git pufgffggg
+# git pufgf
