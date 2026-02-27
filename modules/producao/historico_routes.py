@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-27 00:00 America/Bahia
-# MOTIVO: Fixar referencia de data do Historico (/api/producao/historico) usando MAX(data_ref) em producao_diaria para evitar 'amanha' zerado por divergencia de timezone do servidor.
+# LAST_RECODE: 2026-02-27 00:16 America/Bahia
+# MOTIVO: impedir exibicao de dia futuro/zerado no historico (ancorar em ultimo dia com producao real)
 
 
 from __future__ import annotations
@@ -73,32 +73,6 @@ def _get_conn() -> sqlite3.Connection:
 
     db_path = os.environ.get("INDFLOW_DB_PATH") or os.environ.get("DB_PATH") or "/data/indflow.db"
     return _sqlite_connect(db_path)
-
-
-
-def _max_data_ref_diaria(conn: sqlite3.Connection, machine_id: str) -> date | None:
-    """Retorna o maior data_ref (YYYY-MM-DD) registrado em producao_diaria para a maquina.
-
-    Usado para ancorar o 'hoje' do Historico quando o timezone do servidor diverge do horario local.
-    """
-    try:
-        row = conn.execute(
-            "SELECT MAX(data_ref) AS max_ref FROM producao_diaria WHERE machine_id = ?",
-            (machine_id,),
-        ).fetchone()
-        if not row:
-            return None
-        max_ref = row["max_ref"] if isinstance(row, sqlite3.Row) else (row[0] if row else None)
-        if not max_ref:
-            return None
-        try:
-            return date.fromisoformat(str(max_ref))
-        except Exception:
-            # ultimo fallback: parse manual
-            s = str(max_ref).strip()[:10]
-            return date.fromisoformat(s)
-    except Exception:
-        return None
 
 
 def _hhmmss_to_sec(s: str) -> int:
@@ -918,6 +892,107 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
 
     return out
 
+def _horaria_has_rows(conn: sqlite3.Connection, machine_id: str, data_ref) -> bool:
+    """Retorna True se houver ao menos 1 linha persistida na producao_horaria/refugo_horaria para (machine_id, data_ref).
+    Importante: nao usa 'meta' porque a meta pode ser injetada por config e nao indica persistencia."""
+    try:
+        d = data_ref.isoformat() if hasattr(data_ref, 'isoformat') else str(data_ref)
+    except Exception:
+        d = str(data_ref)
+
+    try:
+        if _table_exists(conn, 'producao_horaria'):
+            col = _resolve_data_col(conn, 'producao_horaria')
+            try:
+                cnt = _safe_int(_fetch_scalar(conn, f"SELECT COUNT(1) FROM producao_horaria WHERE machine_id=? AND {col}=?", (machine_id, d), default=0), 0)
+            except Exception:
+                cnt = 0
+            if cnt > 0:
+                return True
+    except Exception:
+        pass
+
+    try:
+        if _table_exists(conn, 'refugo_horaria'):
+            col = _resolve_data_col(conn, 'refugo_horaria')
+            try:
+                cnt = _safe_int(_fetch_scalar(conn, f"SELECT COUNT(1) FROM refugo_horaria WHERE machine_id=? AND {col}=?", (machine_id, d), default=0), 0)
+            except Exception:
+                cnt = 0
+            if cnt > 0:
+                return True
+    except Exception:
+        pass
+
+    return False
+
+def _parse_hora_hhmm(value: str):
+    try:
+        s = (value or '').strip()
+        if not s:
+            return None
+        h = int(s.split(':', 1)[0])
+        if 0 <= h <= 23:
+            return h
+    except Exception:
+        return None
+    return None
+
+def _remap_horaria_turno_idx_para_abs(hor: dict[int, dict], machine_state: dict, cfg: dict) -> dict[int, dict]:
+    """Se a tabela producao_horaria usa hora_idx do turno (0..len(horas_turno)-1),
+    remapeia para hora absoluta do dia (0..23) usando turno_inicio/active_shift.start."""
+    try:
+        shift_slots = machine_state.get('horas_turno') if isinstance(machine_state, dict) else None
+        shift_len = len(shift_slots) if isinstance(shift_slots, list) else None
+    except Exception:
+        shift_len = None
+
+    if not shift_len or shift_len < 1 or shift_len > 24:
+        return hor
+
+    turno_inicio = None
+    try:
+        turno_inicio = machine_state.get('turno_inicio')
+    except Exception:
+        turno_inicio = None
+    if not turno_inicio:
+        try:
+            turno_inicio = (cfg or {}).get('active_shift', {}).get('start')
+        except Exception:
+            turno_inicio = None
+
+    h0 = _parse_hora_hhmm(str(turno_inicio)) if turno_inicio else None
+    if h0 is None or h0 == 0:
+        return hor
+
+    # Detecta padrao: dados so aparecem em 0..shift_len-1 (idx de turno)
+    nz = []
+    try:
+        for hh, v in (hor or {}).items():
+            if not isinstance(v, dict):
+                continue
+            if _safe_int(v.get('produzido'), 0) != 0 or _safe_int(v.get('refugo'), 0) != 0 or _safe_int(v.get('baseline_esp'), 0) != 0 or _safe_int(v.get('esp_last'), 0) != 0:
+                nz.append(int(hh))
+    except Exception:
+        nz = []
+
+    if not nz:
+        return hor
+
+    if max(nz) >= shift_len:
+        return hor
+
+    # Remapeia idx do turno para hora absoluta
+    base = {h: {'meta': 0, 'produzido': 0, 'refugo': 0, 'baseline_esp': 0, 'esp_last': 0} for h in range(24)}
+    for idx in range(shift_len):
+        abs_h = (h0 + idx) % 24
+        try:
+            base[abs_h] = hor.get(idx) or base[abs_h]
+        except Exception:
+            pass
+
+    return base
+
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
     col = _resolve_data_col(conn, "refugo_horaria")
     tentativas = [
@@ -1114,6 +1189,65 @@ if callable(init_db):
     except Exception:
         pass
 
+def _ultimo_dia_com_producao_real(conn: sqlite3.Connection, machine_id: str) -> date | None:
+    """Retorna o ultimo dia (data_ref) com produzido > 0 para a maquina.
+
+    Isso evita exibir "amanha" zerado quando o servidor roda em timezone diferente
+    ou quando ainda nao houve producao no dia corrente.
+    """
+    try:
+        col = _resolve_data_col(conn, "producao_diaria")
+    except Exception:
+        col = "data_ref"
+
+    mid_raw = (machine_id or "").strip()
+    mid_uns = mid_raw.split("::", 1)[1] if "::" in mid_raw else mid_raw
+
+    # Mesma estrategia do _diaria_do_dia: considera id efetivo e variacoes.
+    mids = set()
+    if mid_raw:
+        mids.add(str(mid_raw))
+
+    like_scoped = None
+    like_legacy = None
+    if "::" not in mid_raw and mid_uns:
+        like_scoped = f"%::{mid_uns.lower()}"
+        like_legacy = f"%:{mid_uns.lower()}"
+
+    where = [f"{col} IS NOT NULL", "COALESCE(produzido,0) > 0"]
+    params: list = []
+
+    if mids:
+        where.append("machine_id IN ({})".format(",".join(["?"] * len(mids))))
+        params.extend(list(mids))
+
+    if like_scoped:
+        where.append("machine_id LIKE ?")
+        params.append(like_scoped)
+    if like_legacy:
+        where.append("machine_id LIKE ?")
+        params.append(like_legacy)
+
+    sql = (
+        f"SELECT MAX({col}) AS max_data_ref "
+        "FROM producao_diaria "
+        "WHERE " + " AND ".join(where)
+    )
+
+    row = conn.execute(sql, tuple(params)).fetchone()
+    if not row:
+        return None
+    val = row["max_data_ref"] if isinstance(row, dict) else row[0]
+    if not val:
+        return None
+    try:
+        return datetime.fromisoformat(str(val)).date()
+    except Exception:
+        try:
+            return date.fromisoformat(str(val))
+        except Exception:
+            return None
+
 @historico_bp.route("/api/producao/historico", methods=["GET"])
 def api_producao_historico():
     machine_id = (request.args.get("machine_id") or "").strip()
@@ -1123,12 +1257,21 @@ def api_producao_historico():
     if not machine_id:
         return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
 
-    now_date = datetime.now(TZ_BAHIA).date()
-    db_date = _max_data_ref_diaria(conn, machine_id)
-    if db_date is not None and db_date <= now_date and (now_date - db_date).days <= 2:
-        hoje = db_date
-    else:
-        hoje = now_date
+    hoje = datetime.now(TZ_BAHIA).date()
+    
+    # Evita exibir dia futuro/zerado no historico: ancora no ultimo dia com producao real.
+    conn_probe = _get_conn()
+    try:
+        ultimo_real = _ultimo_dia_com_producao_real(conn_probe, machine_id)
+    finally:
+        if not callable(get_db):
+            try:
+                conn_probe.close()
+            except Exception:
+                pass
+    if ultimo_real and ultimo_real < hoje:
+        hoje = ultimo_real
+
     inicio = hoje - timedelta(days=days - 1)
 
     conn = _get_conn()
@@ -1241,6 +1384,7 @@ def api_producao_detalhe_dia():
             run_intervals = _fetch_run_intervals_multi(conn, cand_ids, data_ref)
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria_multi(conn, cand_ids, data_ref)
+            hor = _remap_horaria_turno_idx_para_abs(hor, machine_state, cfg)
 
             # ============================================================
             # ============================================================
@@ -1572,7 +1716,7 @@ def _distribute_int_total(total: int, weights: list[int] | None = None, n: int =
     return out
 
 
-def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: str) -> dict[int, dict]:
+def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref) -> dict[int, dict]:
     """Tenta carregar producao_horaria para múltiplos machine_id.
     Retorna o primeiro conjunto não-vazio. Isso resolve casos onde:
     - producao_horaria foi gravada com machine_id unscoped (maquina005)
@@ -1585,9 +1729,10 @@ def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_
             continue
         tried.add(mid)
         try:
-            hor = _fetch_horaria(conn, mid, data_ref)
-            if isinstance(hor, dict) and len(hor) > 0:
-                return hor
+            if _horaria_has_rows(conn, mid, data_ref):
+                hor = _fetch_horaria(conn, mid, data_ref)
+                if isinstance(hor, dict) and len(hor) > 0:
+                    return hor
         except Exception:
             continue
     return {}
@@ -1726,12 +1871,7 @@ def api_producao_backfill_horaria():
     d_from = _parse_date_any((request.args.get("date_from") or "").strip())
     d_to = _parse_date_any((request.args.get("date_to") or "").strip())
 
-    now_date = datetime.now(TZ_BAHIA).date()
-    db_date = _max_data_ref_diaria(conn, machine_id)
-    if db_date is not None and db_date <= now_date and (now_date - db_date).days <= 2:
-        hoje = db_date
-    else:
-        hoje = now_date
+    hoje = datetime.now(TZ_BAHIA).date()
 
     if d_to is None:
         d_to = hoje
