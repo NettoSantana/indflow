@@ -1,5 +1,4 @@
-﻿fix(historico): ler producao_horaria do machine_id correto (scoped/unscoped) no detalhe-dia
+﻿fix(producao): corrigir persistencia e exibicao da hora anterior no detalhe-dia
 
-- _fetch_horaria() sempre retorna 24 chaves mesmo sem linhas; isso fazia o detalhe-dia ficar zerado
-- _fetch_horaria_multi agora só aceita o resultado quando existe algum dado != 0 (produzido/meta/refugo/baseline/esp)
-- Resolve persistencia da hora anterior aparecendo zerada no detalhe-dia por mismatch de machine_id
+- Remapeia producao_horaria por hora_idx do turno para hora absoluta (0..23) usando turno_inicio
+- Evita falso positivo ao escolher machine_id para horaria (exige linhas persistidas)

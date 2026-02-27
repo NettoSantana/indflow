@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 23:42 America/Bahia
-# MOTIVO: corrigir mapeamento de producao_horaria (hora_idx de turno) para horas absolutas no detalhe-dia e evitar falso positivo na escolha de machine_id
+# LAST_RECODE: 2026-02-27 00:00 America/Bahia
+# MOTIVO: Fixar referencia de data do Historico (/api/producao/historico) usando MAX(data_ref) em producao_diaria para evitar 'amanha' zerado por divergencia de timezone do servidor.
 
 
 from __future__ import annotations
@@ -73,6 +73,32 @@ def _get_conn() -> sqlite3.Connection:
 
     db_path = os.environ.get("INDFLOW_DB_PATH") or os.environ.get("DB_PATH") or "/data/indflow.db"
     return _sqlite_connect(db_path)
+
+
+
+def _max_data_ref_diaria(conn: sqlite3.Connection, machine_id: str) -> date | None:
+    """Retorna o maior data_ref (YYYY-MM-DD) registrado em producao_diaria para a maquina.
+
+    Usado para ancorar o 'hoje' do Historico quando o timezone do servidor diverge do horario local.
+    """
+    try:
+        row = conn.execute(
+            "SELECT MAX(data_ref) AS max_ref FROM producao_diaria WHERE machine_id = ?",
+            (machine_id,),
+        ).fetchone()
+        if not row:
+            return None
+        max_ref = row["max_ref"] if isinstance(row, sqlite3.Row) else (row[0] if row else None)
+        if not max_ref:
+            return None
+        try:
+            return date.fromisoformat(str(max_ref))
+        except Exception:
+            # ultimo fallback: parse manual
+            s = str(max_ref).strip()[:10]
+            return date.fromisoformat(s)
+    except Exception:
+        return None
 
 
 def _hhmmss_to_sec(s: str) -> int:
@@ -892,107 +918,6 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
 
     return out
 
-def _horaria_has_rows(conn: sqlite3.Connection, machine_id: str, data_ref) -> bool:
-    """Retorna True se houver ao menos 1 linha persistida na producao_horaria/refugo_horaria para (machine_id, data_ref).
-    Importante: nao usa 'meta' porque a meta pode ser injetada por config e nao indica persistencia."""
-    try:
-        d = data_ref.isoformat() if hasattr(data_ref, 'isoformat') else str(data_ref)
-    except Exception:
-        d = str(data_ref)
-
-    try:
-        if _table_exists(conn, 'producao_horaria'):
-            col = _resolve_data_col(conn, 'producao_horaria')
-            try:
-                cnt = _safe_int(_fetch_scalar(conn, f"SELECT COUNT(1) FROM producao_horaria WHERE machine_id=? AND {col}=?", (machine_id, d), default=0), 0)
-            except Exception:
-                cnt = 0
-            if cnt > 0:
-                return True
-    except Exception:
-        pass
-
-    try:
-        if _table_exists(conn, 'refugo_horaria'):
-            col = _resolve_data_col(conn, 'refugo_horaria')
-            try:
-                cnt = _safe_int(_fetch_scalar(conn, f"SELECT COUNT(1) FROM refugo_horaria WHERE machine_id=? AND {col}=?", (machine_id, d), default=0), 0)
-            except Exception:
-                cnt = 0
-            if cnt > 0:
-                return True
-    except Exception:
-        pass
-
-    return False
-
-def _parse_hora_hhmm(value: str):
-    try:
-        s = (value or '').strip()
-        if not s:
-            return None
-        h = int(s.split(':', 1)[0])
-        if 0 <= h <= 23:
-            return h
-    except Exception:
-        return None
-    return None
-
-def _remap_horaria_turno_idx_para_abs(hor: dict[int, dict], machine_state: dict, cfg: dict) -> dict[int, dict]:
-    """Se a tabela producao_horaria usa hora_idx do turno (0..len(horas_turno)-1),
-    remapeia para hora absoluta do dia (0..23) usando turno_inicio/active_shift.start."""
-    try:
-        shift_slots = machine_state.get('horas_turno') if isinstance(machine_state, dict) else None
-        shift_len = len(shift_slots) if isinstance(shift_slots, list) else None
-    except Exception:
-        shift_len = None
-
-    if not shift_len or shift_len < 1 or shift_len > 24:
-        return hor
-
-    turno_inicio = None
-    try:
-        turno_inicio = machine_state.get('turno_inicio')
-    except Exception:
-        turno_inicio = None
-    if not turno_inicio:
-        try:
-            turno_inicio = (cfg or {}).get('active_shift', {}).get('start')
-        except Exception:
-            turno_inicio = None
-
-    h0 = _parse_hora_hhmm(str(turno_inicio)) if turno_inicio else None
-    if h0 is None or h0 == 0:
-        return hor
-
-    # Detecta padrao: dados so aparecem em 0..shift_len-1 (idx de turno)
-    nz = []
-    try:
-        for hh, v in (hor or {}).items():
-            if not isinstance(v, dict):
-                continue
-            if _safe_int(v.get('produzido'), 0) != 0 or _safe_int(v.get('refugo'), 0) != 0 or _safe_int(v.get('baseline_esp'), 0) != 0 or _safe_int(v.get('esp_last'), 0) != 0:
-                nz.append(int(hh))
-    except Exception:
-        nz = []
-
-    if not nz:
-        return hor
-
-    if max(nz) >= shift_len:
-        return hor
-
-    # Remapeia idx do turno para hora absoluta
-    base = {h: {'meta': 0, 'produzido': 0, 'refugo': 0, 'baseline_esp': 0, 'esp_last': 0} for h in range(24)}
-    for idx in range(shift_len):
-        abs_h = (h0 + idx) % 24
-        try:
-            base[abs_h] = hor.get(idx) or base[abs_h]
-        except Exception:
-            pass
-
-    return base
-
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
     col = _resolve_data_col(conn, "refugo_horaria")
     tentativas = [
@@ -1198,7 +1123,12 @@ def api_producao_historico():
     if not machine_id:
         return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
 
-    hoje = datetime.now(TZ_BAHIA).date()
+    now_date = datetime.now(TZ_BAHIA).date()
+    db_date = _max_data_ref_diaria(conn, machine_id)
+    if db_date is not None and db_date <= now_date and (now_date - db_date).days <= 2:
+        hoje = db_date
+    else:
+        hoje = now_date
     inicio = hoje - timedelta(days=days - 1)
 
     conn = _get_conn()
@@ -1311,7 +1241,6 @@ def api_producao_detalhe_dia():
             run_intervals = _fetch_run_intervals_multi(conn, cand_ids, data_ref)
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria_multi(conn, cand_ids, data_ref)
-            hor = _remap_horaria_turno_idx_para_abs(hor, machine_state, cfg)
 
             # ============================================================
             # ============================================================
@@ -1643,7 +1572,7 @@ def _distribute_int_total(total: int, weights: list[int] | None = None, n: int =
     return out
 
 
-def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref) -> dict[int, dict]:
+def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: str) -> dict[int, dict]:
     """Tenta carregar producao_horaria para múltiplos machine_id.
     Retorna o primeiro conjunto não-vazio. Isso resolve casos onde:
     - producao_horaria foi gravada com machine_id unscoped (maquina005)
@@ -1656,10 +1585,9 @@ def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_
             continue
         tried.add(mid)
         try:
-            if _horaria_has_rows(conn, mid, data_ref):
-                hor = _fetch_horaria(conn, mid, data_ref)
-                if isinstance(hor, dict) and len(hor) > 0:
-                    return hor
+            hor = _fetch_horaria(conn, mid, data_ref)
+            if isinstance(hor, dict) and len(hor) > 0:
+                return hor
         except Exception:
             continue
     return {}
@@ -1798,7 +1726,12 @@ def api_producao_backfill_horaria():
     d_from = _parse_date_any((request.args.get("date_from") or "").strip())
     d_to = _parse_date_any((request.args.get("date_to") or "").strip())
 
-    hoje = datetime.now(TZ_BAHIA).date()
+    now_date = datetime.now(TZ_BAHIA).date()
+    db_date = _max_data_ref_diaria(conn, machine_id)
+    if db_date is not None and db_date <= now_date and (now_date - db_date).days <= 2:
+        hoje = db_date
+    else:
+        hoje = now_date
 
     if d_to is None:
         d_to = hoje
