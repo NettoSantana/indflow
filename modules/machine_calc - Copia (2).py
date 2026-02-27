@@ -1,9 +1,8 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc.py
-# LAST_RECODE: 2026-02-26 14:00 America/Bahia
-# MOTIVO: corrigir recalc diaria (hook) para usar machine_id escopado e evitar zerar totais; manter persistencia da hora anterior.
+# PATH: modules/machine_calc.py
+# LAST_RECODE: 2026-02-21 00:00 America/Bahia
+# MOTIVO: ajustar meta do dia para multi-turno (soma das metas dos turnos) e refletir no card (Meta do Dia).
 #
 # modules/machine_calc.py
-
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -895,6 +894,32 @@ def aplicar_derivados_ml(m):
 
 
 
+# =========================
+# PATCH ADDITIVO (NAO REMOVE NADA)
+# LAST_RECODE: 2026-02-16 10:30 America/Bahia
+# MOTIVO: corrigir indexacao horaria 24h (00-23) e virada de dia em 00:01 para nao perder contagem entre 00:00-04:59.
+# =========================
+from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    _TZ_BAHIA = ZoneInfo("America/Bahia")
+except Exception:
+    _TZ_BAHIA = None
+
+def _now_bahia_safe():
+    try:
+        return datetime.now(_TZ_BAHIA) if _TZ_BAHIA else datetime.now()
+    except Exception:
+        return datetime.now()
+
+def _dia_operacional_str_safe(dt):
+    # Mantem compatibilidade: usa 00:01 como virada
+    try:
+        if dt.hour > 0 or (dt.hour == 0 and dt.minute >= 1):
+            return dt.date().isoformat()
+        return (dt.date() - timedelta(days=1)).isoformat()
+    except Exception:
+        return dt.date().isoformat()
 
 def _recalc_diaria_from_horaria_safe(machine_id, data_ref, meta_dia=0):
     try:
@@ -917,12 +942,6 @@ def _recalc_diaria_from_horaria_safe(machine_id, data_ref, meta_dia=0):
     except Exception:
         pass
 
-# =========================
-# PATCH ADDITIVO (NAO REMOVE NADA)
-# LAST_RECODE: 2026-02-26 14:00 America/Bahia
-# MOTIVO: corrigir hook de recalc diaria para usar machine_id escopado (cliente_id::maquina) e evitar gravar/ler em chaves diferentes (causava zerar).
-# =========================
-
 # Hook nao-invasivo: se existir atualizar_producao_hora, envolve com recalc diaria
 if "atualizar_producao_hora" in globals():
     _orig_atualizar_producao_hora = atualizar_producao_hora
@@ -930,13 +949,12 @@ if "atualizar_producao_hora" in globals():
         res = _orig_atualizar_producao_hora(*args, **kwargs)
         try:
             m = args[0] if args else None
-            if isinstance(m, dict):
-                raw_mid = _get_machine_id_from_m(m) or "maquina01"
-                scoped_mid = _scoped_machine_id(m, raw_mid)
-                dt = agora_ref(m)
-                data_ref = _dia_operacional_ref(dt)
-                meta_dia = int(m.get("meta_turno", 0) or 0)
-                _recalc_diaria_from_horaria_safe(scoped_mid, data_ref, meta_dia)
+            machine_id = (m.get("nome") or "").strip().lower() if isinstance(m, dict) else None
+            if machine_id:
+                dt = _now_bahia_safe()
+                data_ref = _dia_operacional_str_safe(dt)
+                meta_dia = int(m.get("meta_turno", 0) or 0) if isinstance(m, dict) else 0
+                _recalc_diaria_from_horaria_safe(machine_id, data_ref, meta_dia)
         except Exception:
             pass
         return res
