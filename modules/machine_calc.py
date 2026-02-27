@@ -1,10 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-26 14:30 America/Bahia
-# MOTIVO: corrigir persistencia por hora ao virar a hora usando o ultimo esp visto (fecha hora anterior corretamente e evita ficar zerado ate o proximo update).
-#
-# modules/machine_calc.py
-from datetime import datetime, time, timedelta
-from zoneinfo import ZoneInfo
+# LAST_RECODE: 2026-02-26 14:00:00 -0300
+# MOTIVO: evitar zerar producao_por_hora quando cliente_id muda; resolver carregamento/persistencia com fallback por dados existentes
 
 UNIDADES_VALIDAS = {"pcs", "m", "m2"}
 
@@ -76,6 +72,56 @@ def _scoped_machine_id(m, machine_id: str) -> str:
     if cid:
         return f"{cid}::{mid}"
     return mid
+
+
+def _resolve_machine_id_for_horaria(m, raw_machine_id: str, scoped_machine_id: str, data_ref: str) -> str:
+    """
+    Resolve qual machine_id deve ser usado para ler/gravar na tabela producao_horaria.
+
+    Problema real observado:
+    - quando o cliente_id muda (ou quando eventos do dia estao com outro cliente_id),
+      o scoped_machine_id muda e o sistema passa a "nao encontrar" as horas persistidas,
+      parecendo que "zerou tudo".
+
+    Regra:
+    - se ja existir dado persistido para este dia e esta maquina (mesmo com outro cliente_id),
+      usa o machine_id que tiver mais sinal (SUM(produzido) e COUNT de linhas).
+    - caso contrario, usa o scoped_machine_id atual.
+    """
+    try:
+        from modules.db_indflow import get_db
+        conn = get_db()
+        cur = conn.cursor()
+
+        mid = (raw_machine_id or "").strip().lower()
+        if not mid or not data_ref:
+            return scoped_machine_id
+
+        like_pat = f"%::{mid}"
+
+        cur.execute(
+            """
+            SELECT machine_id,
+                   COUNT(*) AS c,
+                   COALESCE(SUM(COALESCE(produzido,0)),0) AS s
+              FROM producao_horaria
+             WHERE data_ref=?
+               AND (machine_id=? OR machine_id=? OR machine_id LIKE ?)
+             GROUP BY machine_id
+             ORDER BY s DESC, c DESC
+             LIMIT 1
+            """,
+            (data_ref, scoped_machine_id, mid, like_pat),
+        )
+        row = cur.fetchone()
+        if row and row[0]:
+            return str(row[0])
+
+    except Exception:
+        # se tabela nao existe ou DB indisponivel, nao quebra
+        return scoped_machine_id
+
+    return scoped_machine_id
 
 
 # ============================================================
@@ -371,7 +417,9 @@ def atualizar_producao_hora(m):
 
     # IDs e data_ref (usado tanto dentro quanto na saída do turno)
     raw_machine_id = _get_machine_id_from_m(m)
-    machine_id = _scoped_machine_id(m, raw_machine_id) if raw_machine_id else None
+    scoped_machine_id = _scoped_machine_id(m, raw_machine_id) if raw_machine_id else None
+    # FIX: se existir producao_horaria salva com outro cliente_id, usar o machine_id mais consistente do dia
+    machine_id = _resolve_machine_id_for_horaria(m, raw_machine_id, scoped_machine_id, str(_dia_operacional_ref(agora))) if scoped_machine_id else None
 
     # CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
@@ -573,17 +621,6 @@ def atualizar_producao_hora(m):
     # Fluxo normal (sem pulo grande)
     # ============================================================
     if prev_idx is None or prev_idx != idx:
-        # ============================================================
-        # FIX: ao virar a hora, usar o último ESP visto na hora anterior
-        # para fechar/persistir a hora anterior SEM "roubar" peças da nova hora.
-        # Isso também evita a situação de "zerar tudo" até o próximo update,
-        # porque já contabilizamos o delta da nova hora no mesmo ciclo.
-        # ============================================================
-        try:
-            esp_prev_end = int(m.get("_ph_esp_last_seen") or esp_abs)
-        except Exception:
-            esp_prev_end = esp_abs
-
         # fecha a hora anterior (se existia)
         if isinstance(prev_idx, int) and prev_idx >= 0:
             # prioridade: acumulador dedicado (se estiver alinhado com a hora anterior)
@@ -591,10 +628,10 @@ def atualizar_producao_hora(m):
             acc_val = int(m.get("_ph_acc", 0) or 0)
             if isinstance(acc_idx, int) and acc_idx == prev_idx and acc_val >= 0:
                 prod_prev = int(acc_val)
-                base_prev = int(esp_prev_end - prod_prev)
+                base_prev = int(esp_abs - prod_prev)
             else:
-                base_prev = int(m.get("baseline_hora", esp_prev_end) or esp_prev_end)
-                prod_prev = esp_prev_end - base_prev
+                base_prev = int(m.get("baseline_hora", esp_abs) or esp_abs)
+                prod_prev = esp_abs - base_prev
                 if prod_prev < 0:
                     prod_prev = 0
                 prod_prev = int(prod_prev)
@@ -616,7 +653,7 @@ def atualizar_producao_hora(m):
                         data_ref=data_ref,
                         hora_idx=prev_idx24 if isinstance(prev_idx24, int) else prev_idx,
                         baseline_esp=base_prev,
-                        esp_last=esp_prev_end,
+                        esp_last=esp_abs,
                         produzido=prod_prev,
                         meta=meta_prev,
                         percentual=pct_prev,
@@ -637,12 +674,13 @@ def atualizar_producao_hora(m):
                 baseline_db = None
 
         # OPCAO 1: ao abrir uma nova hora, sempre iniciar zerado.
-        # IMPORTANTE: baseline deve ser o "esp" do último ponto da hora anterior
-        # (esp_prev_end), e não o esp_abs atual (que já pode ter peças da nova hora).
-        baseline = esp_prev_end
+        # Ignora baseline do DB para a hora atual para evitar herdar contagem anterior.
+        baseline = esp_abs
 
-        # FIX: se ao "abrir a hora" o baseline implicar producao != 0,
-        # força baseline = esp_prev_end (hora inicia zerada).
+
+        # FIX: se ao "abrir a hora" o baseline vindo do DB implicar producao != 0,
+        # forca baseline = esp_abs (hora inicia zerada). Isso evita acumulacao intermitente
+        # quando o DB traz baseline antigo/inconsistente para a hora atual.
         try:
             existing_val = None
             if isinstance(m.get("producao_por_hora"), list) and 0 <= idx < len(m["producao_por_hora"]):
@@ -652,40 +690,40 @@ def atualizar_producao_hora(m):
                     b = int(baseline)
                 except Exception:
                     b = None
-                if b is None or (esp_prev_end - b) != 0:
-                    baseline = esp_prev_end
+                if b is None or (esp_abs - b) != 0:
+                    baseline = esp_abs
         except Exception:
             pass
 
         if baseline is None:
-            baseline = esp_prev_end
+            baseline = esp_abs
 
         m["baseline_hora"] = int(baseline)
         m["producao_hora"] = 0
         m["percentual_hora"] = 0
 
-        # garante que o bucket da hora atual comece zerado (evita 'arrasto' visual)
+        # garante que o bucket da hora atual comece zerado (evita 'arrasto' visual quando havia valor carregado do banco)
         if isinstance(m.get("producao_por_hora"), list) and 0 <= idx < len(m["producao_por_hora"]):
             m["producao_por_hora"][idx] = 0
         if isinstance(m.get("producao_exibicao_24"), list) and 0 <= idx24 < len(m["producao_exibicao_24"]):
             m["producao_exibicao_24"][idx24] = 0
 
-        # rastreadores do modo robusto: reinicia a hora nova NO MESMO CICLO
+        # rastreadores do modo robusto
         m["_ph_acc_idx"] = idx
         m["_ph_acc"] = 0
-        m["_ph_esp_last_seen"] = esp_prev_end
+        m["_ph_esp_last_seen"] = esp_abs
 
         if machine_id:
             try:
                 meta_now = _meta_by_idx(m, idx)
                 ensure_producao_horaria_table()
-                # gravar 0 ao abrir a hora (sem depender de produzir)
+                # IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
                 upsert_hora(
                     machine_id=machine_id,
                     data_ref=data_ref,
                     hora_idx=idx24,
                     baseline_esp=int(baseline),
-                    esp_last=esp_prev_end,
+                    esp_last=esp_abs,
                     produzido=0,
                     meta=meta_now,
                     percentual=0,
@@ -693,8 +731,8 @@ def atualizar_producao_hora(m):
             except Exception:
                 pass
 
-        # NÃO retorna: continua o fluxo e já contabiliza o delta da nova hora
-        # usando o esp_abs atual (evita ficar "zerado" até o próximo update).
+        return
+
     # mesma hora: atualiza parcial (e persiste mesmo se for 0)
     # ============================================================
     # MODO ROBUSTO (Opção C)
