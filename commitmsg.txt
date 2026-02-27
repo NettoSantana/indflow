@@ -1,5 +1,5 @@
-﻿fix(machine_calc): recalc diaria usa machine_id escopado para nao zerar
+﻿fix(historico): ler producao_horaria do machine_id correto (scoped/unscoped) no detalhe-dia
 
-- Ajusta hook de recalc diaria para usar cliente_id::machine_id
-- Evita ler/gravar em chaves diferentes entre producao_horaria e producao_diaria
-- Nao altera historico, front ou rastro
+- _fetch_horaria() sempre retorna 24 chaves mesmo sem linhas; isso fazia o detalhe-dia ficar zerado
+- _fetch_horaria_multi agora só aceita o resultado quando existe algum dado != 0 (produzido/meta/refugo/baseline/esp)
+- Resolve persistencia da hora anterior aparecendo zerada no detalhe-dia por mismatch de machine_id

@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 08:13 America/Bahia
-# MOTIVO: Detalhe-dia deve refletir a configuração (config_v2) e buscar produzido/meta na producao_horaria mesmo quando o banco gravou com machine_id diferente (scoped vs unscoped).
+# LAST_RECODE: 2026-02-26 15:30 America/Bahia
+# MOTIVO: Detalhe-dia deve usar producao_horaria para horas fechadas e evitar override volatil do /status (producao_exibicao_24) que some em restart/deploy.
 
 
 from __future__ import annotations
@@ -1239,6 +1239,8 @@ def api_producao_detalhe_dia():
             # usamos esp_last/baseline_esp (se existirem) para converter em delta por hora.
             # Para a hora corrente, alinhamos com o card (ESP_atual - baseline_da_hora).
             # ============================================================
+            now_hour = None
+            esp_now = None
             try:
                 if now_naive is not None:
                     now_hour = int(now_naive.hour)
@@ -1307,19 +1309,37 @@ def api_producao_detalhe_dia():
             #   Para evitar "herdar" na virada da hora, convertemos para delta por hora.
             # - Meta (meta24) é usada para reancorar em horas NP/break (meta==0).
             # ============================================================
-            produced_override = None
-            refugo_override = None
+            produced_override_current = None
+            refugo_override_current = None
             if now_naive is not None and isinstance(machine_state, dict):
-                v24 = machine_state.get("producao_exibicao_24")
-                if isinstance(v24, list) and len(v24) == 24:
-                    # Usa a meta atual do hor (já preenchida a partir da config) para ancorar NP/break
-                    meta_ref = [ _safe_int(hor.get(hh, {}).get("meta", 0), 0) for hh in range(24) ]
-                    produced_override = _deltaize_exibicao_24(v24, meta_ref)
+                # IMPORTANTE: arrays do /status sao volateis e podem zerar em restart/deploy.
+                # Para garantir persistencia no historico, usamos override APENAS para a HORA CORRENTE,
+                # e somente quando nao foi possivel calcular pelo contador absoluto (esp_now).
+                try:
+                    if now_hour is None:
+                        now_hour = int(now_naive.hour)
+                except Exception:
+                    now_hour = None
 
-                r24 = machine_state.get("refugo_por_hora")
-                if isinstance(r24, list) and len(r24) == 24:
-                    refugo_override = [ _safe_int(x, 0) for x in r24 ]
+                # Produzido: somente se nao temos esp_now
+                if now_hour is not None and esp_now is None:
+                    v24 = machine_state.get("producao_exibicao_24")
+                    if isinstance(v24, list) and len(v24) == 24:
+                        meta_ref = [_safe_int(hor.get(hh, {}).get("meta", 0), 0) for hh in range(24)]
+                        v24_delta = _deltaize_exibicao_24(v24, meta_ref)
+                        try:
+                            produced_override_current = _safe_int(v24_delta[now_hour], 0)
+                        except Exception:
+                            produced_override_current = None
 
+                # Refugo: pode usar o valor da hora corrente quando disponivel
+                if now_hour is not None:
+                    r24 = machine_state.get("refugo_por_hora")
+                    if isinstance(r24, list) and len(r24) == 24:
+                        try:
+                            refugo_override_current = _safe_int(r24[now_hour], 0)
+                        except Exception:
+                            refugo_override_current = None
             horas = []
             for h in range(24):
                 hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
@@ -1337,19 +1357,14 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
-                # Override do dia atual: usa arrays do /status quando disponíveis
-                if produced_override is not None:
-                    try:
-                        produzido = _safe_int(produced_override[h], 0)
-                    except Exception:
-                        pass
-                if refugo_override is not None:
-                    try:
-                        refugo = _safe_int(refugo_override[h], 0)
-                    except Exception:
-                        pass
-
-
+                # Override do dia atual (APENAS HORA CORRENTE):
+                # - evita depender de arrays volateis do /status para horas fechadas (persistencia).
+                # - produzido so usa override se nao temos esp_now.
+                if now_naive is not None and now_hour is not None and h == now_hour:
+                    if esp_now is None and produced_override_current is not None:
+                        produzido = _safe_int(produced_override_current, 0)
+                    if refugo_override_current is not None:
+                        refugo = _safe_int(refugo_override_current, 0)
 
                 is_np = meta <= 0
 
