@@ -1,5 +1,6 @@
-﻿fix(producao): persistir producao por hora no SQLite (baseline_hora + producao_horaria)
+﻿fix(producao_horaria): persistir por hora do dia (0-23) e evitar heranca entre turnos
 
-- Grava baseline por hora no primeiro evento da hora
-- Atualiza snapshot de producao_horaria a cada update do ESP e no polling do status
-- Mantem horas anteriores congeladas e nao perde historico apos deploy
+- Grava producao_horaria usando hora do relogio (0..23), nao indice do turno
+- Carrega do banco em 24h e mapeia para os slots do turno pelo inicio do slot (HH:MM - HH:MM)
+- Atualiza producao_exibicao_24 na hora correta
+- Ajusta recalc diaria (patch) para usar machine_id escopado e meta_dia

@@ -1,6 +1,10 @@
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_calc.py
+# LAST_RECODE: 2026-02-26 14:00 (America/Bahia)
+# MOTIVE: Corrigir persistencia por hora para nao herdar valores entre turnos e restaurar exibicao.
+
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-26 14:00 America/Bahia
-# MOTIVO: corrigir persistência por hora usando hora do dia (0-23) para evitar herança entre turnos e mapear corretamente no 24h.
+# LAST_RECODE: 2026-02-21 00:00 America/Bahia
+# MOTIVO: ajustar meta do dia para multi-turno (soma das metas dos turnos) e refletir no card (Meta do Dia).
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -208,26 +212,6 @@ def calcular_ultima_hora_idx(m, agora: datetime | None = None):
     return diff_h
 
 
-
-
-def _slot_hour24(m, horas, slot_idx: int) -> int:
-    """Retorna a hora do dia (0-23) correspondente ao slot do turno (ex: '22:00 - 23:00').
-    Fallback: hora atual Bahia.
-    """
-    try:
-        if isinstance(horas, (list, tuple)) and 0 <= int(slot_idx) < len(horas):
-            slot = (horas[int(slot_idx)] or "").strip()
-            hstart = int(slot.split("-")[0].strip().split(":")[0])
-            if 0 <= hstart <= 23:
-                return hstart
-    except Exception:
-        pass
-    try:
-        dt = agora_ref(m)
-        return int(getattr(dt, "hour", 0) or 0)
-    except Exception:
-        return 0
-
 # ============================================================
 # BASELINE DIÁRIO (REPO) - mantém interface antiga
 # ============================================================
@@ -359,7 +343,6 @@ def atualizar_producao_hora(m):
         pass
 
     idx = calcular_ultima_hora_idx(m, agora=agora)
-    idx24 = int(getattr(agora, 'hour', 0) or 0)
     dentro_turno = idx is not None
 
     try:
@@ -373,12 +356,30 @@ def atualizar_producao_hora(m):
     raw_machine_id = _get_machine_id_from_m(m)
     machine_id = _scoped_machine_id(m, raw_machine_id) if raw_machine_id else None
 
+    # ============================================================
+    # FIX: evitar "herdar" produção entre turnos no mesmo dia_ref.
+    # A tabela producao_horaria usa hora_idx 0..7 (index do turno).
+    # Para não misturar Turno A/B/C no mesmo dia_ref, escopamos a chave
+    # de persistência por TURNO ATIVO (nome + início/fim).
+    # ============================================================
+    ph_machine_id = None
+    try:
+        sh = m.get("active_shift") or {}
+        sh_name = (sh.get("name") or "").strip() or "SHIFT"
+        sh_start = (sh.get("start") or "").strip()
+        sh_end = (sh.get("end") or "").strip()
+        if machine_id:
+            ph_machine_id = f"{machine_id}::ph::{sh_name}:{sh_start}-{sh_end}"
+    except Exception:
+        ph_machine_id = machine_id
+    if not ph_machine_id:
+        ph_machine_id = machine_id
+
     # CHAVE CERTA: dia operacional (vira 23:59)
     data_ref = _dia_operacional_ref(agora)
 
     esp_abs = int(m.get("esp_absoluto", 0) or 0)
     prev_idx = m.get("ultima_hora")
-    prev_idx24 = m.get("_ph_idx24")
 
     # ============================================================
     # MODO ROBUSTO (Opção C)
@@ -399,7 +400,7 @@ def atualizar_producao_hora(m):
     # ============================================================
     if idx is None:
         # fecha a última hora programada (se existia) e persiste, inclusive se for 0
-        if machine_id and isinstance(prev_idx24, int) and 0 <= prev_idx24 <= 23:
+        if machine_id and isinstance(prev_idx, int) and prev_idx >= 0:
             try:
                 ensure_producao_horaria_table()
                 # prioridade: acumulador dedicado (se estiver alinhado com a última hora)
@@ -426,9 +427,9 @@ def atualizar_producao_hora(m):
                     pass
 
                 upsert_hora(
-                    machine_id=machine_id,
+                    machine_id=ph_machine_id,
                     data_ref=data_ref,
-                    hora_idx=prev_idx24 if isinstance(prev_idx24, int) else prev_idx,
+                    hora_idx=prev_idx,
                     baseline_esp=base_prev,
                     esp_last=esp_abs,
                     produzido=prod_prev,
@@ -452,14 +453,10 @@ def atualizar_producao_hora(m):
     horas = m.get("horas_turno") or []
     horas_len = len(horas)
 
-    if not isinstance(m.get("producao_exibicao_24"), list) or len(m.get("producao_exibicao_24")) != 24:
-        m["producao_exibicao_24"] = [0] * 24
-
     if m.get("_ph_data_ref") != data_ref or m.get("_ph_len") != horas_len:
         m["_ph_loaded"] = False
         m["_ph_data_ref"] = data_ref
         m["_ph_len"] = horas_len
-        m["_ph24_loaded"] = False
 
     if (
         "producao_por_hora" not in m
@@ -472,21 +469,7 @@ def atualizar_producao_hora(m):
     if machine_id and not m.get("_ph_loaded"):
         try:
             ensure_producao_horaria_table()
-            # Carrega do banco sempre em 24h (0-23) e mapeia para o turno atual.
-            ph24 = load_producao_por_hora(machine_id, data_ref, 24)
-            m["producao_exibicao_24"] = ph24 if isinstance(ph24, list) and len(ph24) == 24 else ([0] * 24)
-
-            # Mapeia slots do turno (ex: "22:00 - 23:00") -> hora do dia
-            mapped = [None] * horas_len
-            for i_slot in range(horas_len):
-                try:
-                    slot = (horas[i_slot] or "").strip()
-                    hstart = int(slot.split("-")[0].strip().split(":")[0])
-                    val = m["producao_exibicao_24"][hstart] if 0 <= hstart < 24 else None
-                    mapped[i_slot] = val
-                except Exception:
-                    mapped[i_slot] = None
-            m["producao_por_hora"] = mapped
+            m["producao_por_hora"] = load_producao_por_hora(ph_machine_id, data_ref, horas_len)
             m["_ph_loaded"] = True
         except Exception:
             m["_ph_loaded"] = False
@@ -518,9 +501,9 @@ def atualizar_producao_hora(m):
                         ensure_producao_horaria_table()
                         meta_h = _meta_by_idx(m, h)
                         upsert_hora(
-                            machine_id=machine_id,
+                    machine_id=ph_machine_id,
                             data_ref=data_ref,
-                            hora_idx=_slot_hour24(m, horas, h),
+                            hora_idx=h,
                             baseline_esp=base_prev,
                             esp_last=base_prev,
                             produzido=0,
@@ -532,7 +515,6 @@ def atualizar_producao_hora(m):
 
             # hora atual recebe todo o delta
             m["ultima_hora"] = idx
-            m["_ph_idx24"] = idx24
             # realinha baseline para garantir coerência (baseline = esp_abs - produzido)
             m["baseline_hora"] = int(esp_abs - int(delta_total))
             m["producao_hora"] = int(delta_total)
@@ -555,9 +537,9 @@ def atualizar_producao_hora(m):
                 try:
                     ensure_producao_horaria_table()
                     upsert_hora(
-                        machine_id=machine_id,
+                    machine_id=ph_machine_id,
                         data_ref=data_ref,
-                        hora_idx=idx24,
+                        hora_idx=idx,
                         baseline_esp=int(m["baseline_hora"]),
                         esp_last=esp_abs,
                         produzido=int(delta_total),
@@ -601,9 +583,9 @@ def atualizar_producao_hora(m):
                 try:
                     ensure_producao_horaria_table()
                     upsert_hora(
-                        machine_id=machine_id,
+                    machine_id=ph_machine_id,
                         data_ref=data_ref,
-                        hora_idx=prev_idx24 if isinstance(prev_idx24, int) else prev_idx,
+                        hora_idx=prev_idx,
                         baseline_esp=base_prev,
                         esp_last=esp_abs,
                         produzido=prod_prev,
@@ -615,13 +597,12 @@ def atualizar_producao_hora(m):
 
         # abre a nova hora (e PERSISTE zero imediatamente)
         m["ultima_hora"] = idx
-        m["_ph_idx24"] = idx24
 
         baseline_db = None
         if machine_id:
             try:
                 ensure_producao_horaria_table()
-                baseline_db = get_baseline_for_hora(machine_id, data_ref, idx)
+                baseline_db = get_baseline_for_hora(ph_machine_id, data_ref, idx)
             except Exception:
                 baseline_db = None
 
@@ -657,8 +638,8 @@ def atualizar_producao_hora(m):
         # garante que o bucket da hora atual comece zerado (evita 'arrasto' visual quando havia valor carregado do banco)
         if isinstance(m.get("producao_por_hora"), list) and 0 <= idx < len(m["producao_por_hora"]):
             m["producao_por_hora"][idx] = 0
-        if isinstance(m.get("producao_exibicao_24"), list) and 0 <= idx24 < len(m["producao_exibicao_24"]):
-            m["producao_exibicao_24"][idx24] = 0
+        if isinstance(m.get("producao_exibicao_24"), list) and 0 <= idx < len(m["producao_exibicao_24"]):
+            m["producao_exibicao_24"][idx] = 0
 
         # rastreadores do modo robusto
         m["_ph_acc_idx"] = idx
@@ -671,9 +652,9 @@ def atualizar_producao_hora(m):
                 ensure_producao_horaria_table()
                 # IMPORTANTÍSSIMO: gravar 0 ao abrir a hora (sem depender de produzir)
                 upsert_hora(
-                    machine_id=machine_id,
+                    machine_id=ph_machine_id,
                     data_ref=data_ref,
-                    hora_idx=idx24,
+                    hora_idx=idx,
                     baseline_esp=int(baseline),
                     esp_last=esp_abs,
                     produzido=0,
@@ -751,14 +732,6 @@ def atualizar_producao_hora(m):
 
     m["producao_hora"] = int(prod_final)
 
-    # Atualiza exibicao 24h na hora do relógio
-    try:
-        h24 = int(getattr(agora_ref(m), "hour", 0) or 0)
-        if 0 <= h24 < 24 and isinstance(m.get("producao_exibicao_24"), list) and len(m["producao_exibicao_24"]) == 24:
-            m["producao_exibicao_24"][h24] = int(m["producao_hora"])
-    except Exception:
-        pass
-
     m["percentual_hora"] = _percentual(m["producao_hora"], meta_h)
 
     try:
@@ -771,9 +744,9 @@ def atualizar_producao_hora(m):
         try:
             ensure_producao_horaria_table()
             upsert_hora(
-                machine_id=machine_id,
+                    machine_id=ph_machine_id,
                 data_ref=data_ref,
-                hora_idx=idx24,
+                hora_idx=idx,
                 baseline_esp=int(m.get("baseline_hora", base_h) or base_h),
                 esp_last=esp_abs,
                 produzido=int(m["producao_hora"]),
@@ -999,12 +972,11 @@ if "atualizar_producao_hora" in globals():
         res = _orig_atualizar_producao_hora(*args, **kwargs)
         try:
             m = args[0] if args else None
-            raw_mid = (m.get("nome") or "").strip().lower() if isinstance(m, dict) else None
-            machine_id = _scoped_machine_id(m, raw_mid) if raw_mid else None
+            machine_id = (m.get("nome") or "").strip().lower() if isinstance(m, dict) else None
             if machine_id:
-                dt = agora_ref(m) if isinstance(m, dict) else _now_bahia_safe()
+                dt = _now_bahia_safe()
                 data_ref = _dia_operacional_str_safe(dt)
-                meta_dia = int(m.get("meta_dia", 0) or 0) if isinstance(m, dict) else 0
+                meta_dia = int(m.get("meta_turno", 0) or 0) if isinstance(m, dict) else 0
                 _recalc_diaria_from_horaria_safe(machine_id, data_ref, meta_dia)
         except Exception:
             pass
