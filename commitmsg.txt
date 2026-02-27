@@ -1,4 +1,4 @@
-﻿fix(producao): corrigir persistencia e exibicao da hora anterior no detalhe-dia
+﻿fix(historico): ancorar 'hoje' pelo MAX(data_ref) da producao_diaria
 
-- Remapeia producao_horaria por hora_idx do turno para hora absoluta (0..23) usando turno_inicio
-- Evita falso positivo ao escolher machine_id para horaria (exige linhas persistidas)
+- Evita aparecer 'amanha' zerado no Historico quando o servidor estiver com timezone/dia diferente do cliente
+- Usa MAX(data_ref) por maquina para definir o range de datas do /api/producao/historico
