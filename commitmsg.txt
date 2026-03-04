@@ -1,5 +1,4 @@
-﻿fix(historico): normalizacao de slot horas_turno para alinhar producao_por_hora no historico
+﻿fix(historico): produzido por hora via SUM(delta) em producao_evento (TZ America/Bahia)
 
-- remove espacos de "14:00 - 15:00" para "14:00-15:00"
-- garante correspondencia correta entre horas_turno e producao_por_hora
-- corrige exibicao de Prod no historico (ex: 37 na hora 15:00)
+- hours[].produzido calculado por janela de hora local usando ts_ms
+- remove sobrescrita por estado do turno/segmentos que zerava horas 14-16
