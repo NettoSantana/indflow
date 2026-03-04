@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-02-21 00:00 America/Bahia
-# MOTIVO: ajustar meta do dia para multi-turno (soma das metas dos turnos) e refletir no card (Meta do Dia).
+# LAST_RECODE: 2026-03-04 01:27 America/Bahia
+# MOTIVO: Virada de hora: usar horario do servidor para bucketing (zera na hora exata, independente de tela).
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -307,7 +307,9 @@ def atualizar_producao_hora(m):
     # ============================================================
     # NOVO: acumular "não programado" (fora do turno)
     # ============================================================
-    agora = agora_ref(m)
+    agora_bucket = now_bahia()
+    agora_evt = agora_ref(m, fallback=agora_bucket)
+    agora = agora_bucket
 
     # ============================================================
     # MULTI-TURNO (v2): Meta do Dia = soma das metas dos turnos
