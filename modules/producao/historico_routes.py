@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-04 11:30 America/Bahia
-# MOTIVO: Barra do historico: segmentos somente por RUN/STOP/NP via machine_state_event; SQL defensivo para schemas antigos (colunas id/data/ts/state).
+# LAST_RECODE: 2026-03-04 13:41 America/Bahia
+# MOTIVO: Barra do historico: segmentos por estado RUN/STOP/IDLE mantendo ultimo estado ate mudar; completa a hora inteira; base machine_state_event.
 
 
 from __future__ import annotations
@@ -671,6 +671,248 @@ def _build_segments_for_hour(
 
 
 
+
+def _merge_state_segments(segs: list[tuple[datetime, datetime, str]]) -> list[tuple[datetime, datetime, str]]:
+    if not segs:
+        return []
+    segs = sorted(segs, key=lambda x: x[0])
+    out: list[tuple[datetime, datetime, str]] = []
+    cur_s, cur_e, cur_st = segs[0]
+    for s, e, st in segs[1:]:
+        if e <= s:
+            continue
+        if st == cur_st and s <= cur_e:
+            if e > cur_e:
+                cur_e = e
+            continue
+        if s <= cur_e:
+            # sobreposicao com estado diferente: corta o anterior
+            if s > cur_s:
+                out.append((cur_s, s, cur_st))
+            cur_s, cur_e, cur_st = s, e, st
+            continue
+        out.append((cur_s, cur_e, cur_st))
+        cur_s, cur_e, cur_st = s, e, st
+    out.append((cur_s, cur_e, cur_st))
+    return out
+
+
+def _fetch_state_segments_from_state_events(
+    conn: sqlite3.Connection,
+    effective_machine_id: str,
+    data_ref: date,
+) -> list[tuple[datetime, datetime, str]]:
+    """
+    Monta segmentos de estado (RUN/STOP/IDLE/NP) para o dia, baseados EXCLUSIVAMENTE em machine_state_event.
+
+    Regra:
+    - Mantem o ultimo estado ate surgir um novo evento.
+    - Se nao houver evento anterior para definir o estado inicial do dia, inicia como IDLE.
+    - Segmentos sao retornados como datetime naive (TZ_BAHIA assumido) no intervalo [day_start, hard_end].
+
+    Observacoes:
+    - Implementacao defensiva: detecta nomes de colunas (id, data, ts, state) para suportar schemas antigos.
+    - Para o dia atual, hard_end = agora (nao preenche futuro).
+    """
+    try:
+        if not _table_exists(conn, "machine_state_event"):
+            return []
+    except Exception:
+        return []
+
+    cols = _get_columns(conn, "machine_state_event")
+
+    id_col = None
+    if "effective_machine_id" in cols:
+        id_col = "effective_machine_id"
+    elif "machine_id" in cols:
+        id_col = "machine_id"
+    else:
+        return []
+
+    date_col = None
+    if "data_ref" in cols:
+        date_col = "data_ref"
+    else:
+        try:
+            date_col = _resolve_data_col(conn, "machine_state_event")
+        except Exception:
+            date_col = None
+    if not date_col:
+        return []
+
+    ts_col = None
+    for c in ("ts_ms", "ts", "timestamp_ms"):
+        if c in cols:
+            ts_col = c
+            break
+    if not ts_col:
+        return []
+
+    state_col = None
+    for c in ("state", "status"):
+        if c in cols:
+            state_col = c
+            break
+    if not state_col:
+        return []
+
+    day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0)
+    day_end = day_start + timedelta(days=1)
+
+    now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
+    if day_start.date() == now_dt.date():
+        hard_end = min(day_end, now_dt)
+    else:
+        hard_end = day_end
+
+    if hard_end <= day_start:
+        return []
+
+    day_start_ms = int(day_start.replace(tzinfo=TZ_BAHIA).timestamp() * 1000)
+
+    allowed = ("RUN", "STOP", "IDLE", "NP")
+
+    # estado inicial: ultimo evento antes de 00:00
+    state0 = None
+    try:
+        sql0 = (
+            "SELECT {state_col}, {ts_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {ts_col} < ? "
+            "ORDER BY {ts_col} DESC LIMIT 1"
+        ).format(state_col=state_col, ts_col=ts_col, id_col=id_col)
+        r0 = conn.execute(sql0, (effective_machine_id, day_start_ms)).fetchone()
+        if r0:
+            try:
+                r0_state = str(r0[0] or "").upper()
+                r0_ts_ms = int(r0[1]) if r0[1] is not None else None
+            except Exception:
+                r0_state = ""
+                r0_ts_ms = None
+
+            # tolerancia anti-heranca "muito antiga"
+            stale_ms = 6 * 60 * 60 * 1000
+            if (
+                r0_state in allowed
+                and r0_ts_ms is not None
+                and (day_start_ms - r0_ts_ms) <= stale_ms
+            ):
+                state0 = r0_state
+    except Exception:
+        state0 = None
+
+    # eventos do dia
+    evs: list[tuple[datetime, str]] = []
+    try:
+        sql = (
+            "SELECT {ts_col}, {state_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {date_col}=? "
+            "ORDER BY {ts_col} ASC"
+        ).format(ts_col=ts_col, state_col=state_col, id_col=id_col, date_col=date_col)
+        rows = conn.execute(sql, (effective_machine_id, data_ref.isoformat())).fetchall()
+        for r in rows:
+            try:
+                ts_ms = int(r[0])
+            except Exception:
+                continue
+            st = str(r[1] or "").upper()
+            if st not in allowed:
+                continue
+            try:
+                t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
+            except Exception:
+                continue
+            if t < day_start:
+                continue
+            if t > hard_end:
+                break
+            evs.append((t, st))
+    except Exception:
+        evs = []
+
+    cur_state = state0 if state0 in allowed else "IDLE"
+    cur_t = day_start
+
+    segs: list[tuple[datetime, datetime, str]] = []
+
+    for t, st in evs:
+        if t <= cur_t:
+            cur_state = st
+            cur_t = t
+            continue
+        segs.append((cur_t, t, cur_state))
+        cur_state = st
+        cur_t = t
+
+    if hard_end > cur_t:
+        segs.append((cur_t, hard_end, cur_state))
+
+    # merge adjacentes do mesmo estado
+    return _merge_state_segments(segs)
+
+
+def _build_segments_for_hour_from_day_segments(
+    hour_start: datetime,
+    hour_end: datetime,
+    is_np: bool,
+    day_segments: list[tuple[datetime, datetime, str]],
+) -> list[dict]:
+    if is_np:
+        return [
+            {
+                "start": hour_start.strftime("%H:%M:%S"),
+                "end": hour_end.strftime("%H:%M:%S"),
+                "state": "NP",
+            }
+        ]
+
+    if hour_end <= hour_start:
+        return [
+            {
+                "start": hour_start.strftime("%H:%M:%S"),
+                "end": hour_start.strftime("%H:%M:%S"),
+                "state": "IDLE",
+            }
+        ]
+
+    segs: list[dict] = []
+
+    cursor = hour_start
+    last_state = None
+
+    for ds, de, st in day_segments or []:
+        inter = _intersect(hour_start, hour_end, ds, de)
+        if not inter:
+            continue
+        a, b = inter
+
+        if a > cursor:
+            # buraco: mantem o ultimo estado conhecido; se nao houver, IDLE
+            fill_state = last_state if last_state in ("RUN", "STOP", "IDLE", "NP") else "IDLE"
+            segs.append({"start": cursor.strftime("%H:%M:%S"), "end": a.strftime("%H:%M:%S"), "state": fill_state})
+            cursor = a
+
+        segs.append({"start": a.strftime("%H:%M:%S"), "end": b.strftime("%H:%M:%S"), "state": st})
+        last_state = st
+        cursor = b
+
+    if cursor < hour_end:
+        fill_state = last_state if last_state in ("RUN", "STOP", "IDLE", "NP") else "IDLE"
+        segs.append({"start": cursor.strftime("%H:%M:%S"), "end": hour_end.strftime("%H:%M:%S"), "state": fill_state})
+
+    # merge adjacentes iguais
+    merged: list[dict] = []
+    for s in segs:
+        if not merged:
+            merged.append(s)
+            continue
+        if merged[-1]["state"] == s["state"] and merged[-1]["end"] == s["start"]:
+            merged[-1]["end"] = s["end"]
+        else:
+            merged.append(s)
+
+    return merged
+
 def _fetch_run_intervals_from_state_events(
     conn: sqlite3.Connection,
     effective_machine_id: str,
@@ -1252,7 +1494,7 @@ def api_producao_detalhe_dia():
 
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
-            run_intervals = _fetch_run_intervals_from_state_events(conn, eff_mid, data_ref)
+            day_state_segments = _fetch_state_segments_from_state_events(conn, eff_mid, data_ref)
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria(conn, eff_mid, data_ref)
 
@@ -1408,36 +1650,7 @@ def api_producao_detalhe_dia():
                 # Regra:
                 # - Hora atual (do dia atual): usa o status atual (run) para marcar RUN/STOP.
                 # - Demais horas sem eventos: marca como IDLE (vira cinza no front).
-                if (not is_np) and (not run_intervals):
-                    is_current_hour = False
-                    try:
-                        if now_naive is not None and hs <= now_naive < he:
-                            is_current_hour = True
-                    except Exception:
-                        is_current_hour = False
-
-                    if is_current_hour:
-                        if run_now_flag is True:
-                            segs = [{
-                                "start": hs.strftime("%H:%M:%S"),
-                                "end": he_calc.strftime("%H:%M:%S"),
-                                "state": "RUN",
-                            }]
-                        else:
-                            segs = [{
-                                "start": hs.strftime("%H:%M:%S"),
-                                "end": he_calc.strftime("%H:%M:%S"),
-                                "state": "STOP",
-                            }]
-                    else:
-                        segs = [{
-                            "start": hs.strftime("%H:%M:%S"),
-                            "end": he_calc.strftime("%H:%M:%S"),
-                            "state": "IDLE",
-                        }]
-                else:
-                    segs = _build_segments_for_hour(hs, he_calc, is_np, run_intervals)
-
+                segs = _build_segments_for_hour_from_day_segments(hs, he_calc, is_np, day_state_segments)
                 if (not is_np) and now_naive is not None and stop_start_naive is not None:
                     try:
                         if hs <= now_naive < he and stop_start_naive <= he_calc:
