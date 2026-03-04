@@ -1,5 +1,5 @@
-﻿fix(historico): barra por status (RUN/STOP/NP), sem depender de producao
+﻿fix(historico): barra por status na hora atual e nao inferir STOP sem eventos
 
-- Remove fallback que marcava RUN pela producao quando machine_state_event esta vazio
-- Para hora atual, usa machine_state (run/status/status_ui) para definir RUN/STOP
-- Para horas passadas sem eventos, nao inventa historico (assume STOP)
+- Remove fallback por producao quando nao houver machine_state_event
+- Hora atual usa status atual (run/status_ui) para RUN/STOP
+- Horas sem eventos viram IDLE (cinza no front)
