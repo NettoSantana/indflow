@@ -1,5 +1,5 @@
-﻿fix(historico): usar producao_por_hora no detalhe-dia para Prod do historico
+﻿fix(historico): Prod do Historico usa producao_por_hora (horas_turno) e remove fallback errado
 
-- No /api/producao/detalhe-dia, Prod por hora prioriza machine_state.producao_por_hora (mapeada por horas_turno)
-- Fallback para producao_exibicao_24 apenas se nao houver mapeamento
-- Evita Prod 0 no historico quando o card ja mostra producao na hora, sem herdar na virada
+- Para HOJE, "Prod" do historico passa a ler apenas machine_state.producao_por_hora alinhado a horas_turno
+- Remove uso de producao_exibicao_24 no historico (evita ler hora errada)
+- Remove lixo no fim do arquivo que podia quebrar import
