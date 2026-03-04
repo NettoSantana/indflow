@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-02-24 00:00 America/Bahia
-# MOTIVO: Backfill persistente RUN/STOP em machine_state_event (a partir de producao_evento) antes de responder detalhe-dia, estabilizando Historico no refresh.
+# LAST_RECODE: 2026-03-04 23:50 America/Bahia
+# MOTIVO: OP por slot: permitir criar OP em posicao 1..5 (1 ativa, 2-5 fila) via /producao/op/iniciar com posicao no payload.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -620,6 +620,8 @@ def init_op_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             machine_id TEXT NOT NULL,
 
+            posicao INTEGER NOT NULL DEFAULT 1,
+
             os TEXT NOT NULL,
             lote TEXT NOT NULL,
             operador TEXT NOT NULL,
@@ -655,6 +657,7 @@ def init_op_db():
         "ALTER TABLE ordens_producao ADD COLUMN qtd_cost_elas INTEGER DEFAULT 0",
         "ALTER TABLE ordens_producao ADD COLUMN refugo INTEGER DEFAULT 0",
         "ALTER TABLE ordens_producao ADD COLUMN qtd_saco_caixa INTEGER DEFAULT 0",
+        "ALTER TABLE ordens_producao ADD COLUMN posicao INTEGER NOT NULL DEFAULT 1",
     ]:
         try:
             cur.execute(sql)
@@ -897,15 +900,16 @@ def _insert_op_row(payload: dict) -> int:
     cur.execute(
         """
         INSERT INTO ordens_producao (
-            machine_id, os, lote, operador, bobina, gr_fio, observacoes,
+            machine_id, posicao, os, lote, operador, bobina, gr_fio, observacoes,
             started_at, ended_at, status,
             baseline_pcs, baseline_u1, baseline_u2,
             op_metros, op_pcs, op_conv_m_por_pcs,
             unidade_1, unidade_2
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload.get("machine_id"),
+            payload.get("posicao"),
             payload.get("os"),
             payload.get("lote"),
             payload.get("operador"),
@@ -2161,7 +2165,56 @@ def op_iniciar():
         return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
 
     with _op_lock:
-        if machine_id in op_active:
+        # Slot/posicao: 1..5
+        # - Se posicao nao vier no payload, usamos o primeiro slot vazio (1..5)
+        # - So pode existir 1 OP ATIVA por maquina (normalmente posicao 1)
+        raw_pos = data.get("posicao")
+        if raw_pos is None:
+            raw_pos = data.get("slot")
+        if raw_pos is None:
+            raw_pos = data.get("op_posicao")
+
+        posicao = None
+        try:
+            if raw_pos is not None and str(raw_pos).strip() != "":
+                posicao = int(str(raw_pos).strip())
+        except Exception:
+            posicao = None
+
+        if posicao is not None and (posicao < 1 or posicao > 5):
+            return jsonify({"error": "posicao deve ser um numero entre 1 e 5"}), 400
+
+        # Descobrir slots ocupados (ATIVA/FILA, sem ended_at)
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT posicao
+                FROM ordens_producao
+                WHERE machine_id = ?
+                  AND ended_at IS NULL
+                  AND status IN ('ATIVA', 'FILA')
+                """,
+                (machine_id,),
+            )
+            ocupadas = {int(r[0]) for r in cur.fetchall() if r[0] is not None}
+
+        if posicao is None:
+            # Primeiro slot vazio
+            for p in range(1, 6):
+                if p not in ocupadas:
+                    posicao = p
+                    break
+
+        if posicao is None:
+            return jsonify({"error": "Fila cheia: ja existem 5 OPs (ativa/fila) para esta maquina"}), 409
+
+        if posicao in ocupadas:
+            return jsonify({"error": f"Slot {posicao} ja possui uma OP (ativa/fila)"}), 409
+
+        # Regra: so ativa se nao existir OP ativa
+        existe_ativa = machine_id in op_active
+        if posicao == 1 and existe_ativa:
             return jsonify({"error": "Ja existe uma OP ativa para esta maquina"}), 409
 
     bobinas_list, bobina = _normalize_bobinas(data)
@@ -2173,16 +2226,29 @@ def op_iniciar():
     unidade_1 = _as_str(data.get("unidade_1"))
     unidade_2 = _as_str(data.get("unidade_2"))
 
-    # Baseline da OP: valor absoluto atual do ESP. A OP sempre inicia com 0 (esp_atual - baseline).
-    with _get_conn() as conn:
-        esp_atual = _get_current_esp_abs(conn, machine_id)
-    baseline_pcs = int(esp_atual)
-    baseline_u1 = float(esp_atual)
+    # Slot escolhido:
+    # - posicao 1: cria OP ATIVA (se nao houver ativa)
+    # - posicao 2..5: cria OP na FILA (mesmo que ja exista ativa)
+    is_active = (posicao == 1)
+
+    # Baseline:
+    # - ATIVA: ancora no valor absoluto atual do ESP (op inicia em 0 = esp_atual - baseline)
+    # - FILA: baseline fica 0 e so sera ancorado quando ativar (passo futuro)
+    baseline_pcs = 0
+    baseline_u1 = 0.0
     baseline_u2 = 0.0
+    if is_active:
+        with _get_conn() as conn:
+            esp_atual = _get_current_esp_abs(conn, machine_id)
+        baseline_pcs = int(esp_atual)
+        baseline_u1 = float(esp_atual)
+
     started_at = _now_iso()
 
     row_payload = {
         "machine_id": machine_id,
+        "posicao": posicao,
+        "status": ("ATIVA" if is_active else "FILA"),
         "os": os_,
         "lote": lote,
         "operador": operador,
@@ -2192,7 +2258,8 @@ def op_iniciar():
         "observacoes": observacoes,
         "started_at": started_at,
         "ended_at": None,
-        "status": "ATIVA",
+        "posicao": posicao,
+        "status": ("ATIVA" if is_active else "FILA"),
         "baseline_pcs": baseline_pcs,
         "baseline_u1": baseline_u1,
         "baseline_u2": baseline_u2,
@@ -2241,10 +2308,12 @@ def op_iniciar():
         "op_conv_m_por_pcs": row_payload.get("op_conv_m_por_pcs") or 0,
     }
 
-    with _op_lock:
-        op_active[machine_id] = op_mem
+    if is_active:
+        with _op_lock:
+            op_active[machine_id] = op_mem
+        return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id, "posicao": posicao})
 
-    return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id})
+    return jsonify({"status": "ok", "active": False, "op_id": op_id, "machine_id": machine_id, "posicao": posicao, "status_op": "FILA"})
 
 
 

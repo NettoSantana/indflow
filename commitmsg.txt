@@ -1,9 +1,5 @@
-﻿feat(OP): permitir abrir OP clicando diretamente no slot
+﻿feat(front): abrir OP por slot e Abrir direcionado ao primeiro slot vazio
 
-slots 1..5 agora são clicáveis
-
-clique abre modal de criação de OP
-
-posição do slot é enviada automaticamente
-
-fluxo mais rápido para operador de máquina
+- Clique no slot 1..5 abre modal Nova OP com posicao preenchida
+- Botao Abrir usa automaticamente o primeiro slot vazio
+- Envia posicao no payload do /producao/op/iniciar
