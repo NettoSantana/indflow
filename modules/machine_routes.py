@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-25 15:20 America/Bahia
-# MOTIVO: Corrigir meta do dia no /machine/status (evitar multiplicar meta_hora por horas indevidas), expondo meta_dia (soma dos turnos) e usando meta_turno_ativo apenas para meta_por_hora do turno atual.
+# LAST_RECODE: 2026-03-04 08:15 America/Bahia
+# MOTIVO: Corrigir virada da hora: quando timestamp do ESP atrasar/oscilar (drift alto), usar relógio do servidor para calcular hora_idx e iniciar hora zerada (sem herdar).
 
 import os
 import json
@@ -1877,10 +1877,32 @@ def update_machine():
         agora_lc = now_bahia()
         now_ms_lc = int(agora_lc.timestamp() * 1000)
 
-        effective_ts_ms = int(ts_ms_in) if ts_ms_in is not None else int(now_ms_lc)
+        max_drift_ms = _safe_int(os.getenv("INDFLOW_MAX_ESP_TS_DRIFT_MS"), 300000)
 
-        m["_last_esp_ts_ms_seen"] = effective_ts_ms
-        m["_last_esp_ts_source"] = "esp" if ts_ms_in is not None else "server_fallback"
+        ts_ms_in_int = None
+        if ts_ms_in is not None:
+            try:
+                ts_ms_in_int = int(ts_ms_in)
+            except Exception:
+                ts_ms_in_int = None
+
+        if ts_ms_in_int is None:
+            effective_ts_ms = int(now_ms_lc)
+            ts_source = "server_fallback"
+        else:
+            drift_ms = abs(int(now_ms_lc) - int(ts_ms_in_int))
+            if drift_ms > int(max_drift_ms):
+                # timestamp do ESP está fora da janela aceitável -> usar relógio do servidor para bucket de hora
+                effective_ts_ms = int(now_ms_lc)
+                ts_source = "server_fallback_drift"
+                m["_last_esp_ts_ms_raw"] = int(ts_ms_in_int)
+                m["_last_esp_ts_drift_ms"] = int(drift_ms)
+            else:
+                effective_ts_ms = int(ts_ms_in_int)
+                ts_source = "esp"
+
+        m["_last_esp_ts_ms_seen"] = int(effective_ts_ms)
+        m["_last_esp_ts_source"] = ts_source
 
         try:
             m["_last_esp_ts_iso_local"] = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA).strftime("%Y-%m-%d %H:%M:%S")
