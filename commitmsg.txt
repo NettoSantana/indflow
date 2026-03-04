@@ -1,5 +1,4 @@
-﻿fix(historico): barra por status na hora atual e nao inferir STOP sem eventos
+﻿fix(machine_calc): virada da hora baseada no relogio do servidor
 
-- Remove fallback por producao quando nao houver machine_state_event
-- Hora atual usa status atual (run/status_ui) para RUN/STOP
-- Horas sem eventos viram IDLE (cinza no front)
+- Bucket de hora e dia_operacional_ref passam a usar horario do servidor (America/Bahia)
+- Evita herdar producao na virada quando timestamp do ESP atrasa ou oscila
