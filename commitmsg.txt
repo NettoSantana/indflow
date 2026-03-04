@@ -1,5 +1,5 @@
-﻿fix(historico): Prod do Historico usa producao_por_hora (horas_turno) e remove fallback errado
+﻿fix(historico): normalizacao de slot horas_turno para alinhar producao_por_hora no historico
 
-- Para HOJE, "Prod" do historico passa a ler apenas machine_state.producao_por_hora alinhado a horas_turno
-- Remove uso de producao_exibicao_24 no historico (evita ler hora errada)
-- Remove lixo no fim do arquivo que podia quebrar import
+- remove espacos de "14:00 - 15:00" para "14:00-15:00"
+- garante correspondencia correta entre horas_turno e producao_por_hora
+- corrige exibicao de Prod no historico (ex: 37 na hora 15:00)

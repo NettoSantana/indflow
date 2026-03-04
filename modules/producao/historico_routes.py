@@ -1492,18 +1492,30 @@ def api_producao_detalhe_dia():
                     stop_start_naive = None
 
 
+            # Mapa hora(0-23) -> producao_por_hora (alinhada a horas_turno) para usar no historico
+            prod_turno_by_hour = None
+            if isinstance(machine_state, dict):
+                try:
+                    horas_turno = machine_state.get("horas_turno")
+                    prod_turno = machine_state.get("producao_por_hora")
+                    if isinstance(horas_turno, list) and isinstance(prod_turno, list) and len(horas_turno) == len(prod_turno):
+                        m = {}
                         for i_slot, slot in enumerate(horas_turno):
                             try:
-                                s = str(slot).replace(" ", "")
-                                # aceita "14:00-15:00" ou "14:00 - 15:00"
-                                start = s.split("-", 1)[0]
-                                hh = int(start.split(":", 1)[0])
+                                s = str(slot)
+                                # Ex.: "13:00 - 14:00" -> hour=13
+                                start = s.split("-", 1)[0].strip()
+                                hh = int(start.split(":", 1)[0].strip())
                                 val = prod_turno[i_slot]
                                 if val is None:
                                     continue
                                 m[hh] = _safe_int(val, 0)
                             except Exception:
                                 continue
+                        prod_turno_by_hour = m if m else None
+                except Exception:
+                    prod_turno_by_hour = None
+
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             day_state_segments = _fetch_state_segments_from_state_events(conn, eff_mid, data_ref)
