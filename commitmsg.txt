@@ -1,5 +1,5 @@
-﻿style(front): fila de OP em layout horizontal (5 slots lado a lado)
+﻿style(front): fila de OP no topo (chips) e remover card do grid
 
-- Substitui tabela por cards horizontais (posicao 1..5)
-- Mantem consumo de GET /machine/op/fila
-- Mantem botao Atualizar e refresh automatico
+- Remove o card "Fila de OP" do grid
+- Renderiza 5 slots (1..5) no topo, lado a lado, na linha do titulo
+- Mantem consumo de GET /machine/op/fila e refresh automatico

@@ -631,7 +631,7 @@ function _renderOpFilaTop(rows){
     const opTxt = op ? String(op) : "—";
 
     out.push(
-      `<div class="op-chip" title="POS ${p}">` +
+      `<div class="op-chip" onclick="abrirOpSlot(${p})" style="cursor:pointer" title="POS ${p}">` +
         `<div class="op-chip-pos">${p}</div>` +
         `<div class="op-chip-op" title="${opTxt}">${opTxt}</div>` +
         `<span class="op-chip-status ${b.cls}">${b.label}</span>` +
