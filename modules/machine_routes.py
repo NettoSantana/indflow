@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# LAST_RECODE: 2026-02-25 15:20 America/Bahia
-# MOTIVO: Corrigir meta do dia no /machine/status (evitar multiplicar meta_hora por horas indevidas), expondo meta_dia (soma dos turnos) e usando meta_turno_ativo apenas para meta_por_hora do turno atual.
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
+# LAST_RECODE: 2026-03-04 16:58 America/Bahia
+# MOTIVO: Registrar transicoes RUN/STOP/IDLE/NP no machine_state_event para pintar a barra por estado no historico.
 
 import os
 import json
@@ -124,10 +124,10 @@ def _record_machine_state_transition(
     hora_idx: int,
 ) -> None:
     """
-    Persiste a transicao de estado (RUN/STOP/NP) se mudou em relacao ao ultimo evento.
+    Persiste a transicao de estado (RUN/STOP/IDLE/NP) se mudou em relacao ao ultimo evento.
     """
     st = (state or "").strip().upper()
-    if st not in ("RUN", "STOP", "NP"):
+    if st not in ("RUN", "STOP", "IDLE", "NP"):
         return
 
     ts_ms = int(agora.timestamp() * 1000)
@@ -154,7 +154,7 @@ def _infer_state_for_timeline(m: dict, hora_atual: int | None) -> str:
     Decide estado apenas para a barra (sem meta):
       - NP: fora de programacao (np_por_hora_24[h] > 0)
       - RUN: status_ui == PRODUZINDO
-      - STOP: caso contrario
+      - STOP: status_ui == PARADA e parado_min >= 1
     """
     try:
         if isinstance(hora_atual, int) and 0 <= hora_atual < 24:
@@ -170,7 +170,20 @@ def _infer_state_for_timeline(m: dict, hora_atual: int | None) -> str:
     except Exception:
         pass
 
-    return "STOP"
+    try:
+        if (m.get("status_ui") or "").strip().upper() == "PARADA":
+            pm = m.get("parado_min")
+            if pm is None:
+                return "IDLE"
+            try:
+                if int(pm) >= 1:
+                    return "STOP"
+            except Exception:
+                return "IDLE"
+    except Exception:
+        pass
+
+    return "IDLE"
 
 def _calc_produzido_from_ops(ops: list) -> int:
     """
@@ -1871,6 +1884,7 @@ def update_machine():
         except Exception:
             pass
 
+    delta_evt = 0
     try:
         ts_ms_in = _get_ts_ms_from_payload(data)
 
@@ -1933,6 +1947,57 @@ def update_machine():
                 m["stopped_since_ms"] = now_ms
             else:
                 m["stopped_since_ms"] = existing
+    except Exception:
+        pass
+
+
+    # Registra transicao de estado para pintar a barra por tempo (RUN/STOP/IDLE/NP)
+    try:
+        agora_evt = now_bahia()
+        hora_evt = int(agora_evt.hour)
+        data_ref_evt = dia_operacional_ref_str(agora_evt)
+        raw_mid = _norm_machine_id(machine_id)
+        eff_mid = f"{cliente_id}::{raw_mid}"
+
+        # NP: fora de programacao para a hora atual
+        np_now = False
+        try:
+            np24 = m.get("np_por_hora_24") or [0] * 24
+            if isinstance(np24, list) and len(np24) == 24 and _safe_int(np24[hora_evt], 0) > 0:
+                np_now = True
+        except Exception:
+            np_now = False
+
+        if np_now:
+            state_evt = "NP"
+        else:
+            thr_evt = 0
+            try:
+                thr_evt = int(m.get("no_count_stop_sec", 0) or 0)
+            except Exception:
+                thr_evt = 0
+
+            sem_contar_evt = 0
+            try:
+                last_ts_evt = m.get("_last_count_ts_ms")
+                if last_ts_evt is None:
+                    last_ts_evt = int(agora_evt.timestamp() * 1000)
+                last_ts_evt = int(last_ts_evt)
+                now_ms_evt = int(agora_evt.timestamp() * 1000)
+                if now_ms_evt >= last_ts_evt:
+                    sem_contar_evt = int((now_ms_evt - last_ts_evt) / 1000)
+            except Exception:
+                sem_contar_evt = 0
+
+            if int(delta_evt or 0) > 0:
+                state_evt = "RUN"
+            else:
+                if thr_evt >= 5 and sem_contar_evt >= thr_evt:
+                    state_evt = "STOP"
+                else:
+                    state_evt = "IDLE"
+
+        _record_machine_state_transition(raw_mid, eff_mid, str(cliente_id), state_evt, agora_evt, data_ref_evt, hora_evt)
     except Exception:
         pass
 

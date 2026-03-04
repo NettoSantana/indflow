@@ -1,4 +1,4 @@
-﻿fix(historico): barra baseada apenas em RUN/STOP com SQL defensivo
+﻿fix(historico): barra por estado mantendo ultimo ate mudar
 
-- machine_state_event: detectar colunas (id/data/ts/state) para suportar schemas antigos
-- remove dependencia de producao/meta/heuristicas para pintar a barra
+- Monta segmentos RUN/STOP/IDLE por transicoes do machine_state_event
+- Completa cada hora sem buracos, mantendo ultimo estado ate o fim da hora
