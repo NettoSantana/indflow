@@ -1,4 +1,4 @@
-﻿fix(historico): barra baseada em RUN/STOP sem herdar RUN antigo
+﻿fix(historico_routes): corrigir indentacao em try de state0
 
-- machine_state_event: ignora state0=RUN se ultimo evento antes do dia for muito antigo (6h)
-- evita horas verdes erradas por heranca de dia anterior sem evento de STOP
+- Corrige erro de sintaxe (try sem bloco valido por indentacao incorreta)
+- Mantem regra da barra baseada em RUN/STOP
