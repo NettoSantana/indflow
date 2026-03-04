@@ -1,4 +1,5 @@
-﻿fix(machine_calc): virada da hora baseada no relogio do servidor
+﻿fix(machine_routes): virada de hora robusta contra atraso de timestamp do ESP
 
-- Bucket de hora e dia_operacional_ref passam a usar horario do servidor (America/Bahia)
-- Evita herdar producao na virada quando timestamp do ESP atrasa ou oscila
+- Se ts_ms do ESP tiver drift alto vs servidor, usar relogio do servidor (America/Bahia) para bucket de hora
+- Evita hora_idx atrasar e hora nova herdar producao por timestamp oscilando
+- Mantem uso normal do ts_ms do ESP quando dentro da janela aceitavel
