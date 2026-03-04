@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-04 13:41 America/Bahia
-# MOTIVO: Barra do historico: segmentos por estado RUN/STOP/IDLE mantendo ultimo estado ate mudar; completa a hora inteira; base machine_state_event.
+# ULTIMO_RECODE: 2026-03-04 17:30:56
+# MOTIVO: Historico detalhe-dia deve usar producao_por_hora (estado da maquina) para exibir Prod no historico, mantendo regra de virada de hora.
 
 
 from __future__ import annotations
@@ -1492,6 +1492,30 @@ def api_producao_detalhe_dia():
                     stop_start_naive = None
 
 
+            # Mapa hora(0-23) -> producao_por_hora (alinhada a horas_turno) para usar no historico
+            prod_turno_by_hour = None
+            if isinstance(machine_state, dict):
+                try:
+                    horas_turno = machine_state.get("horas_turno")
+                    prod_turno = machine_state.get("producao_por_hora")
+                    if isinstance(horas_turno, list) and isinstance(prod_turno, list) and len(horas_turno) == len(prod_turno):
+                        m = {}
+                        for i_slot, slot in enumerate(horas_turno):
+                            try:
+                                s = str(slot)
+                                # Ex.: "13:00 - 14:00" -> hour=13
+                                start = s.split("-", 1)[0].strip()
+                                hh = int(start.split(":", 1)[0].strip())
+                                val = prod_turno[i_slot]
+                                if val is None:
+                                    continue
+                                m[hh] = _safe_int(val, 0)
+                            except Exception:
+                                continue
+                        prod_turno_by_hour = m if m else None
+                except Exception:
+                    prod_turno_by_hour = None
+
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
             day_state_segments = _fetch_state_segments_from_state_events(conn, eff_mid, data_ref)
@@ -1602,16 +1626,22 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
 
-                # Fallback de exibicao (HOJE): se a persistencia horaria nao rodou,
-                # usa producao_exibicao_24 do machine_state (alimentado pelo update do ESP)
-                # para nao mostrar Prod=0 e barra vermelha quando a maquina esta produzindo.
+                # Fallback de exibicao (HOJE): quando a persistencia horaria ainda nao atualizou,
+                # usa primeiro producao_por_hora (alinhada a horas_turno) e, se nao existir,
+                # cai para producao_exibicao_24. Assim o numero do historico acompanha o card
+                # sem herdar na virada da hora.
                 if now_naive is not None and isinstance(machine_state, dict) and data_ref == now_naive.date():
                     try:
-                        p24 = machine_state.get("producao_exibicao_24")
-                        if isinstance(p24, list) and len(p24) == 24:
-                            p24_h = _safe_int(p24[h], 0)
-                            if p24_h > produzido:
-                                produzido = p24_h
+                        if isinstance(prod_turno_by_hour, dict) and h in prod_turno_by_hour:
+                            pph = _safe_int(prod_turno_by_hour.get(h), 0)
+                            if pph > produzido:
+                                produzido = pph
+                        else:
+                            p24 = machine_state.get("producao_exibicao_24")
+                            if isinstance(p24, list) and len(p24) == 24:
+                                p24_h = _safe_int(p24[h], 0)
+                                if p24_h > produzido:
+                                    produzido = p24_h
                     except Exception:
                         pass
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
