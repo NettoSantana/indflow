@@ -1,6 +1,6 @@
 # PATH: modules/machine_calc.py
-# LAST_RECODE: 2026-03-04 02:09 America/Bahia
-# MOTIVO: fix virada da hora baseada no relogio do servidor (America/Bahia) para evitar heranca quando timestamp do ESP oscila.
+# LAST_RECODE: 2026-03-04 01:27 America/Bahia
+# MOTIVO: Virada de hora: usar horario do servidor para bucketing (zera na hora exata, independente de tela).
 #
 # modules/machine_calc.py
 from datetime import datetime, time, timedelta
@@ -305,11 +305,11 @@ def atualizar_producao_hora(m):
     )
 
     # ============================================================
-    # HORA DE REFERENCIA PARA BUCKET (relogio do servidor)
-    # - Virada de hora e dia operacional seguem o relogio do servidor (America/Bahia).
-    # - Evita herdar producao quando timestamp do ESP atrasa ou oscila.
+    # NOVO: acumular "não programado" (fora do turno)
     # ============================================================
-    agora = now_bahia()
+    agora_bucket = now_bahia()
+    agora_evt = agora_ref(m, fallback=agora_bucket)
+    agora = agora_bucket
 
     # ============================================================
     # MULTI-TURNO (v2): Meta do Dia = soma das metas dos turnos
