@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-LAST_RECODE: 2026-03-04 19:48 (America/Bahia)
-MOTIVO: Adicionar card e tabela para exibir a fila fixa de OP (5 slots) consumindo GET /machine/op/fila, sem logica de negocio no front.
+LAST_RECODE: 2026-03-04 19:55 (America/Bahia)
+MOTIVO: Ajustar visual da fila fixa de OP para layout horizontal (5 slots lado a lado), mantendo consumo de GET /machine/op/fila.
 -->
 
 <!DOCTYPE html>
@@ -215,7 +215,7 @@ MOTIVO: Adicionar card e tabela para exibir a fila fixa de OP (5 slots) consumin
       border: 1px solid #e5e7eb;
       border-radius: 14px;
       overflow: hidden;
-      background: #f8fafc;
+      background: #ffffff;
     }
     .op-fila-head{
       display:flex;
@@ -239,61 +239,80 @@ MOTIVO: Adicionar card e tabela para exibir a fila fixa de OP (5 slots) consumin
       color: #64748b;
       white-space: nowrap;
     }
-    .op-fila-table{
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 13px;
-      background: #fff;
+
+    .op-fila-slots{
+      display:flex;
+      gap:10px;
+      padding: 12px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      background: #ffffff;
     }
-    .op-fila-table th, .op-fila-table td{
-      padding: 10px 12px;
-      border-bottom: 1px solid #e5e7eb;
-      text-align: left;
-      vertical-align: middle;
-    }
-    .op-fila-table th{
+
+    .op-slot{
+      flex: 0 0 108px;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 10px 10px;
       background: #f8fafc;
-      color: #334155;
-      font-weight: 900;
+      box-shadow: 0 6px 16px rgba(15,23,42,0.05);
+    }
+
+    .op-slot-top{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:8px;
+      margin-bottom: 8px;
+    }
+
+    .op-slot-pos{
       font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-    }
-    .op-fila-pos{
       font-weight: 900;
       color: #0f172a;
-      width: 70px;
     }
-    .op-fila-op{
-      font-weight: 900;
-      color: #0f172a;
-      max-width: 320px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .op-fila-badge{
+
+    .op-slot-badge{
       display:inline-block;
-      padding: 6px 10px;
+      padding: 4px 8px;
       border-radius: 999px;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 900;
       color: #fff;
       text-transform: uppercase;
       letter-spacing: 0.02em;
-      min-width: 92px;
+      min-width: 64px;
       text-align: center;
+      white-space: nowrap;
     }
-    .op-fila-ativa{ background:#16a34a; }
-    .op-fila-fila{ background:#64748b; }
-    .op-fila-encerrada{ background:#0f172a; }
-    .op-fila-vazio{ background:#94a3b8; }
+
+    .op-slot-ativa{ background:#16a34a; }
+    .op-slot-fila{ background:#64748b; }
+    .op-slot-encerrada{ background:#0f172a; }
+    .op-slot-vazio{ background:#94a3b8; }
+
+    .op-slot-op{
+      font-size: 12px;
+      font-weight: 900;
+      color: #0f172a;
+      line-height: 1.15;
+      min-height: 28px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      text-align:center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .op-fila-error{
       padding: 10px 12px;
       font-size: 13px;
       font-weight: 900;
       color: #b91c1c;
-      background: #fff;
+      background: #ffffff;
+      border-top: 1px solid #e5e7eb;
     }
   </style>
 
@@ -354,22 +373,47 @@ MOTIVO: Adicionar card e tabela para exibir a fila fixa de OP (5 slots) consumin
               <div class="op-fila-meta" id="op-fila-meta">machine_id: —</div>
             </div>
 
-            <table class="op-fila-table">
-              <thead>
-                <tr>
-                  <th style="width:70px;">Pos</th>
-                  <th>OP</th>
-                  <th style="width:140px;">Status</th>
-                </tr>
-              </thead>
-              <tbody id="op-fila-tbody">
-                <tr><td class="op-fila-pos">1</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
-                <tr><td class="op-fila-pos">2</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
-                <tr><td class="op-fila-pos">3</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
-                <tr><td class="op-fila-pos">4</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
-                <tr><td class="op-fila-pos">5</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
-              </tbody>
-            </table>
+            <div class="op-fila-slots" id="op-fila-slots">
+              <div class="op-slot">
+                <div class="op-slot-top">
+                  <div class="op-slot-pos">1</div>
+                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
+                </div>
+                <div class="op-slot-op">—</div>
+              </div>
+
+              <div class="op-slot">
+                <div class="op-slot-top">
+                  <div class="op-slot-pos">2</div>
+                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
+                </div>
+                <div class="op-slot-op">—</div>
+              </div>
+
+              <div class="op-slot">
+                <div class="op-slot-top">
+                  <div class="op-slot-pos">3</div>
+                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
+                </div>
+                <div class="op-slot-op">—</div>
+              </div>
+
+              <div class="op-slot">
+                <div class="op-slot-top">
+                  <div class="op-slot-pos">4</div>
+                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
+                </div>
+                <div class="op-slot-op">—</div>
+              </div>
+
+              <div class="op-slot">
+                <div class="op-slot-top">
+                  <div class="op-slot-pos">5</div>
+                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
+                </div>
+                <div class="op-slot-op">—</div>
+              </div>
+            </div>
 
             <div id="op-fila-error" class="op-fila-error" style="display:none;"></div>
           </div>
@@ -631,16 +675,16 @@ function _normalizeOpFilaPayload(payload){
 
 function _badgeClassFromStatus(st){
   const s = String(st || "").toLowerCase();
-  if(s === "ativa") return {cls:"op-fila-ativa", label:"ATIVA"};
-  if(s === "fila") return {cls:"op-fila-fila", label:"FILA"};
-  if(s === "encerrada") return {cls:"op-fila-encerrada", label:"ENCERRADA"};
-  if(s === "vazio" || s === "" || s === "null" || s === "none") return {cls:"op-fila-vazio", label:"VAZIO"};
-  return {cls:"op-fila-fila", label:String(st||"FILA").toUpperCase()};
+  if(s === "ativa") return {cls:"op-slot-ativa", label:"ATIVA"};
+  if(s === "fila") return {cls:"op-slot-fila", label:"FILA"};
+  if(s === "encerrada") return {cls:"op-slot-encerrada", label:"ENCERRADA"};
+  if(s === "vazio" || s === "" || s === "null" || s === "none") return {cls:"op-slot-vazio", label:"VAZIO"};
+  return {cls:"op-slot-fila", label:String(st||"FILA").toUpperCase()};
 }
 
 function _renderOpFilaRows(rows){
-  const tbody = document.getElementById("op-fila-tbody");
-  if(!tbody) return;
+  const slots = document.getElementById("op-fila-slots");
+  if(!slots) return;
 
   const byPos = {};
   (rows || []).forEach((r) => {
@@ -657,15 +701,19 @@ function _renderOpFilaRows(rows){
     const st = r ? (r.status || "") : "vazio";
     const b = _badgeClassFromStatus(st);
     const opTxt = op ? String(op) : "—";
+
     out.push(
-      `<tr>` +
-      `<td class="op-fila-pos">${p}</td>` +
-      `<td class="op-fila-op">${opTxt}</td>` +
-      `<td><span class="op-fila-badge ${b.cls}">${b.label}</span></td>` +
-      `</tr>`
+      `<div class="op-slot">` +
+        `<div class="op-slot-top">` +
+          `<div class="op-slot-pos">${p}</div>` +
+          `<span class="op-slot-badge ${b.cls}">${b.label}</span>` +
+        `</div>` +
+        `<div class="op-slot-op" title="${opTxt}">${opTxt}</div>` +
+      `</div>`
     );
   }
-  tbody.innerHTML = out.join("");
+
+  slots.innerHTML = out.join("");
 }
 
 async function carregarOpFila(){

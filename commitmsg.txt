@@ -1,5 +1,5 @@
-﻿feat(machine_op): fila fixa de OP por maquina
+﻿feat(front): exibir fila fixa de OP na tela da maquina
 
-- Tabela machine_op_fila com 5 slots por maquina (posicao 1..5)
-- Endpoints: GET /machine/op/fila, POST /machine/op/ativar, POST /machine/op/encerrar
-- Regra: no maximo 1 OP ATIVA; sem reorganizacao automatica
+- Adiciona card "Fila de OP" com 5 slots (posicao 1..5)
+- Consome GET /machine/op/fila?machine_id=...
+- Atualizacao manual e refresh automatico a cada 15s (somente leitura)
