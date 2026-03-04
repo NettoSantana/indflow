@@ -1,4 +1,5 @@
-﻿fix(historico): usar producao_exibicao_24 do machine_state como fallback no detalhe-dia
+﻿fix(historico): impedir STOP artificial de 60 min quando nao existem eventos
 
-- Evita Prod=0 e barras vermelhas quando a persistencia horaria ainda nao gravou
-- Aplica apenas para o dia atual (HOJE) e somente se existir producao_exibicao_24
+- Remove fallback que marcava hora inteira como STOP
+- Agora horas sem eventos nao contabilizam tempo
+- Corrige exibicao de tempo parado no historico

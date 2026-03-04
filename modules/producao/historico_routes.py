@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-03 23:35 America/Bahia
-# MOTIVO: Ajustar detalhe-dia para usar producao_exibicao_24 do machine_state (quando disponivel) como fallback em DEV, evitando horas zeradas/vermelhas quando a persistencia horaria ainda nao rodou.
+# LAST_RECODE: 2026-03-03 23:55 America/Bahia
+# MOTIVO: Fazer a barra do historico depender somente do status (RUN/STOP/NP), removendo fallback baseado em producao quando machine_state_event estiver vazio.
 
 
 from __future__ import annotations
@@ -1335,14 +1335,36 @@ def api_producao_detalhe_dia():
 
 
                 # Fallback: se nao houver rastro em machine_state_event para o dia,
-                # nao marque a hora inteira como STOP quando houve producao.
-                # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN a hora inteira; senao => STOP.
+                # a barra deve depender SOMENTE do status (RUN/STOP/NP), nunca da producao.
+                #
+                # Regras:
+                # - Se houver run_intervals: usa o historico real (_build_segments_for_hour).
+                # - Se NAO houver run_intervals:
+                #   - Se for o dia atual e esta for a hora atual: pinta pela condicao "rodando agora" do machine_state.
+                #   - Para horas passadas sem eventos: nao inventa historico (assume STOP).
                 if (not is_np) and (not run_intervals):
-                    if produzido > 0:
+                    is_current_hour = (
+                        (now_naive is not None)
+                        and (data_ref == now_naive.date())
+                        and (hs <= now_naive < he)
+                    )
+
+                    if is_current_hour:
+                        is_running_now = False
+                        try:
+                            run_flag = int(machine_state.get("run") or 0)
+                            status_ui = str(machine_state.get("status_ui") or "").upper()
+                            status_txt = str(machine_state.get("status") or "").upper()
+
+                            if run_flag == 1 and ("PARADO" not in status_ui) and (status_txt != "STOP"):
+                                is_running_now = True
+                        except Exception:
+                            is_running_now = False
+
                         segs = [{
                             "start": hs.strftime("%H:%M:%S"),
                             "end": he_calc.strftime("%H:%M:%S"),
-                            "state": "RUN",
+                            "state": "RUN" if is_running_now else "STOP",
                         }]
                     else:
                         segs = [{
