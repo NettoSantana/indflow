@@ -1,5 +1,9 @@
-﻿style(front): fila de OP no topo (chips) e remover card do grid
+﻿feat(OP): permitir abrir OP clicando diretamente no slot
 
-- Remove o card "Fila de OP" do grid
-- Renderiza 5 slots (1..5) no topo, lado a lado, na linha do titulo
-- Mantem consumo de GET /machine/op/fila e refresh automatico
+slots 1..5 agora são clicáveis
+
+clique abre modal de criação de OP
+
+posição do slot é enviada automaticamente
+
+fluxo mais rápido para operador de máquina
