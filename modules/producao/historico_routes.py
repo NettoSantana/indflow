@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-26 07:00 America/Bahia
-# MOTIVO: Fazer detalhe-dia refletir a meta por hora da tela 24h usando config_v2.shifts (turnos+breaks) como fonte de verdade; manter fallback de compatibilidade.
+# LAST_RECODE: 2026-03-03 23:35 America/Bahia
+# MOTIVO: Ajustar detalhe-dia para usar producao_exibicao_24 do machine_state (quando disponivel) como fallback em DEV, evitando horas zeradas/vermelhas quando a persistencia horaria ainda nao rodou.
 
 
 from __future__ import annotations
@@ -1290,6 +1290,19 @@ def api_producao_detalhe_dia():
 
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
+
+                # Fallback de exibicao (HOJE): se a persistencia horaria nao rodou,
+                # usa producao_exibicao_24 do machine_state (alimentado pelo update do ESP)
+                # para nao mostrar Prod=0 e barra vermelha quando a maquina esta produzindo.
+                if now_naive is not None and isinstance(machine_state, dict) and data_ref == now_naive.date():
+                    try:
+                        p24 = machine_state.get("producao_exibicao_24")
+                        if isinstance(p24, list) and len(p24) == 24:
+                            p24_h = _safe_int(p24[h], 0)
+                            if p24_h > produzido:
+                                produzido = p24_h
+                    except Exception:
+                        pass
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
 
 

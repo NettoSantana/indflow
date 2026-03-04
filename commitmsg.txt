@@ -1,4 +1,5 @@
-﻿cleanup: remover arquivos de backup (- Copia) do repositório
+﻿fix(historico): barra do detalhe-dia baseada em segmentos do backend
 
-- Remove machine_calc - Copia.py
-- Remove historico_routes - Copia (2).py
+- Prioriza h.segments (machine_state_event) para desenhar RUN/STOP/NP
+- Evita depender de localStorage/visita previa (aba anonima nao fica zerada)
+- Mantem fallback antigo caso backend nao envie segmentos
