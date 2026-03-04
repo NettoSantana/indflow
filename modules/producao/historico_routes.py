@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-04 00:05 America/Bahia
-# MOTIVO: Detalhe-dia: quando nao houver machine_state_event, nao inferir STOP pela producao; usar apenas status atual (run) na hora corrente e marcar demais horas como IDLE (cinza).
+# LAST_RECODE: 2026-03-04 01:20 America/Bahia
+# MOTIVO: Barra do historico: nao assumir RUN desde 00:00 por estado antigo; ignorar estado inicial RUN se ultimo evento for muito antigo (evita horas verdes erradas).
 
 
 from __future__ import annotations
@@ -707,14 +707,28 @@ def _fetch_run_intervals_from_state_events(
     # Estado inicial: ultimo evento antes do dia
     state0 = None
     try:
-        r0 = conn.execute(
+                r0 = conn.execute(
             "SELECT state, ts_ms FROM machine_state_event "
             "WHERE effective_machine_id=? AND ts_ms < ? "
             "ORDER BY ts_ms DESC LIMIT 1",
             (effective_machine_id, day_start_ms),
         ).fetchone()
         if r0:
-            state0 = str(r0[0] or "").upper()
+            # Se o ultimo evento antes do dia for muito antigo, nao use como estado inicial.
+            # Isso evita pintar horas como RUN por heranca de um dia anterior sem evento de STOP.
+            try:
+                r0_state = str(r0[0] or "").upper()
+                r0_ts_ms = int(r0[1]) if r0[1] is not None else None
+            except Exception:
+                r0_state = ""
+                r0_ts_ms = None
+
+            # tolerancia: se o ultimo evento for mais antigo que 6h antes de 00:00, ignora.
+            stale_ms = 6 * 60 * 60 * 1000
+            if r0_state in ("RUN", "STOP", "NP") and r0_ts_ms is not None and (day_start_ms - r0_ts_ms) <= stale_ms:
+                state0 = r0_state
+            else:
+                state0 = None
     except Exception:
         state0 = None
 
