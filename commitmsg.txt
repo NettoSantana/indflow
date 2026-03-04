@@ -1,4 +1,4 @@
-﻿fix(historico): corrigir erro de indentacao TAB vs spaces que quebrava import do modulo
+﻿fix(historico): barra baseada apenas em RUN/STOP com SQL defensivo
 
-- converte todo o arquivo para 4 spaces
-- elimina erro 'unindent does not match any outer indentation level'
+- machine_state_event: detectar colunas (id/data/ts/state) para suportar schemas antigos
+- remove dependencia de producao/meta/heuristicas para pintar a barra
