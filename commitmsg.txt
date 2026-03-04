@@ -1,5 +1,5 @@
-﻿fix(detalhe-dia): corrigir NameError e calcular produzido/h via producao_evento
+﻿fix(detalhe-dia): produzido por hora via SUM(delta) em producao_evento (TZ America/Bahia)
 
-- Evita erro 'name hor is not defined' no endpoint detalhe-dia
-- produzido por hora passa a ser soma de delta em producao_evento (bucket por hora local America/Bahia)
-- Mantem meta/baseline vindos de producao_horaria
+- hours[].produzido passa a ser calculado por janela de hora local usando ts_ms
+- remove sobrescrita por machine_state (producao_exibicao_24 / horas_turno) que zerava horas
+- producao_horaria fica como fallback quando nao houver eventos
