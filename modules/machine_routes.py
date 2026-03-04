@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
-# LAST_RECODE: 2026-03-04 16:58 America/Bahia
-# MOTIVO: Registrar transicoes RUN/STOP/IDLE/NP no machine_state_event para pintar a barra por estado no historico.
+# LAST_RECODE: 2026-03-04 19:05 America/Bahia
+# MOTIVO: Implementar fila fixa de Ordens de Producao (OP) por maquina (ate 5 slots, 1 ativa).
 
 import os
 import json
@@ -40,6 +40,355 @@ from modules.machine.device_helpers import (
 )
 
 machine_bp = Blueprint("machine_bp", __name__)
+
+# =====================================================
+# FILA FIXA DE ORDENS DE PRODUCAO (OP) POR MAQUINA
+# - 5 slots (posicao 1..5)
+# - no maximo 1 OP ATIVA
+# - sem reorganizacao automatica (posicoes fixas)
+# =====================================================
+
+def _ensure_machine_op_fila_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS machine_op_fila (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente_id TEXT,
+            machine_id TEXT NOT NULL,
+            posicao INTEGER NOT NULL,
+            op TEXT,
+            status TEXT NOT NULL DEFAULT 'VAZIO',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_machine_op_fila_mid ON machine_op_fila(machine_id)")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_machine_op_fila_cid_mid ON machine_op_fila(cliente_id, machine_id)")
+    except Exception:
+        pass
+
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_machine_op_fila_cliente
+            ON machine_op_fila(cliente_id, machine_id, posicao)
+            WHERE cliente_id IS NOT NULL
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_machine_op_fila_legacy
+            ON machine_op_fila(machine_id, posicao)
+            WHERE cliente_id IS NULL
+            """
+        )
+    except Exception:
+        pass
+
+def _op_status_norm(v: str | None) -> str:
+    s = (v or "").strip().upper()
+    if s in ("ATIVA", "FILA", "ENCERRADA", "VAZIO"):
+        return s
+    return "VAZIO"
+
+def _ensure_machine_op_fila_slots(conn: sqlite3.Connection, cliente_id: str | None, machine_id: str) -> None:
+    _ensure_machine_op_fila_table(conn)
+
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+
+    now_iso = now_bahia().isoformat(timespec="seconds")
+
+    for pos in range(1, 6):
+        if cid:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO machine_op_fila(cliente_id, machine_id, posicao, op, status, created_at, updated_at)
+                VALUES(?, ?, ?, NULL, 'VAZIO', ?, ?)
+                """,
+                (cid, mid, int(pos), now_iso, now_iso),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO machine_op_fila(cliente_id, machine_id, posicao, op, status, created_at, updated_at)
+                VALUES(NULL, ?, ?, NULL, 'VAZIO', ?, ?)
+                """,
+                (mid, int(pos), now_iso, now_iso),
+            )
+
+def _load_machine_op_fila(conn: sqlite3.Connection, cliente_id: str | None, machine_id: str) -> list[dict]:
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+
+    _ensure_machine_op_fila_slots(conn, cid, mid)
+
+    if cid:
+        cur = conn.execute(
+            """
+            SELECT posicao, op, status
+              FROM machine_op_fila
+             WHERE cliente_id = ?
+               AND machine_id = ?
+             ORDER BY posicao ASC
+            """,
+            (cid, mid),
+        )
+    else:
+        cur = conn.execute(
+            """
+            SELECT posicao, op, status
+              FROM machine_op_fila
+             WHERE cliente_id IS NULL
+               AND machine_id = ?
+             ORDER BY posicao ASC
+            """,
+            (mid,),
+        )
+
+    rows = cur.fetchall() or []
+    out = []
+    for r in rows:
+        try:
+            pos = int(r[0])
+        except Exception:
+            continue
+        opv = r[1] if len(r) > 1 else None
+        st = _op_status_norm(r[2] if len(r) > 2 else None)
+        out.append({"posicao": pos, "op": opv, "status": st})
+
+    by_pos = {int(x["posicao"]): x for x in out if isinstance(x, dict) and isinstance(x.get("posicao"), int)}
+    final = []
+    for pos in range(1, 6):
+        it = by_pos.get(pos) or {"posicao": pos, "op": None, "status": "VAZIO"}
+        it["posicao"] = int(pos)
+        it["status"] = _op_status_norm(it.get("status"))
+        final.append(it)
+
+    return final
+
+def _has_active_op(conn: sqlite3.Connection, cliente_id: str | None, machine_id: str) -> bool:
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+
+    _ensure_machine_op_fila_table(conn)
+
+    if cid:
+        row = conn.execute(
+            "SELECT 1 FROM machine_op_fila WHERE cliente_id=? AND machine_id=? AND upper(status)='ATIVA' LIMIT 1",
+            (cid, mid),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM machine_op_fila WHERE cliente_id IS NULL AND machine_id=? AND upper(status)='ATIVA' LIMIT 1",
+            (mid,),
+        ).fetchone()
+    return row is not None
+
+def _activate_op_slot(conn: sqlite3.Connection, cliente_id: str | None, machine_id: str, posicao: int) -> tuple[bool, str]:
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+
+    _ensure_machine_op_fila_slots(conn, cid, mid)
+
+    if posicao < 1 or posicao > 5:
+        return (False, "posicao invalida (1..5)")
+
+    if _has_active_op(conn, cid, mid):
+        return (False, "ja existe OP ativa")
+
+    if cid:
+        row = conn.execute(
+            "SELECT op, status FROM machine_op_fila WHERE cliente_id=? AND machine_id=? AND posicao=? LIMIT 1",
+            (cid, mid, int(posicao)),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT op, status FROM machine_op_fila WHERE cliente_id IS NULL AND machine_id=? AND posicao=? LIMIT 1",
+            (mid, int(posicao)),
+        ).fetchone()
+
+    if not row:
+        return (False, "slot nao encontrado")
+
+    opv = (row[0] or "").strip() if row[0] is not None else ""
+    st = _op_status_norm(row[1] if len(row) > 1 else None)
+
+    if not opv:
+        return (False, "slot sem OP cadastrada")
+
+    if st == "ENCERRADA":
+        return (False, "OP encerrada nao pode ser ativada")
+
+    now_iso = now_bahia().isoformat(timespec="seconds")
+
+    if cid:
+        conn.execute(
+            "UPDATE machine_op_fila SET status='FILA', updated_at=? WHERE cliente_id=? AND machine_id=? AND upper(status)='ATIVA'",
+            (now_iso, cid, mid),
+        )
+    else:
+        conn.execute(
+            "UPDATE machine_op_fila SET status='FILA', updated_at=? WHERE cliente_id IS NULL AND machine_id=? AND upper(status)='ATIVA'",
+            (now_iso, mid),
+        )
+
+    if cid:
+        conn.execute(
+            "UPDATE machine_op_fila SET status='ATIVA', updated_at=? WHERE cliente_id=? AND machine_id=? AND posicao=?",
+            (now_iso, cid, mid, int(posicao)),
+        )
+    else:
+        conn.execute(
+            "UPDATE machine_op_fila SET status='ATIVA', updated_at=? WHERE cliente_id IS NULL AND machine_id=? AND posicao=?",
+            (now_iso, mid, int(posicao)),
+        )
+
+    return (True, "OK")
+
+def _encerrar_op_ativa(conn: sqlite3.Connection, cliente_id: str | None, machine_id: str, mode: str | None) -> tuple[bool, str]:
+    mid = _norm_machine_id(_unscope_machine_id(machine_id))
+    cid = (cliente_id or "").strip() or None
+
+    _ensure_machine_op_fila_slots(conn, cid, mid)
+
+    if not _has_active_op(conn, cid, mid):
+        return (False, "nao existe OP ativa")
+
+    now_iso = now_bahia().isoformat(timespec="seconds")
+    m = (mode or "").strip().lower()
+
+    if m in ("remove", "remover", "delete", "deletar", "apagar"):
+        if cid:
+            conn.execute(
+                "UPDATE machine_op_fila SET op=NULL, status='VAZIO', updated_at=? WHERE cliente_id=? AND machine_id=? AND upper(status)='ATIVA'",
+                (now_iso, cid, mid),
+            )
+        else:
+            conn.execute(
+                "UPDATE machine_op_fila SET op=NULL, status='VAZIO', updated_at=? WHERE cliente_id IS NULL AND machine_id=? AND upper(status)='ATIVA'",
+                (now_iso, mid),
+            )
+        return (True, "OK")
+
+    if cid:
+        conn.execute(
+            "UPDATE machine_op_fila SET status='ENCERRADA', updated_at=? WHERE cliente_id=? AND machine_id=? AND upper(status)='ATIVA'",
+            (now_iso, cid, mid),
+        )
+    else:
+        conn.execute(
+            "UPDATE machine_op_fila SET status='ENCERRADA', updated_at=? WHERE cliente_id IS NULL AND machine_id=? AND upper(status)='ATIVA'",
+            (now_iso, mid),
+        )
+    return (True, "OK")
+
+@machine_bp.route("/machine/op/fila", methods=["GET"])
+@login_required
+def machine_op_fila_listar():
+    cliente_id = None
+    try:
+        cliente_id = _get_cliente_id_for_request()
+    except Exception:
+        cliente_id = None
+
+    machine_id = _norm_machine_id(request.args.get("machine_id", "maquina01"))
+
+    conn = get_db()
+    try:
+        _ensure_machine_op_fila_table(conn)
+        fila = _load_machine_op_fila(conn, cliente_id, machine_id)
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    return jsonify({"ok": True, "cliente_id": cliente_id, "machine_id": machine_id, "fila": fila})
+
+@machine_bp.route("/machine/op/ativar", methods=["POST"])
+@login_required
+def machine_op_fila_ativar():
+    payload = request.get_json(silent=True) or {}
+
+    cliente_id = None
+    try:
+        cliente_id = _get_cliente_id_for_request()
+    except Exception:
+        cliente_id = None
+
+    machine_id = _norm_machine_id(payload.get("machine_id", "maquina01"))
+
+    try:
+        posicao = int(payload.get("posicao", 0) or 0)
+    except Exception:
+        posicao = 0
+
+    if posicao < 1 or posicao > 5:
+        return jsonify({"ok": False, "error": "posicao invalida (1..5)"}), 400
+
+    conn = get_db()
+    try:
+        ok, msg = _activate_op_slot(conn, cliente_id, machine_id, posicao)
+        if ok:
+            fila = _load_machine_op_fila(conn, cliente_id, machine_id)
+            conn.commit()
+            return jsonify({"ok": True, "message": "OK", "cliente_id": cliente_id, "machine_id": machine_id, "fila": fila})
+
+        conn.commit()
+        if msg == "ja existe OP ativa":
+            return jsonify({"ok": False, "error": msg}), 409
+        return jsonify({"ok": False, "error": msg}), 400
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+@machine_bp.route("/machine/op/encerrar", methods=["POST"])
+@login_required
+def machine_op_fila_encerrar():
+    payload = request.get_json(silent=True) or {}
+
+    cliente_id = None
+    try:
+        cliente_id = _get_cliente_id_for_request()
+    except Exception:
+        cliente_id = None
+
+    machine_id = _norm_machine_id(payload.get("machine_id", "maquina01"))
+    mode = payload.get("mode") or payload.get("acao") or None
+
+    conn = get_db()
+    try:
+        ok, msg = _encerrar_op_ativa(conn, cliente_id, machine_id, mode)
+        if ok:
+            fila = _load_machine_op_fila(conn, cliente_id, machine_id)
+            conn.commit()
+            return jsonify({"ok": True, "message": "OK", "cliente_id": cliente_id, "machine_id": machine_id, "fila": fila})
+
+        conn.commit()
+        if msg == "nao existe OP ativa":
+            return jsonify({"ok": False, "error": msg}), 409
+        return jsonify({"ok": False, "error": msg}), 400
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 
 def _get_tz():
