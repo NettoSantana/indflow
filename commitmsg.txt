@@ -1,13 +1,5 @@
-﻿feat(producao): implementar fila de OP por maquina (estrutura base)
+﻿feat(machine_op): fila fixa de OP por maquina
 
-- Introduz conceito de fila de ordens de producao por maquina
-- Limite logico de 5 OPs por maquina
-- Apenas 1 OP pode estar ativa por vez
-- Operador pode ativar OP somente se nao houver OP ativa
-- Encerramento da OP ativa libera maquina para nova ativacao
-- Estrutura preparada para futura separacao de roles (operador/gerente)
-
-Arquitetura:
-- Controle de fila mantido no backend
-- Frontend apenas consumira estado da fila
-- Base preparada para OEE por OP no futuro
+- Tabela machine_op_fila com 5 slots por maquina (posicao 1..5)
+- Endpoints: GET /machine/op/fila, POST /machine/op/ativar, POST /machine/op/encerrar
+- Regra: no maximo 1 OP ATIVA; sem reorganizacao automatica

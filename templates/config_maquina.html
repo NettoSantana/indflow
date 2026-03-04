@@ -1,14 +1,7 @@
 <!--
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-21 17:47 (America/Bahia)
-Motivo: Adicionar cards "Paradas" e "Graficos" no HUB da maquina (links /producao/paradas e /producao/graficos).
--->
-
-<!--
-Arquivo: templates/base.html
-Alterado em: 2026-02-01 18:55 (America/Bahia)
-Por: ChatGPT
-Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas iguais ao PC.
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
+LAST_RECODE: 2026-03-04 19:48 (America/Bahia)
+MOTIVO: Adicionar card e tabela para exibir a fila fixa de OP (5 slots) consumindo GET /machine/op/fila, sem logica de negocio no front.
 -->
 
 <!DOCTYPE html>
@@ -215,6 +208,93 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       margin-top:6px;
       line-height:1.3;
     }
+
+    /* ===== FILA DE OP (5 SLOTS FIXOS) ===== */
+    .op-fila-wrap{
+      margin-top: 10px;
+      border: 1px solid #e5e7eb;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #f8fafc;
+    }
+    .op-fila-head{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      background: #ffffff;
+    }
+    .op-fila-title{
+      font-size: 12px;
+      font-weight: 900;
+      color: #0f172a;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .op-fila-meta{
+      font-size: 12px;
+      font-weight: 800;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    .op-fila-table{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: #fff;
+    }
+    .op-fila-table th, .op-fila-table td{
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: middle;
+    }
+    .op-fila-table th{
+      background: #f8fafc;
+      color: #334155;
+      font-weight: 900;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+    .op-fila-pos{
+      font-weight: 900;
+      color: #0f172a;
+      width: 70px;
+    }
+    .op-fila-op{
+      font-weight: 900;
+      color: #0f172a;
+      max-width: 320px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .op-fila-badge{
+      display:inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 900;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      min-width: 92px;
+      text-align: center;
+    }
+    .op-fila-ativa{ background:#16a34a; }
+    .op-fila-fila{ background:#64748b; }
+    .op-fila-encerrada{ background:#0f172a; }
+    .op-fila-vazio{ background:#94a3b8; }
+    .op-fila-error{
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 900;
+      color: #b91c1c;
+      background: #fff;
+    }
   </style>
 
 </head>
@@ -259,6 +339,42 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
             <button id="btn-op-manage" type="button" class="btn btn-primary">Abrir</button>
           </div>
         </div>
+
+        <div class="machine-card" id="card-op-fila">
+          <div class="machine-card-title">Fila de OP</div>
+          <p class="machine-card-desc">Exibe os 5 slots fixos da fila de Ordens de Produção desta máquina. A fila não reorganiza automaticamente.</p>
+          <div class="machine-card-actions" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
+            <button id="btn-op-fila-refresh" type="button" class="btn btn-secondary">Atualizar</button>
+            <span id="op-fila-last" class="help-text" style="margin:0;">—</span>
+          </div>
+
+          <div class="op-fila-wrap" style="margin-top:12px;">
+            <div class="op-fila-head">
+              <div class="op-fila-title">Slots</div>
+              <div class="op-fila-meta" id="op-fila-meta">machine_id: —</div>
+            </div>
+
+            <table class="op-fila-table">
+              <thead>
+                <tr>
+                  <th style="width:70px;">Pos</th>
+                  <th>OP</th>
+                  <th style="width:140px;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="op-fila-tbody">
+                <tr><td class="op-fila-pos">1</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
+                <tr><td class="op-fila-pos">2</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
+                <tr><td class="op-fila-pos">3</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
+                <tr><td class="op-fila-pos">4</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
+                <tr><td class="op-fila-pos">5</td><td class="op-fila-op">—</td><td><span class="op-fila-badge op-fila-vazio">VAZIO</span></td></tr>
+              </tbody>
+            </table>
+
+            <div id="op-fila-error" class="op-fila-error" style="display:none;"></div>
+          </div>
+        </div>
+
 
         <div class="machine-card">
           <div class="machine-card-title">Historico</div>
@@ -480,6 +596,105 @@ async function carregarOpStatus(){
   }
 }
 
+
+function _setOpFilaError(msg){
+  const el = document.getElementById("op-fila-error");
+  if(!el) return;
+  if(msg){
+    el.style.display = "block";
+    el.textContent = String(msg);
+  }else{
+    el.style.display = "none";
+    el.textContent = "";
+  }
+}
+
+function _formatNowHHMM(){
+  try{
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    return `${hh}:${mm}`;
+  }catch(e){
+    return "";
+  }
+}
+
+function _normalizeOpFilaPayload(payload){
+  if(!payload) return [];
+  if(Array.isArray(payload)) return payload;
+  if(Array.isArray(payload.fila)) return payload.fila;
+  if(Array.isArray(payload.rows)) return payload.rows;
+  if(Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+function _badgeClassFromStatus(st){
+  const s = String(st || "").toLowerCase();
+  if(s === "ativa") return {cls:"op-fila-ativa", label:"ATIVA"};
+  if(s === "fila") return {cls:"op-fila-fila", label:"FILA"};
+  if(s === "encerrada") return {cls:"op-fila-encerrada", label:"ENCERRADA"};
+  if(s === "vazio" || s === "" || s === "null" || s === "none") return {cls:"op-fila-vazio", label:"VAZIO"};
+  return {cls:"op-fila-fila", label:String(st||"FILA").toUpperCase()};
+}
+
+function _renderOpFilaRows(rows){
+  const tbody = document.getElementById("op-fila-tbody");
+  if(!tbody) return;
+
+  const byPos = {};
+  (rows || []).forEach((r) => {
+    const pos = Number(r.posicao || r.pos || 0);
+    if(pos >= 1 && pos <= 5){
+      byPos[pos] = r;
+    }
+  });
+
+  const out = [];
+  for(let p=1; p<=5; p++){
+    const r = byPos[p] || null;
+    const op = r ? (r.op || r.op_id || r.op_code || r.op_num || "") : "";
+    const st = r ? (r.status || "") : "vazio";
+    const b = _badgeClassFromStatus(st);
+    const opTxt = op ? String(op) : "—";
+    out.push(
+      `<tr>` +
+      `<td class="op-fila-pos">${p}</td>` +
+      `<td class="op-fila-op">${opTxt}</td>` +
+      `<td><span class="op-fila-badge ${b.cls}">${b.label}</span></td>` +
+      `</tr>`
+    );
+  }
+  tbody.innerHTML = out.join("");
+}
+
+async function carregarOpFila(){
+  _setOpFilaError(null);
+  const meta = document.getElementById("op-fila-meta");
+  if(meta) meta.textContent = `machine_id: ${machine_id}`;
+
+  const btn = document.getElementById("btn-op-fila-refresh");
+  if(btn) btn.disabled = true;
+
+  try{
+    const payload = await _getJson(`/machine/op/fila?machine_id=${encodeURIComponent(machine_id)}`);
+    if(!payload){
+      _setOpFilaError("Nao foi possivel carregar a fila de OP (sem resposta).");
+      _renderOpFilaRows([]);
+    }else{
+      const rows = _normalizeOpFilaPayload(payload);
+      _renderOpFilaRows(rows);
+    }
+
+    const last = document.getElementById("op-fila-last");
+    if(last) last.textContent = `Atualizado: ${_formatNowHHMM()}`;
+  }catch(err){
+    _setOpFilaError("Falha ao carregar fila de OP.");
+  }finally{
+    if(btn) btn.disabled = false;
+  }
+}
+
 function _setModalMode(mode){
   opModalMode = (mode === "edit") ? "edit" : "new";
   const t = document.getElementById("opModalTitle");
@@ -531,6 +746,10 @@ function initOpUI(){
 
   if(btnManage) btnManage.addEventListener("click", openOpModal);
   if(box) box.addEventListener("click", openOpModal);
+
+  const btnFilaRefresh = document.getElementById("btn-op-fila-refresh");
+  if(btnFilaRefresh) btnFilaRefresh.addEventListener("click", () => { carregarOpFila(); });
+
 
   const bd = document.getElementById("opModalBackdrop");
   const bc = document.getElementById("btnCloseOpModal");
@@ -613,6 +832,10 @@ function initOpUI(){
 
 initOpUI();
 carregarOpStatus();
+carregarOpFila();
+
+// Atualiza a fila periodicamente (somente leitura)
+setInterval(() => { carregarOpFila(); }, 15000);
 </script>
 
 </body>
