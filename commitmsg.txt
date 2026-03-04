@@ -1,4 +1,5 @@
-﻿fix(historico): barra por estado mantendo ultimo ate mudar
+﻿fix(machine_state): gravar transicoes RUN/STOP/IDLE/NP no update
 
-- Monta segmentos RUN/STOP/IDLE por transicoes do machine_state_event
-- Completa cada hora sem buracos, mantendo ultimo estado ate o fim da hora
+- Registra eventos em machine_state_event na rota /machine/update
+- Define RUN/STOP/IDLE por delta e no_count_stop_sec
+- Mantem NP por np_por_hora_24
