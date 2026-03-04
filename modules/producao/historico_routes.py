@@ -1626,22 +1626,12 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
 
-                # Fallback de exibicao (HOJE): quando a persistencia horaria ainda nao atualizou,
-                # usa primeiro producao_por_hora (alinhada a horas_turno) e, se nao existir,
-                # cai para producao_exibicao_24. Assim o numero do historico acompanha o card
-                # sem herdar na virada da hora.
+                # Produzido (HOJE): usar SEMPRE producao_por_hora alinhada a horas_turno do estado da maquina.
+                # Isso garante que o "Prod" do Historico acompanhe o card e zere corretamente na virada.
                 if now_naive is not None and isinstance(machine_state, dict) and data_ref == now_naive.date():
                     try:
                         if isinstance(prod_turno_by_hour, dict) and h in prod_turno_by_hour:
-                            pph = _safe_int(prod_turno_by_hour.get(h), 0)
-                            if pph > produzido:
-                                produzido = pph
-                        else:
-                            p24 = machine_state.get("producao_exibicao_24")
-                            if isinstance(p24, list) and len(p24) == 24:
-                                p24_h = _safe_int(p24[h], 0)
-                                if p24_h > produzido:
-                                    produzido = p24_h
+                            produzido = _safe_int(prod_turno_by_hour.get(h), 0)
                     except Exception:
                         pass
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
@@ -2017,5 +2007,3 @@ def api_producao_backfill_horaria():
 @historico_bp.route("/historico", methods=["GET"])
 def historico_page():
     return render_template("historico.html")
-###ml")
-###ererfff

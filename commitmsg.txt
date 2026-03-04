@@ -1,5 +1,5 @@
-﻿fix(machine_state): gravar transicoes RUN/STOP/IDLE/NP no update
+﻿fix(historico): usar producao_por_hora no detalhe-dia para Prod do historico
 
-- Registra eventos em machine_state_event na rota /machine/update
-- Define RUN/STOP/IDLE por delta e no_count_stop_sec
-- Mantem NP por np_por_hora_24
+- No /api/producao/detalhe-dia, Prod por hora prioriza machine_state.producao_por_hora (mapeada por horas_turno)
+- Fallback para producao_exibicao_24 apenas se nao houver mapeamento
+- Evita Prod 0 no historico quando o card ja mostra producao na hora, sem herdar na virada
