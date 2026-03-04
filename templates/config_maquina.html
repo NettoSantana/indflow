@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-LAST_RECODE: 2026-03-04 19:55 (America/Bahia)
-MOTIVO: Ajustar visual da fila fixa de OP para layout horizontal (5 slots lado a lado), mantendo consumo de GET /machine/op/fila.
+LAST_RECODE: 2026-03-04 20:05 (America/Bahia)
+MOTIVO: Mover fila fixa de OP (5 slots) para o topo (linha do titulo), removendo o card "Fila de OP" do grid.
 -->
 
 <!DOCTYPE html>
@@ -209,112 +209,98 @@ MOTIVO: Ajustar visual da fila fixa de OP para layout horizontal (5 slots lado a
       line-height:1.3;
     }
 
-    /* ===== FILA DE OP (5 SLOTS FIXOS) ===== */
-    .op-fila-wrap{
-      margin-top: 10px;
-      border: 1px solid #e5e7eb;
-      border-radius: 14px;
-      overflow: hidden;
-      background: #ffffff;
-    }
-    .op-fila-head{
+    /* ===== FILA DE OP NO TOPO (5 SLOTS FIXOS) ===== */
+    .op-fila-top{
       display:flex;
-      justify-content:space-between;
       align-items:center;
       gap:10px;
-      padding: 10px 12px;
-      border-bottom: 1px solid #e5e7eb;
-      background: #ffffff;
-    }
-    .op-fila-title{
-      font-size: 12px;
-      font-weight: 900;
-      color: #0f172a;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-    }
-    .op-fila-meta{
-      font-size: 12px;
-      font-weight: 800;
-      color: #64748b;
-      white-space: nowrap;
+      flex:1;
+      min-width:420px;
+      padding:8px 10px;
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      background:#ffffff;
+      overflow-x:auto;
     }
 
-    .op-fila-slots{
+    .op-fila-top-label{
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      text-transform:uppercase;
+      letter-spacing:0.03em;
+      white-space:nowrap;
+    }
+
+    .op-fila-top-slots{
       display:flex;
+      align-items:center;
       gap:10px;
-      padding: 12px;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      background: #ffffff;
+      flex-wrap:nowrap;
+      white-space:nowrap;
     }
 
-    .op-slot{
-      flex: 0 0 108px;
-      border: 1px solid #e5e7eb;
-      border-radius: 14px;
-      padding: 10px 10px;
-      background: #f8fafc;
-      box-shadow: 0 6px 16px rgba(15,23,42,0.05);
-    }
-
-    .op-slot-top{
+    .op-chip{
+      flex:0 0 auto;
       display:flex;
-      justify-content:space-between;
       align-items:center;
       gap:8px;
-      margin-bottom: 8px;
+      padding:7px 10px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      background:#f8fafc;
     }
 
-    .op-slot-pos{
-      font-size: 12px;
-      font-weight: 900;
-      color: #0f172a;
+    .op-chip-pos{
+      font-size:12px;
+      font-weight:900;
+      color:#0f172a;
+      min-width:12px;
+      text-align:center;
     }
 
-    .op-slot-badge{
+    .op-chip-op{
+      font-size:12px;
+      font-weight:900;
+      color:#0f172a;
+      max-width:160px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .op-chip-status{
       display:inline-block;
-      padding: 4px 8px;
-      border-radius: 999px;
-      font-size: 10px;
-      font-weight: 900;
-      color: #fff;
-      text-transform: uppercase;
-      letter-spacing: 0.02em;
-      min-width: 64px;
-      text-align: center;
-      white-space: nowrap;
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:10px;
+      font-weight:900;
+      color:#fff;
+      text-transform:uppercase;
+      letter-spacing:0.02em;
+      white-space:nowrap;
     }
 
-    .op-slot-ativa{ background:#16a34a; }
-    .op-slot-fila{ background:#64748b; }
-    .op-slot-encerrada{ background:#0f172a; }
-    .op-slot-vazio{ background:#94a3b8; }
+    .op-st-ativa{ background:#16a34a; }
+    .op-st-fila{ background:#64748b; }
+    .op-st-encerrada{ background:#0f172a; }
+    .op-st-vazio{ background:#94a3b8; }
 
-    .op-slot-op{
-      font-size: 12px;
-      font-weight: 900;
-      color: #0f172a;
-      line-height: 1.15;
-      min-height: 28px;
+    .op-fila-top-actions{
       display:flex;
       align-items:center;
-      justify-content:center;
-      text-align:center;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      gap:10px;
+      margin-left:auto;
+      white-space:nowrap;
     }
 
-    .op-fila-error{
-      padding: 10px 12px;
-      font-size: 13px;
-      font-weight: 900;
-      color: #b91c1c;
-      background: #ffffff;
-      border-top: 1px solid #e5e7eb;
+    .op-fila-top-updated{
+      font-size:12px;
+      font-weight:800;
+      color:#64748b;
     }
   </style>
+
 
 </head>
 
@@ -341,6 +327,17 @@ MOTIVO: Ajustar visual da fila fixa de OP para layout horizontal (5 slots lado a
       <div class="top-row">
         <h1 class="section-title" id="titulo-maquina">MAQUINA</h1>
 
+
+
+        <div id="op-fila-top" class="op-fila-top" style="display:none;">
+          <div class="op-fila-top-label">OPs</div>
+          <div id="op-fila-top-slots" class="op-fila-top-slots"></div>
+          <div class="op-fila-top-actions">
+            <button id="btn-op-fila-refresh" type="button" class="btn btn-secondary">Atualizar</button>
+            <span id="op-fila-top-updated" class="op-fila-top-updated">—</span>
+          </div>
+        </div>
+
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
           <div id="op-ativo-box" class="op-ativo-box" style="display:none;">
             <div class="op-ativo-title">OP ativa</div>
@@ -359,65 +356,6 @@ MOTIVO: Ajustar visual da fila fixa de OP para layout horizontal (5 slots lado a
           </div>
         </div>
 
-        <div class="machine-card" id="card-op-fila">
-          <div class="machine-card-title">Fila de OP</div>
-          <p class="machine-card-desc">Exibe os 5 slots fixos da fila de Ordens de Produção desta máquina. A fila não reorganiza automaticamente.</p>
-          <div class="machine-card-actions" style="justify-content:space-between; align-items:center; flex-wrap:wrap;">
-            <button id="btn-op-fila-refresh" type="button" class="btn btn-secondary">Atualizar</button>
-            <span id="op-fila-last" class="help-text" style="margin:0;">—</span>
-          </div>
-
-          <div class="op-fila-wrap" style="margin-top:12px;">
-            <div class="op-fila-head">
-              <div class="op-fila-title">Slots</div>
-              <div class="op-fila-meta" id="op-fila-meta">machine_id: —</div>
-            </div>
-
-            <div class="op-fila-slots" id="op-fila-slots">
-              <div class="op-slot">
-                <div class="op-slot-top">
-                  <div class="op-slot-pos">1</div>
-                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
-                </div>
-                <div class="op-slot-op">—</div>
-              </div>
-
-              <div class="op-slot">
-                <div class="op-slot-top">
-                  <div class="op-slot-pos">2</div>
-                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
-                </div>
-                <div class="op-slot-op">—</div>
-              </div>
-
-              <div class="op-slot">
-                <div class="op-slot-top">
-                  <div class="op-slot-pos">3</div>
-                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
-                </div>
-                <div class="op-slot-op">—</div>
-              </div>
-
-              <div class="op-slot">
-                <div class="op-slot-top">
-                  <div class="op-slot-pos">4</div>
-                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
-                </div>
-                <div class="op-slot-op">—</div>
-              </div>
-
-              <div class="op-slot">
-                <div class="op-slot-top">
-                  <div class="op-slot-pos">5</div>
-                  <span class="op-slot-badge op-slot-vazio">VAZIO</span>
-                </div>
-                <div class="op-slot-op">—</div>
-              </div>
-            </div>
-
-            <div id="op-fila-error" class="op-fila-error" style="display:none;"></div>
-          </div>
-        </div>
 
 
         <div class="machine-card">
@@ -641,17 +579,6 @@ async function carregarOpStatus(){
 }
 
 
-function _setOpFilaError(msg){
-  const el = document.getElementById("op-fila-error");
-  if(!el) return;
-  if(msg){
-    el.style.display = "block";
-    el.textContent = String(msg);
-  }else{
-    el.style.display = "none";
-    el.textContent = "";
-  }
-}
 
 function _formatNowHHMM(){
   try{
@@ -673,18 +600,19 @@ function _normalizeOpFilaPayload(payload){
   return [];
 }
 
-function _badgeClassFromStatus(st){
+function _badgeFromStatus(st){
   const s = String(st || "").toLowerCase();
-  if(s === "ativa") return {cls:"op-slot-ativa", label:"ATIVA"};
-  if(s === "fila") return {cls:"op-slot-fila", label:"FILA"};
-  if(s === "encerrada") return {cls:"op-slot-encerrada", label:"ENCERRADA"};
-  if(s === "vazio" || s === "" || s === "null" || s === "none") return {cls:"op-slot-vazio", label:"VAZIO"};
-  return {cls:"op-slot-fila", label:String(st||"FILA").toUpperCase()};
+  if(s === "ativa") return {cls:"op-st-ativa", label:"ATIVA"};
+  if(s === "fila") return {cls:"op-st-fila", label:"FILA"};
+  if(s === "encerrada") return {cls:"op-st-encerrada", label:"ENCERRADA"};
+  if(s === "vazio" || s === "" || s === "null" || s === "none") return {cls:"op-st-vazio", label:"VAZIO"};
+  return {cls:"op-st-fila", label:String(st || "FILA").toUpperCase()};
 }
 
-function _renderOpFilaRows(rows){
-  const slots = document.getElementById("op-fila-slots");
-  if(!slots) return;
+function _renderOpFilaTop(rows){
+  const wrap = document.getElementById("op-fila-top");
+  const slots = document.getElementById("op-fila-top-slots");
+  if(!wrap || !slots) return;
 
   const byPos = {};
   (rows || []).forEach((r) => {
@@ -699,45 +627,35 @@ function _renderOpFilaRows(rows){
     const r = byPos[p] || null;
     const op = r ? (r.op || r.op_id || r.op_code || r.op_num || "") : "";
     const st = r ? (r.status || "") : "vazio";
-    const b = _badgeClassFromStatus(st);
+    const b = _badgeFromStatus(st);
     const opTxt = op ? String(op) : "—";
 
     out.push(
-      `<div class="op-slot">` +
-        `<div class="op-slot-top">` +
-          `<div class="op-slot-pos">${p}</div>` +
-          `<span class="op-slot-badge ${b.cls}">${b.label}</span>` +
-        `</div>` +
-        `<div class="op-slot-op" title="${opTxt}">${opTxt}</div>` +
+      `<div class="op-chip" title="POS ${p}">` +
+        `<div class="op-chip-pos">${p}</div>` +
+        `<div class="op-chip-op" title="${opTxt}">${opTxt}</div>` +
+        `<span class="op-chip-status ${b.cls}">${b.label}</span>` +
       `</div>`
     );
   }
 
   slots.innerHTML = out.join("");
+  wrap.style.display = "flex";
 }
 
 async function carregarOpFila(){
-  _setOpFilaError(null);
-  const meta = document.getElementById("op-fila-meta");
-  if(meta) meta.textContent = `machine_id: ${machine_id}`;
-
   const btn = document.getElementById("btn-op-fila-refresh");
   if(btn) btn.disabled = true;
 
   try{
     const payload = await _getJson(`/machine/op/fila?machine_id=${encodeURIComponent(machine_id)}`);
-    if(!payload){
-      _setOpFilaError("Nao foi possivel carregar a fila de OP (sem resposta).");
-      _renderOpFilaRows([]);
-    }else{
-      const rows = _normalizeOpFilaPayload(payload);
-      _renderOpFilaRows(rows);
-    }
+    const rows = _normalizeOpFilaPayload(payload);
+    _renderOpFilaTop(rows);
 
-    const last = document.getElementById("op-fila-last");
-    if(last) last.textContent = `Atualizado: ${_formatNowHHMM()}`;
+    const up = document.getElementById("op-fila-top-updated");
+    if(up) up.textContent = `Atualizado: ${_formatNowHHMM()}`;
   }catch(err){
-    _setOpFilaError("Falha ao carregar fila de OP.");
+    console.error("Falha ao carregar fila de OP", err);
   }finally{
     if(btn) btn.disabled = false;
   }

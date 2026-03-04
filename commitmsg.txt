@@ -1,5 +1,5 @@
-﻿feat(front): exibir fila fixa de OP na tela da maquina
+﻿style(front): fila de OP em layout horizontal (5 slots lado a lado)
 
-- Adiciona card "Fila de OP" com 5 slots (posicao 1..5)
-- Consome GET /machine/op/fila?machine_id=...
-- Atualizacao manual e refresh automatico a cada 15s (somente leitura)
+- Substitui tabela por cards horizontais (posicao 1..5)
+- Mantem consumo de GET /machine/op/fila
+- Mantem botao Atualizar e refresh automatico
