@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# ULTIMO_RECODE: 2026-03-04 18:43:39
-# MOTIVO: Detalhe-dia: Prod no Historico deve usar producao_por_hora do estado da maquina (alinhado a horas_turno), com fallback de chave cliente_id::machine_id.
+# ULTIMO_RECODE: 2026-03-04 19:48:12
+# MOTIVO: Detalhe-dia: hours[].produzido deve espelhar producao_exibicao_24 do machine_state (fallback producao_por_hora alinhada a horas_turno) sem remover rotas.
 
 
 from __future__ import annotations
@@ -1634,15 +1634,6 @@ def api_producao_detalhe_dia():
 
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
-
-                # Produzido (HOJE): usar SEMPRE producao_por_hora alinhada a horas_turno do estado da maquina.
-                # Isso garante que o "Prod" do Historico acompanhe o card e zere corretamente na virada.
-                if now_naive is not None and isinstance(machine_state, dict) and data_ref == now_naive.date():
-                    try:
-                        if isinstance(prod_turno_by_hour, dict) and h in prod_turno_by_hour:
-                            produzido = _safe_int(prod_turno_by_hour.get(h), 0)
-                    except Exception:
-                        pass
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
 
 
@@ -1702,6 +1693,38 @@ def api_producao_detalhe_dia():
                         "qtd_paradas": qtd_paradas,
                     }
                 )
+
+
+            # ============================================================
+            # Merge (HOJE): Historico nao calcula producao; apenas exibe o que ja existe no estado da maquina.
+            # Regra:
+            # - Prioridade: producao_exibicao_24[hour]
+            # - Fallback: producao_por_hora alinhada a horas_turno (mapeada para hora do relogio)
+            # ============================================================
+            if now_naive is not None and isinstance(machine_state, dict) and data_ref == now_naive.date():
+                try:
+                    prod_ex24 = machine_state.get("producao_exibicao_24")
+                    if isinstance(prod_ex24, list) and len(prod_ex24) >= 24:
+                        for hobj in horas:
+                            try:
+                                hh = _safe_int(hobj.get("hour"), -1)
+                                if 0 <= hh <= 23:
+                                    val = prod_ex24[hh]
+                                    if val is not None:
+                                        hobj["produzido"] = _safe_int(val, 0)
+                            except Exception:
+                                continue
+                    else:
+                        if isinstance(prod_turno_by_hour, dict):
+                            for hobj in horas:
+                                try:
+                                    hh = _safe_int(hobj.get("hour"), -1)
+                                    if 0 <= hh <= 23 and hh in prod_turno_by_hour:
+                                        hobj["produzido"] = _safe_int(prod_turno_by_hour.get(hh), 0)
+                                except Exception:
+                                    continue
+                except Exception:
+                    pass
 
             return jsonify(
                 {
