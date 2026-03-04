@@ -1,4 +1,4 @@
-﻿fix(historico): corrigir blocos try/indentacao no historico_routes
+﻿cleanup: remover arquivos de backup (- Copia) do repositório
 
-- Remove erro do Pylance: try sem except/finally
-- Corrige indentacao quebrada no detalhe-dia
+- Remove machine_calc - Copia.py
+- Remove historico_routes - Copia (2).py

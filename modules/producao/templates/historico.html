@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-25 05:58 America/Bahia
-MOTIVO: Corrigir hora atual e horas futuras no Historico usando timezone America/Bahia (evita marcar 07:00 quando sao 05:50).
+LAST_RECODE: 2026-03-03 23:20 America/Bahia
+MOTIVO: Preferir segmentos de estado vindos do backend (machine_state_event) no modal detalhe-dia, evitando depender de localStorage ou visita previa para desenhar barras RUN STOP NP.
 -->
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
@@ -1678,13 +1678,19 @@ function safeText(v){
         '<span class="pill">Paradas ' + (qtdParadas === null ? '-' : fmtInt(qtdParadas)) + '</span>';
       wrap.appendChild(pills);
 
-const label = document.createElement("div");
-      label.className = "hour-top";
-      const st = buildTrailBar(isoDay, hourIdx);
-      wrap.appendChild(st.bar);
+      const segments =
+        (Array.isArray(h && h.segments) ? h.segments :
+         (Array.isArray(h && h.timeline) ? h.timeline :
+          (Array.isArray(h && h.barra) ? h.barra : null)));
 
+      if(segments && segments.length){
+        wrap.appendChild(buildHourBar(isoDay, hourIdx, segments));
+      }else{
+        const st = buildTrailBar(isoDay, hourIdx);
+        wrap.appendChild(st.bar);
+      }
 
-      tdD.appendChild(wrap);
+tdD.appendChild(wrap);
       tr.appendChild(tdD);
 
       dayHourTbody.appendChild(tr);
