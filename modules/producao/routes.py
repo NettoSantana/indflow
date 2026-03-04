@@ -1,6 +1,5 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-04 18:35 America/Bahia
-# RECODE_REASON: OP fila (5 slots) + ativacao/encerramento pelo operador (sem reordenar)
+# LAST_RECODE: 2026-02-24 00:00 America/Bahia
 # MOTIVO: Backfill persistente RUN/STOP em machine_state_event (a partir de producao_evento) antes de responder detalhe-dia, estabilizando Historico no refresh.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
@@ -342,68 +341,7 @@ def _ensure_range_rows(machine_id: str, days_desc: list[str]):
             except Exception:
                 continue
 
-    
-    # -------------------------------------------------
-    # TABELA: FILA DE OPS POR MAQUINA (MAX 5 SLOTS)
-    # - Mantem as OPs "disponiveis" para o operador ativar.
-    # - Operador so consegue ativar se NAO houver OP ativa.
-    # - A fila nao muda de posicao (slot fixo). Ativa = is_active=1.
-    # -------------------------------------------------
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ordens_producao_fila (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            machine_id TEXT NOT NULL,
-            slot_idx INTEGER NOT NULL,
-
-            is_active INTEGER NOT NULL DEFAULT 0,
-            last_op_id INTEGER,
-
-            os TEXT NOT NULL,
-            lote TEXT NOT NULL,
-            operador TEXT NOT NULL,
-
-            bobina TEXT,
-            bobinas_json TEXT,
-            gr_fio TEXT,
-            observacoes TEXT,
-
-            unidade_1 TEXT,
-            unidade_2 TEXT,
-
-            created_at TEXT NOT NULL,
-            updated_at TEXT,
-
-            cliente_id TEXT,
-
-            UNIQUE(machine_id, slot_idx)
-        )
-        """
-    )
-
-    # Migracoes defensivas (caso tabela exista em formato antigo)
-    for col, ddl in [
-        ("is_active", "INTEGER NOT NULL DEFAULT 0"),
-        ("last_op_id", "INTEGER"),
-        ("bobinas_json", "TEXT"),
-        ("created_at", "TEXT NOT NULL DEFAULT ''"),
-        ("updated_at", "TEXT"),
-        ("cliente_id", "TEXT"),
-        ("unidade_1", "TEXT"),
-        ("unidade_2", "TEXT"),
-    ]:
-        try:
-            cur.execute(f"ALTER TABLE ordens_producao_fila ADD COLUMN {col} {ddl}")
-        except Exception:
-            pass
-
-    # Indices para leitura rapida
-    try:
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_opfila_machine ON ordens_producao_fila(machine_id)")
-    except Exception:
-        pass
-
-    conn.commit()
+        conn.commit()
     except Exception:
         try:
             if conn:
@@ -662,162 +600,6 @@ _op_lock = Lock()
 # Uma OP ativa por maquina (em memoria):
 # op_active[machine_id] = { ... }
 op_active = {}
-
-
-# =====================================================
-# OP FILA (max 5) - persistida no banco
-# =====================================================
-
-def _json_dumps_safe(obj):
-    try:
-        return json.dumps(obj, ensure_ascii=False)
-    except Exception:
-        try:
-            return json.dumps({})
-        except Exception:
-            return "{}"
-
-
-def _json_loads_safe(s):
-    try:
-        return json.loads(s) if s else None
-    except Exception:
-        return None
-
-
-def _fila_fetch_slots(conn, machine_id: str, cliente_id: str | None = None):
-    cur = conn.cursor()
-    where = "machine_id = ?"
-    params = [machine_id]
-    # cliente_id e opcional (multi-tenant). Se a coluna nao existir, ignoramos.
-    try:
-        cols = [r[1] for r in cur.execute("PRAGMA table_info(ordens_producao_fila)").fetchall()]
-        if cliente_id and "cliente_id" in cols:
-            where += " AND (cliente_id = ? OR cliente_id IS NULL OR cliente_id = '')"
-            params.append(cliente_id)
-    except Exception:
-        pass
-
-    cur.execute(
-        f"""
-        SELECT slot_idx, is_active, last_op_id, os, lote, operador
-        FROM ordens_producao_fila
-        WHERE {where}
-        ORDER BY slot_idx
-        """,
-        params,
-    )
-    rows = cur.fetchall() or []
-    out = []
-    for r in rows:
-        out.append(
-            {
-                "slot_idx": int(r[0] or 0),
-                "is_active": bool(int(r[1] or 0)),
-                "last_op_id": int(r[2] or 0),
-                "os": r[3] or "",
-                "lote": r[4] or "",
-                "operador": r[5] or "",
-            }
-        )
-    return out
-
-
-def _fila_get_payload(conn, machine_id: str, slot_idx: int):
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, os, lote, operador, bobina, bobinas_json, gr_fio, observacoes, unidade_1, unidade_2
-        FROM ordens_producao_fila
-        WHERE machine_id = ? AND slot_idx = ?
-        """,
-        (machine_id, int(slot_idx)),
-    )
-    r = cur.fetchone()
-    if not r:
-        return None
-    bobinas = _json_loads_safe(r[5]) if r[5] else None
-    return {
-        "fila_id": int(r[0] or 0),
-        "machine_id": machine_id,
-        "slot_idx": int(slot_idx),
-        "os": r[1] or "",
-        "lote": r[2] or "",
-        "operador": r[3] or "",
-        "bobina": r[4] or "",
-        "bobinas": bobinas if isinstance(bobinas, list) else [],
-        "gr_fio": r[6] or "",
-        "observacoes": r[7] or "",
-        "unidade_1": r[8] or "",
-        "unidade_2": r[9] or "",
-    }
-
-
-def _fila_set_active(conn, machine_id: str, slot_idx: int | None):
-    cur = conn.cursor()
-    # desativa tudo
-    cur.execute(
-        "UPDATE ordens_producao_fila SET is_active = 0, updated_at = ? WHERE machine_id = ?",
-        (_now_iso(), machine_id),
-    )
-    if slot_idx is None:
-        return
-    cur.execute(
-        "UPDATE ordens_producao_fila SET is_active = 1, updated_at = ? WHERE machine_id = ? AND slot_idx = ?",
-        (_now_iso(), machine_id, int(slot_idx)),
-    )
-
-
-def _fila_upsert_slot(conn, machine_id: str, slot_idx: int, payload: dict, cliente_id: str | None = None):
-    cur = conn.cursor()
-    now_iso = _now_iso()
-    bobinas_json = _json_dumps_safe(payload.get("bobinas") or [])
-    cur.execute(
-        """
-        INSERT INTO ordens_producao_fila (
-            machine_id, slot_idx, is_active, last_op_id,
-            os, lote, operador,
-            bobina, bobinas_json, gr_fio, observacoes,
-            unidade_1, unidade_2,
-            created_at, updated_at, cliente_id
-        ) VALUES (
-            ?, ?, 0, NULL,
-            ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?,
-            ?, ?, ?
-        )
-        ON CONFLICT(machine_id, slot_idx) DO UPDATE SET
-            os=excluded.os,
-            lote=excluded.lote,
-            operador=excluded.operador,
-            bobina=excluded.bobina,
-            bobinas_json=excluded.bobinas_json,
-            gr_fio=excluded.gr_fio,
-            observacoes=excluded.observacoes,
-            unidade_1=excluded.unidade_1,
-            unidade_2=excluded.unidade_2,
-            updated_at=excluded.updated_at,
-            cliente_id=excluded.cliente_id
-        """,
-        (
-            machine_id,
-            int(slot_idx),
-            str(payload.get("os") or "").strip(),
-            str(payload.get("lote") or "").strip(),
-            str(payload.get("operador") or "").strip(),
-            str(payload.get("bobina") or "").strip(),
-            bobinas_json,
-            str(payload.get("gr_fio") or "").strip(),
-            str(payload.get("observacoes") or "").strip(),
-            str(payload.get("unidade_1") or "").strip(),
-            str(payload.get("unidade_2") or "").strip(),
-            now_iso,
-            now_iso,
-            (cliente_id or "").strip() if cliente_id else None,
-        ),
-    )
-
 
 
 def _get_conn():
@@ -2363,40 +2145,37 @@ def op_status():
 # }
 # Nota: baseline chega no proximo passo (front). Por enquanto default 0.
 # =====================================================
+@producao_bp.route("/op/iniciar", methods=["POST"])
+@login_required
+def op_iniciar():
+    data = request.get_json(silent=True) or {}
 
-def _start_op_from_payload(payload: dict):
-    """
-    Inicia OP (cria linha em ordens_producao e registra em memoria op_active).
-    Retorna (ok, op_id, error_msg, http_code)
-    """
-    data = payload or {}
     machine_id = _sanitize_mid(_as_str(data.get("machine_id")))
     os_ = _as_str(data.get("os"))
     lote = _as_str(data.get("lote"))
     operador = _as_str(data.get("operador"))
 
     if not machine_id:
-        return False, 0, "machine_id obrigatorio", 400
+        return jsonify({"error": "machine_id obrigatorio"}), 400
     if not os_ or not lote or not operador:
-        return False, 0, "OS, Lote e Operador sao obrigatorios", 400
+        return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
 
     with _op_lock:
         if machine_id in op_active:
-            return False, 0, "Ja existe uma OP ativa para esta maquina", 409
+            return jsonify({"error": "Ja existe uma OP ativa para esta maquina"}), 409
 
     bobinas_list, bobina = _normalize_bobinas(data)
     if bobinas_list is None:
-        return False, 0, "Bobinas devem ser numeros (metros)", 400
-
+        return jsonify({"error": "Bobinas devem ser numeros (metros)"}), 400
     gr_fio = _as_str(data.get("gr_fio"))
     observacoes = _as_str(data.get("observacoes"))
+
     unidade_1 = _as_str(data.get("unidade_1"))
     unidade_2 = _as_str(data.get("unidade_2"))
 
     # Baseline da OP: valor absoluto atual do ESP. A OP sempre inicia com 0 (esp_atual - baseline).
     with _get_conn() as conn:
         esp_atual = _get_current_esp_abs(conn, machine_id)
-
     baseline_pcs = int(esp_atual)
     baseline_u1 = float(esp_atual)
     baseline_u2 = 0.0
@@ -2408,6 +2187,7 @@ def _start_op_from_payload(payload: dict):
         "lote": lote,
         "operador": operador,
         "bobina": bobina,
+        "bobinas": bobinas_list,
         "gr_fio": gr_fio,
         "observacoes": observacoes,
         "started_at": started_at,
@@ -2418,56 +2198,31 @@ def _start_op_from_payload(payload: dict):
         "baseline_u2": baseline_u2,
         "op_metros": 0,
         "op_pcs": 0,
-        "op_conv_m_por_pcs": 0,
+        "op_conv_m_por_pcs": _get_conv_m_por_pcs(machine_id),
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
     }
 
-    # Persistir no banco
     try:
-        conn = _get_conn()
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO ordens_producao (
-                machine_id, os, lote, operador,
-                bobina, gr_fio, observacoes,
-                started_at, ended_at, status,
-                baseline_pcs, baseline_u1, baseline_u2,
-                op_metros, op_pcs, op_conv_m_por_pcs,
-                unidade_1, unidade_2
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                row_payload["machine_id"],
-                row_payload["os"],
-                row_payload["lote"],
-                row_payload["operador"],
-                row_payload["bobina"],
-                row_payload["gr_fio"],
-                row_payload["observacoes"],
-                row_payload["started_at"],
-                row_payload["ended_at"],
-                row_payload["status"],
-                int(row_payload["baseline_pcs"]),
-                float(row_payload["baseline_u1"]),
-                float(row_payload["baseline_u2"]),
-                int(row_payload["op_metros"]),
-                int(row_payload["op_pcs"]),
-                float(row_payload["op_conv_m_por_pcs"]),
-                row_payload["unidade_1"],
-                row_payload["unidade_2"],
-            ),
-        )
-        op_id = int(cur.lastrowid or 0)
-        conn.commit()
-        conn.close()
+        op_id = _insert_op_row(row_payload)
     except Exception:
-        try:
-            conn.close()
-        except Exception:
-            pass
-        return False, 0, "Falha ao iniciar OP no banco", 500
+        return jsonify({"error": "Falha ao salvar OP no banco"}), 500
+
+    # Registrar evento da primeira bobina (se houver) com timestamp de inicio e baseline absoluto
+    # Regra: a bobina atual continua ate a proxima bobina ser inserida (novo evento).
+    try:
+        if bobinas_list:
+            _upsert_bobina_event_start(
+                op_id=op_id,
+                seq=0,
+                comprimento_m=int(bobinas_list[0] or 0),
+                started_at=started_at,
+                start_abs_pcs=int(baseline_pcs),
+            )
+    except Exception:
+        # Nao bloquear inicio da OP por falha de evento; historico cai em fallback.
+        pass
+
 
     op_mem = {
         "op_id": op_id,
@@ -2489,175 +2244,7 @@ def _start_op_from_payload(payload: dict):
     with _op_lock:
         op_active[machine_id] = op_mem
 
-    return True, op_id, "", 200
-
-
-
-@producao_bp.route("/op/iniciar", methods=["POST"])
-@login_required
-def op_iniciar():
-    data = request.get_json(silent=True) or {}
-
-    ok, op_id, err, code = _start_op_from_payload(data)
-    if not ok:
-        return jsonify({"error": err}), code
-
-    machine_id = _sanitize_mid(_as_str(data.get("machine_id")))
     return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id})
-
-
-# =====================================================
-# OP FILA - endpoints (max 5 slots)
-# =====================================================
-
-@producao_bp.route("/op/fila/status", methods=["GET"])
-@login_required
-def op_fila_status():
-    machine_id = _sanitize_mid(_as_str(request.args.get("machine_id")))
-    if not machine_id:
-        return jsonify({"error": "machine_id obrigatorio"}), 400
-
-    # cliente_id opcional (se o front enviar)
-    cliente_id = _as_str(request.args.get("cliente_id"))
-
-    conn = _get_conn()
-    try:
-        slots = _fila_fetch_slots(conn, machine_id, cliente_id or None)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    # sempre devolver 5 slots (1..5)
-    by_idx = {int(s["slot_idx"]): s for s in slots}
-    out_slots = []
-    active_slot = None
-    for i in range(1, 6):
-        s = by_idx.get(i) or {"slot_idx": i, "is_active": False, "last_op_id": 0, "os": "", "lote": "", "operador": ""}
-        if s.get("is_active"):
-            active_slot = i
-        out_slots.append(s)
-
-    return jsonify({"ok": True, "machine_id": machine_id, "active_slot": active_slot, "slots": out_slots})
-
-
-@producao_bp.route("/op/fila/adicionar", methods=["POST"])
-@login_required
-def op_fila_adicionar():
-    """
-    Endpoint de gerente (sem checar role agora).
-    Adiciona/atualiza um slot livre na fila (1..5).
-    """
-    data = request.get_json(silent=True) or {}
-    machine_id = _sanitize_mid(_as_str(data.get("machine_id")))
-    if not machine_id:
-        return jsonify({"error": "machine_id obrigatorio"}), 400
-
-    payload = {
-        "machine_id": machine_id,
-        "os": _as_str(data.get("os")),
-        "lote": _as_str(data.get("lote")),
-        "operador": _as_str(data.get("operador")),
-        "bobina": _as_str(data.get("bobina")),
-        "bobinas": data.get("bobinas") if isinstance(data.get("bobinas"), list) else [],
-        "gr_fio": _as_str(data.get("gr_fio")),
-        "observacoes": _as_str(data.get("observacoes")),
-        "unidade_1": _as_str(data.get("unidade_1")),
-        "unidade_2": _as_str(data.get("unidade_2")),
-    }
-
-    if not payload["os"] or not payload["lote"] or not payload["operador"]:
-        return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
-
-    slot_idx = data.get("slot_idx")
-    try:
-        slot_idx = int(slot_idx) if slot_idx is not None else 0
-    except Exception:
-        slot_idx = 0
-    if slot_idx and (slot_idx < 1 or slot_idx > 5):
-        return jsonify({"error": "slot_idx deve ser 1..5"}), 400
-
-    cliente_id = _as_str(data.get("cliente_id"))
-
-    conn = _get_conn()
-    try:
-        cur = conn.cursor()
-
-        if not slot_idx:
-            # achar slot livre
-            cur.execute(
-                """
-                SELECT slot_idx FROM ordens_producao_fila
-                WHERE machine_id = ?
-                """,
-                (machine_id,),
-            )
-            used = {int(r[0]) for r in (cur.fetchall() or [])}
-            free = [i for i in range(1, 6) if i not in used]
-            if not free:
-                return jsonify({"error": "fila cheia (max 5)"}), 409
-            slot_idx = free[0]
-
-        _fila_upsert_slot(conn, machine_id, slot_idx, payload, cliente_id or None)
-        conn.commit()
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    return jsonify({"ok": True, "machine_id": machine_id, "slot_idx": int(slot_idx)})
-
-
-@producao_bp.route("/op/fila/ativar", methods=["POST"])
-@login_required
-def op_fila_ativar():
-    """
-    Operador:
-    - so pode ativar se NAO existir OP ativa
-    - ativa um slot (1..5)
-    """
-    data = request.get_json(silent=True) or {}
-    machine_id = _sanitize_mid(_as_str(data.get("machine_id")))
-    try:
-        slot_idx = int(data.get("slot_idx", 0))
-    except Exception:
-        slot_idx = 0
-
-    if not machine_id or slot_idx < 1 or slot_idx > 5:
-        return jsonify({"error": "machine_id e slot_idx(1..5) obrigatorios"}), 400
-
-    with _op_lock:
-        if machine_id in op_active:
-            return jsonify({"error": "Ja existe OP ativa. Encerre antes de ativar outra."}), 409
-
-    conn = _get_conn()
-    try:
-        payload = _fila_get_payload(conn, machine_id, slot_idx)
-        if not payload:
-            return jsonify({"error": "Slot vazio"}), 404
-
-        ok, op_id, err, code = _start_op_from_payload(payload)
-        if not ok:
-            return jsonify({"error": err}), code
-
-        # marcar fila como ativa e registrar last_op_id
-        _fila_set_active(conn, machine_id, slot_idx)
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE ordens_producao_fila SET last_op_id = ?, updated_at = ? WHERE machine_id = ? AND slot_idx = ?",
-            (int(op_id), _now_iso(), machine_id, int(slot_idx)),
-        )
-        conn.commit()
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    return jsonify({"ok": True, "machine_id": machine_id, "slot_idx": int(slot_idx), "op_id": int(op_id)})
-
 
 
 
@@ -2882,17 +2469,6 @@ def op_encerrar():
 
     with _op_lock:
         op_active.pop(machine_id, None)
-
-    # Fila: ao encerrar, nenhuma OP fica ativa ate o operador escolher outra
-    try:
-        conn = _get_conn()
-        try:
-            _fila_set_active(conn, machine_id, None)
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception:
-        pass
 
     return jsonify(
         {
