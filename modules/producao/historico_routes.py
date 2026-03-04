@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# ULTIMO_RECODE: 2026-03-04 17:30:56
-# MOTIVO: Historico detalhe-dia deve usar producao_por_hora (estado da maquina) para exibir Prod no historico, mantendo regra de virada de hora.
+# ULTIMO_RECODE: 2026-03-04 18:43:39
+# MOTIVO: Detalhe-dia: Prod no Historico deve usar producao_por_hora do estado da maquina (alinhado a horas_turno), com fallback de chave cliente_id::machine_id.
 
 
 from __future__ import annotations
@@ -1462,7 +1462,16 @@ def api_producao_detalhe_dia():
             run_now_flag = None
             if now_naive is not None and callable(get_machine):
                 try:
-                    machine_state = get_machine(eff_mid) or get_machine(machine_id)
+                    # Tentativa 1: effective_machine_id (pode ser device_id::machine_id)
+                    machine_state = get_machine(eff_mid)
+                    # Tentativa 2: cliente_id::machine_id (chave padrao do estado)
+                    if (not isinstance(machine_state, dict)) and isinstance(cfg, dict):
+                        cfg_cliente_id = cfg.get("cliente_id")
+                        if cfg_cliente_id:
+                            machine_state = get_machine(f"{cfg_cliente_id}::{machine_id}")
+                    # Tentativa 3: fallback antigo (caso get_machine aceite apenas machine_id)
+                    if not isinstance(machine_state, dict):
+                        machine_state = get_machine(machine_id)
                     if isinstance(machine_state, dict):
                         stopped_ms = machine_state.get("stopped_since_ms") or machine_state.get("stopped_since")
                         status_ui = str(machine_state.get("status_ui") or "").strip().upper()
