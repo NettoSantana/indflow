@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# ULTIMO_RECODE: 2026-03-04 19:48:12
-# MOTIVO: Detalhe-dia: hours[].produzido deve espelhar producao_exibicao_24 do machine_state (fallback producao_por_hora alinhada a horas_turno) sem remover rotas.
+# ULTIMO_RECODE: 2026-03-04 21:30:00
+# MOTIVO: Detalhe-dia: hours[].produzido deve vir de SUM(delta) em producao_evento por janela local (America/Bahia), evitando sobrescrita por machine_state.
 
 
 from __future__ import annotations
@@ -149,6 +149,41 @@ def _count_pulses_producao_evento(
     if c == 0 and machine_id and machine_id != effective_machine_id:
         c = _count(machine_id)
     return int(c) if c and c > 0 else 0
+
+
+def _sum_delta_producao_evento(
+    conn: sqlite3.Connection,
+    machine_id: str,
+    effective_machine_id: str,
+    start_ms: int,
+    end_ms: int,
+) -> int:
+    """Soma delta em producao_evento no intervalo [start_ms, end_ms).
+
+    Usa effective_machine_id primeiro e faz fallback para machine_id original quando necessario.
+    Retorna 0 quando nao houver eventos no intervalo.
+    """
+    if start_ms <= 0 or end_ms <= 0 or end_ms <= start_ms:
+        return 0
+    if not _table_exists(conn, "producao_evento"):
+        return 0
+
+    sql = "SELECT COALESCE(SUM(delta), 0) AS s FROM producao_evento WHERE machine_id = ? AND ts_ms >= ? AND ts_ms < ?"
+
+    def _sum(mid: str) -> int:
+        try:
+            row = conn.execute(sql, (mid, int(start_ms), int(end_ms))).fetchone()
+            if not row:
+                return 0
+            return _safe_int(row[0] if not isinstance(row, sqlite3.Row) else row["s"], 0)
+        except Exception:
+            return 0
+
+    s = _sum(effective_machine_id) if effective_machine_id else 0
+    if s == 0 and machine_id and machine_id != effective_machine_id:
+        s = _sum(machine_id)
+    return int(s) if s and s > 0 else 0
+
 
 def _extract_esp_counter(machine_state: dict | None) -> int | None:
     """Extrai o contador absoluto do ESP a partir do estado da maquina (best-effort)."""
@@ -1549,72 +1584,11 @@ def api_producao_detalhe_dia():
                         hor[hh]["meta"] = _safe_int(meta24[hh], 0)
             except Exception:
                 pass
-
-
-
             # ============================================================
-            # Normalizacao (dia atual): evitar valores acumulados em producao_horaria
-            #
-            # Caso producao_horaria tenha armazenado ESP acumulado em 'produzido',
-            # usamos esp_last/baseline_esp (se existirem) para converter em delta por hora.
-            # Para a hora corrente, alinhamos com o card (ESP_atual - baseline_da_hora).
+            # Produzido por hora (fonte da verdade): SUM(delta) em producao_evento por janela local (America/Bahia)
+            # - Evita problemas de timezone e sobrescritas por estado/turno
+            # - producao_horaria vira apenas fallback (quando nao houver eventos)
             # ============================================================
-            try:
-                if now_naive is not None:
-                    now_hour = int(now_naive.hour)
-                    esp_now = _extract_esp_counter(machine_state)
-
-                    # Baseline por hora: preferir baseline_esp do banco; se faltar, usar esp_last da hora anterior
-                    last_esp = 0
-                    for hh in range(24):
-                        try:
-                            last_esp = max(_safe_int(hor.get(hh, {}).get("esp_last", 0), 0), last_esp)
-                        except Exception:
-                            pass
-
-                    prev_esp = 0
-                    for hh in range(24):
-                        base = _safe_int(hor.get(hh, {}).get("baseline_esp", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if base <= 0 and hh > 0:
-                            prev_esp_val = _safe_int(hor.get(hh - 1, {}).get("esp_last", 0), 0)
-                            if prev_esp_val > 0:
-                                base = prev_esp_val
-                        if base <= 0:
-                            base = prev_esp
-
-                        # Atualiza prev_esp para permitir fallback mesmo sem esp_last
-                        if esp_h > 0:
-                            prev_esp = esp_h
-
-                        hor[hh]["_baseline_calc"] = base
-
-                    # Ajusta produzido por hora usando esp_last/baseline quando disponivel
-                    for hh in range(24):
-                        if hh > now_hour:
-                            # Futuro no dia atual: zera para nao herdar acumulado
-                            hor[hh]["produzido"] = 0
-                            continue
-
-                        base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if hh == now_hour and esp_now is not None:
-                            # Hora corrente: usa o contador atual do ESP
-                            delta = _safe_int(esp_now, 0) - base
-                        else:
-                            # Horas passadas: se houver esp_last, calcula delta
-                            if esp_h > 0:
-                                delta = esp_h - base
-                            else:
-                                delta = None
-
-                        if delta is None:
-                            continue
-                        if delta < 0:
-                            delta = 0
-                        hor[hh]["produzido"] = int(delta)
-            except Exception:
-                pass
 
             # Monta resposta hora a hora
 
@@ -1635,6 +1609,18 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
+
+
+                # Produzido por hora via eventos (ts_ms em UTC, janela calculada em hora local)
+                try:
+                    start_ms = _naive_bahia_to_ms(hs)
+                    end_ms = _naive_bahia_to_ms(he_calc)
+                    if end_ms > start_ms:
+                        prod_evt = _sum_delta_producao_evento(conn, machine_id, eff_mid, start_ms, end_ms)
+                        if prod_evt is not None:
+                            produzido = _safe_int(prod_evt, 0)
+                except Exception:
+                    pass
 
 
 
@@ -1695,36 +1681,6 @@ def api_producao_detalhe_dia():
                 )
 
 
-            # ============================================================
-            # Merge (HOJE): Historico nao calcula producao; apenas exibe o que ja existe no estado da maquina.
-            # Regra:
-            # - Prioridade: producao_exibicao_24[hour]
-            # - Fallback: producao_por_hora alinhada a horas_turno (mapeada para hora do relogio)
-            # ============================================================
-            if now_naive is not None and isinstance(machine_state, dict) and data_ref == now_naive.date():
-                try:
-                    prod_ex24 = machine_state.get("producao_exibicao_24")
-                    if isinstance(prod_ex24, list) and len(prod_ex24) >= 24:
-                        for hobj in horas:
-                            try:
-                                hh = _safe_int(hobj.get("hour"), -1)
-                                if 0 <= hh <= 23:
-                                    val = prod_ex24[hh]
-                                    if val is not None:
-                                        hobj["produzido"] = _safe_int(val, 0)
-                            except Exception:
-                                continue
-                    else:
-                        if isinstance(prod_turno_by_hour, dict):
-                            for hobj in horas:
-                                try:
-                                    hh = _safe_int(hobj.get("hour"), -1)
-                                    if 0 <= hh <= 23 and hh in prod_turno_by_hour:
-                                        hobj["produzido"] = _safe_int(prod_turno_by_hour.get(hh), 0)
-                                except Exception:
-                                    continue
-                except Exception:
-                    pass
 
             return jsonify(
                 {
