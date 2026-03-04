@@ -1,1 +1,4 @@
-﻿fix(historico): corrigir indentacao quebrada na funcao de leitura de eventos RUN/STOP
+﻿fix(historico): corrigir erro de indentacao TAB vs spaces que quebrava import do modulo
+
+- converte todo o arquivo para 4 spaces
+- elimina erro 'unindent does not match any outer indentation level'

@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-04 10:42 America/Bahia
-# MOTIVO: Barra do historico: nao assumir RUN desde 00:00 por estado antigo; ignorar estado inicial RUN se ultimo evento for muito antigo (evita horas verdes erradas).
+# LAST_RECODE: 2026-03-04 11:30 America/Bahia
+# MOTIVO: Barra do historico: segmentos somente por RUN/STOP/NP via machine_state_event; SQL defensivo para schemas antigos (colunas id/data/ts/state).
 
 
 from __future__ import annotations
@@ -679,9 +679,14 @@ def _fetch_run_intervals_from_state_events(
     """
     Converte machine_state_event (transicoes RUN/STOP/NP) em intervalos RUN para o dia.
 
-    - Usa o ultimo estado antes de 00:00 para definir estado inicial do dia.
+    Regra da barra: somente RUN/STOP/NP vindos de machine_state_event.
+    Nao deduz RUN por producao, meta, ritmo ou qualquer heuristica.
+
+    Observacoes:
+    - Implementacao defensiva: detecta nomes de colunas (id, data, ts, state) para suportar schemas antigos.
+    - Usa datetimes naive (sem tzinfo) internamente, para nao misturar naive vs aware.
     - Para dia atual, corta intervalo aberto em "agora" para nao preencher futuro.
-    - Se a tabela nao existir, retorna [].
+    - Se a tabela nao existir ou nao tiver colunas minimas, retorna [].
     """
     try:
         if not _table_exists(conn, "machine_state_event"):
@@ -689,12 +694,51 @@ def _fetch_run_intervals_from_state_events(
     except Exception:
         return []
 
+    cols = _get_columns(conn, "machine_state_event")
+
+    # coluna de id da maquina (preferencia: effective_machine_id, fallback: machine_id)
+    id_col = None
+    if "effective_machine_id" in cols:
+        id_col = "effective_machine_id"
+    elif "machine_id" in cols:
+        id_col = "machine_id"
+    else:
+        return []
+
+    # coluna de data do evento (preferencia: data_ref, fallback: resolver como nas demais tabelas)
+    date_col = None
+    if "data_ref" in cols:
+        date_col = "data_ref"
+    else:
+        try:
+            date_col = _resolve_data_col(conn, "machine_state_event")
+        except Exception:
+            date_col = None
+    if not date_col:
+        return []
+
+    # coluna do timestamp em ms
+    ts_col = None
+    for c in ("ts_ms", "ts", "timestamp_ms"):
+        if c in cols:
+            ts_col = c
+            break
+    if not ts_col:
+        return []
+
+    # coluna do estado
+    state_col = None
+    for c in ("state", "status"):
+        if c in cols:
+            state_col = c
+            break
+    if not state_col:
+        return []
+
     # IMPORTANTE: o restante do Historico usa datetimes naive (sem tzinfo).
-    # Para evitar erro de comparacao naive vs aware, aqui tambem usamos naive.
     day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0)
     day_end = day_start + timedelta(days=1)
 
-    # "agora" somente se for o dia atual, para nao inventar futuro
     now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
     if day_start.date() == now_dt.date():
         hard_end = min(day_end, now_dt)
@@ -707,24 +751,27 @@ def _fetch_run_intervals_from_state_events(
     # Estado inicial: ultimo evento antes do dia
     state0 = None
     try:
-        r0 = conn.execute(
-            "SELECT state, ts_ms FROM machine_state_event "
-            "WHERE effective_machine_id=? AND ts_ms < ? "
-            "ORDER BY ts_ms DESC LIMIT 1",
-            (effective_machine_id, day_start_ms),
-        ).fetchone()
+        sql0 = (
+            "SELECT {state_col}, {ts_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {ts_col} < ? "
+            "ORDER BY {ts_col} DESC LIMIT 1"
+        ).format(state_col=state_col, ts_col=ts_col, id_col=id_col)
+        r0 = conn.execute(sql0, (effective_machine_id, day_start_ms)).fetchone()
         if r0:
-            # Se o ultimo evento antes do dia for muito antigo, nao use como estado inicial.
-            # Isso evita pintar horas como RUN por heranca de um dia anterior sem evento de STOP.
             try:
                 r0_state = str(r0[0] or "").upper()
                 r0_ts_ms = int(r0[1]) if r0[1] is not None else None
             except Exception:
                 r0_state = ""
                 r0_ts_ms = None
+
             # tolerancia: se o ultimo evento for mais antigo que 6h antes de 00:00, ignora.
             stale_ms = 6 * 60 * 60 * 1000
-            if r0_state in ("RUN", "STOP", "NP") and r0_ts_ms is not None and (day_start_ms - r0_ts_ms) <= stale_ms:
+            if (
+                r0_state in ("RUN", "STOP", "NP")
+                and r0_ts_ms is not None
+                and (day_start_ms - r0_ts_ms) <= stale_ms
+            ):
                 state0 = r0_state
             else:
                 state0 = None
@@ -734,12 +781,12 @@ def _fetch_run_intervals_from_state_events(
     # Eventos do dia
     evs: list[tuple[int, str]] = []
     try:
-        for r in conn.execute(
-            "SELECT ts_ms, state FROM machine_state_event "
-            "WHERE effective_machine_id=? AND data_ref=? "
-            "ORDER BY ts_ms ASC",
-            (effective_machine_id, data_ref.isoformat()),
-        ).fetchall():
+        sql = (
+            "SELECT {ts_col}, {state_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {date_col}=? "
+            "ORDER BY {ts_col} ASC"
+        ).format(ts_col=ts_col, state_col=state_col, id_col=id_col, date_col=date_col)
+        for r in conn.execute(sql, (effective_machine_id, data_ref.isoformat())).fetchall():
             try:
                 ts_ms = int(r[0])
             except Exception:
@@ -759,7 +806,6 @@ def _fetch_run_intervals_from_state_events(
     def _push_run(a: datetime, b: datetime) -> None:
         if b <= a:
             return
-        # corta em hard_end
         aa = max(a, day_start)
         bb = min(b, hard_end)
         if bb > aa:
@@ -785,6 +831,8 @@ def _fetch_run_intervals_from_state_events(
         _push_run(cur_t, hard_end)
 
     return _merge_intervals(intervals)
+
+
 
 
 def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
@@ -1727,4 +1775,4 @@ def api_producao_backfill_horaria():
 def historico_page():
     return render_template("historico.html")
 ###ml")
-###
+###ererfff
