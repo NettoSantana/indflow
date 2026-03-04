@@ -1,4 +1,4 @@
-﻿fix(machine_calc): virada da hora baseada no relogio do servidor
+﻿fix(historico): barra baseada em RUN/STOP sem herdar RUN antigo
 
-- Bucket de hora e dia_operacional_ref passam a usar horario do servidor (America/Bahia)
-- Evita herdar producao na virada quando timestamp do ESP atrasa ou oscila
+- machine_state_event: ignora state0=RUN se ultimo evento antes do dia for muito antigo (6h)
+- evita horas verdes erradas por heranca de dia anterior sem evento de STOP
