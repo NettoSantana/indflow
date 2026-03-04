@@ -1,5 +1,5 @@
-﻿fix(historico): impedir STOP artificial de 60 min quando nao existem eventos
+﻿fix(historico): barra por status (RUN/STOP/NP), sem depender de producao
 
-- Remove fallback que marcava hora inteira como STOP
-- Agora horas sem eventos nao contabilizam tempo
-- Corrige exibicao de tempo parado no historico
+- Remove fallback que marcava RUN pela producao quando machine_state_event esta vazio
+- Para hora atual, usa machine_state (run/status/status_ui) para definir RUN/STOP
+- Para horas passadas sem eventos, nao inventa historico (assume STOP)

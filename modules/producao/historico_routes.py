@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-03 23:55 America/Bahia
-# MOTIVO: Fazer a barra do historico depender somente do status (RUN/STOP/NP), removendo fallback baseado em producao quando machine_state_event estiver vazio.
+# LAST_RECODE: 2026-03-04 00:05 America/Bahia
+# MOTIVO: Detalhe-dia: quando nao houver machine_state_event, nao inferir STOP pela producao; usar apenas status atual (run) na hora corrente e marcar demais horas como IDLE (cinza).
 
 
 from __future__ import annotations
@@ -1156,6 +1156,7 @@ def api_producao_detalhe_dia():
 
             machine_state = None
             stop_start_naive = None
+            run_now_flag = None
             if now_naive is not None and callable(get_machine):
                 try:
                     machine_state = get_machine(eff_mid) or get_machine(machine_id)
@@ -1172,6 +1173,13 @@ def api_producao_detalhe_dia():
                                     is_stopped = True
                             except Exception:
                                 is_stopped = False
+
+                        # Flag unico para hora atual (True=RUN, False=STOP)
+                        try:
+                            run_now_flag = (not is_stopped)
+                        except Exception:
+                            run_now_flag = None
+
                         if is_stopped and stopped_ms is not None:
                             try:
                                 stop_start_naive = _ms_to_naive_bahia(int(stopped_ms))
@@ -1335,42 +1343,36 @@ def api_producao_detalhe_dia():
 
 
                 # Fallback: se nao houver rastro em machine_state_event para o dia,
-                # a barra deve depender SOMENTE do status (RUN/STOP/NP), nunca da producao.
-                #
-                # Regras:
-                # - Se houver run_intervals: usa o historico real (_build_segments_for_hour).
-                # - Se NAO houver run_intervals:
-                #   - Se for o dia atual e esta for a hora atual: pinta pela condicao "rodando agora" do machine_state.
-                #   - Para horas passadas sem eventos: nao inventa historico (assume STOP).
+                # NAO invente STOP pela ausencia de eventos (isso deixa tudo vermelho).
+                # Regra:
+                # - Hora atual (do dia atual): usa o status atual (run) para marcar RUN/STOP.
+                # - Demais horas sem eventos: marca como IDLE (vira cinza no front).
                 if (not is_np) and (not run_intervals):
-                    is_current_hour = (
-                        (now_naive is not None)
-                        and (data_ref == now_naive.date())
-                        and (hs <= now_naive < he)
-                    )
+                    is_current_hour = False
+                    try:
+                        if now_naive is not None and hs <= now_naive < he:
+                            is_current_hour = True
+                    except Exception:
+                        is_current_hour = False
 
                     if is_current_hour:
-                        is_running_now = False
-                        try:
-                            run_flag = int(machine_state.get("run") or 0)
-                            status_ui = str(machine_state.get("status_ui") or "").upper()
-                            status_txt = str(machine_state.get("status") or "").upper()
-
-                            if run_flag == 1 and ("PARADO" not in status_ui) and (status_txt != "STOP"):
-                                is_running_now = True
-                        except Exception:
-                            is_running_now = False
-
-                        segs = [{
-                            "start": hs.strftime("%H:%M:%S"),
-                            "end": he_calc.strftime("%H:%M:%S"),
-                            "state": "RUN" if is_running_now else "STOP",
-                        }]
+                        if run_now_flag is True:
+                            segs = [{
+                                "start": hs.strftime("%H:%M:%S"),
+                                "end": he_calc.strftime("%H:%M:%S"),
+                                "state": "RUN",
+                            }]
+                        else:
+                            segs = [{
+                                "start": hs.strftime("%H:%M:%S"),
+                                "end": he_calc.strftime("%H:%M:%S"),
+                                "state": "STOP",
+                            }]
                     else:
                         segs = [{
                             "start": hs.strftime("%H:%M:%S"),
                             "end": he_calc.strftime("%H:%M:%S"),
-                            "state": "STOP",
+                            "state": "IDLE",
                         }]
                 else:
                     segs = _build_segments_for_hour(hs, he_calc, is_np, run_intervals)
