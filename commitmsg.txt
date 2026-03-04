@@ -1,5 +1,4 @@
-﻿fix(historico): barra do detalhe-dia baseada em segmentos do backend
+﻿fix(historico): usar producao_exibicao_24 do machine_state como fallback no detalhe-dia
 
-- Prioriza h.segments (machine_state_event) para desenhar RUN/STOP/NP
-- Evita depender de localStorage/visita previa (aba anonima nao fica zerada)
-- Mantem fallback antigo caso backend nao envie segmentos
+- Evita Prod=0 e barras vermelhas quando a persistencia horaria ainda nao gravou
+- Aplica apenas para o dia atual (HOJE) e somente se existir producao_exibicao_24
