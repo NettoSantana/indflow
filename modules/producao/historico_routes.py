@@ -1,5 +1,5 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-03-04 01:20 America/Bahia
+# LAST_RECODE: 2026-03-04 10:42 America/Bahia
 # MOTIVO: Barra do historico: nao assumir RUN desde 00:00 por estado antigo; ignorar estado inicial RUN se ultimo evento for muito antigo (evita horas verdes erradas).
 
 
@@ -707,7 +707,7 @@ def _fetch_run_intervals_from_state_events(
     # Estado inicial: ultimo evento antes do dia
     state0 = None
     try:
-                r0 = conn.execute(
+        r0 = conn.execute(
             "SELECT state, ts_ms FROM machine_state_event "
             "WHERE effective_machine_id=? AND ts_ms < ? "
             "ORDER BY ts_ms DESC LIMIT 1",
@@ -722,7 +722,6 @@ def _fetch_run_intervals_from_state_events(
             except Exception:
                 r0_state = ""
                 r0_ts_ms = None
-
             # tolerancia: se o ultimo evento for mais antigo que 6h antes de 00:00, ignora.
             stale_ms = 6 * 60 * 60 * 1000
             if r0_state in ("RUN", "STOP", "NP") and r0_ts_ms is not None and (day_start_ms - r0_ts_ms) <= stale_ms:
@@ -1727,4 +1726,5 @@ def api_producao_backfill_horaria():
 @historico_bp.route("/historico", methods=["GET"])
 def historico_page():
     return render_template("historico.html")
+###ml")
 ###
