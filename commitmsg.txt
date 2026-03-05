@@ -1,6 +1,5 @@
-﻿fix(producao/op): activated_at persistido + op/get retorna bobinas_detail com eventos
+﻿fix(producao-op): aliases de ativar + encerrar por op_id no banco
 
-- Adiciona coluna activated_at em ordens_producao (create + migration)
-- /producao/op/get passa a retornar activated_at
-- /producao/op/get monta bobinas_detail com started_at/ended_at via ordens_producao_bobina_eventos
-- Aplica fallback de comprimento e calcula pcs_total/metro_consumido quando possivel (principalmente com OP ATIVA)
+- Adiciona rotas /op/tivar e /op/activate (compat com front antigo)
+- Em /op/encerrar: se vier op_id, encerra via op_encerrar_by_id (sem depender do cache op_active)
+- Em /op/ativar: imprime erro/stage no log do Railway pra diagnosticar 500
