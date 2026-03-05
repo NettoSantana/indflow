@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-04 23:50 America/Bahia
-# MOTIVO: OP por slot: permitir criar OP em posicao 1..5 (1 ativa, 2-5 fila) via /producao/op/iniciar com posicao no payload.
+# LAST_RECODE: 2026-03-04 22:17 America/Bahia
+# MOTIVO: OP por fila incremental: remover limite 1..5 e permitir criar quantas OPs forem necessarias (sem fila cheia).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2165,9 +2165,9 @@ def op_iniciar():
         return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
 
     with _op_lock:
-        # Slot/posicao: 1..5
-        # - Se posicao nao vier no payload, usamos o primeiro slot vazio (1..5)
-        # - So pode existir 1 OP ATIVA por maquina (normalmente posicao 1)
+        # Fila incremental (sem limite de quantidade)
+        # - Se posicao nao vier no payload, usamos a proxima posicao (max + 1)
+        # - Mantemos unicidade: nao pode haver duas OPs ativas/fila com a mesma posicao
         raw_pos = data.get("posicao")
         if raw_pos is None:
             raw_pos = data.get("slot")
@@ -2181,10 +2181,13 @@ def op_iniciar():
         except Exception:
             posicao = None
 
-        if posicao is not None and (posicao < 1 or posicao > 5):
-            return jsonify({"error": "posicao deve ser um numero entre 1 e 5"}), 400
+        if posicao == 0:
+            posicao = None
 
-        # Descobrir slots ocupados (ATIVA/FILA, sem ended_at)
+        if posicao is not None and posicao < 1:
+            return jsonify({"error": "posicao deve ser um numero >= 1"}), 400
+
+        # Descobrir posicoes ocupadas (ATIVA/FILA, sem ended_at)
         with _get_conn() as conn:
             cur = conn.cursor()
             cur.execute(
@@ -2200,22 +2203,11 @@ def op_iniciar():
             ocupadas = {int(r[0]) for r in cur.fetchall() if r[0] is not None}
 
         if posicao is None:
-            # Primeiro slot vazio
-            for p in range(1, 6):
-                if p not in ocupadas:
-                    posicao = p
-                    break
-
-        if posicao is None:
-            return jsonify({"error": "Fila cheia: ja existem 5 OPs (ativa/fila) para esta maquina"}), 409
+            posicao = (max(ocupadas) + 1) if ocupadas else 1
 
         if posicao in ocupadas:
-            return jsonify({"error": f"Slot {posicao} ja possui uma OP (ativa/fila)"}), 409
+            return jsonify({"error": f"Posicao {posicao} ja possui uma OP (ativa/fila)"}), 409
 
-        # Regra: so ativa se nao existir OP ativa
-        existe_ativa = machine_id in op_active
-        if posicao == 1 and existe_ativa:
-            return jsonify({"error": "Ja existe uma OP ativa para esta maquina"}), 409
 
     bobinas_list, bobina = _normalize_bobinas(data)
     if bobinas_list is None:
