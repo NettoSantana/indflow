@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-05 02:38
-MOTIVO: Corrigir clique do botao Editar no Historico para nao abrir o modal grande (somente redirecionar para config com edit_op_id).
+LAST_RECODE: 2026-03-05 03:00
+MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, carregando OP via /op/get e permitindo editar campos e bobinas (add/remove).
 -->
 
 <!--
@@ -11,8 +11,8 @@ Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atu
 -->
 <!--
 PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-24 19:40 America/Bahia
-MOTIVO: Ajustar Tempo Prod/Parado para ler *_sec do backend e exibir em minutos no layout.
+LAST_RECODE: 2026-03-05 03:00
+MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, carregando OP via /op/get e permitindo editar campos e bobinas (add/remove).
 -->
 
 {#
@@ -429,6 +429,43 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   /* ===============================
      Bobinas (fechamento por bobina)
      =============================== */
+
+  .bobinas-m-wrap{
+    margin-top:12px;
+    padding:12px;
+    border:1px solid #e5e7eb;
+    border-radius:14px;
+    background:#ffffff;
+  }
+  .bobinas-m-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:10px;
+  }
+  .bobinas-m-title{
+    font-size:12px;
+    font-weight:900;
+    color:#0f172a;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+  }
+  .bobinas-m-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .bobinas-m-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .bobinas-m-row input{
+    width:220px;
+    max-width:100%;
+  }
+
   .bobinas-wrap{
     grid-column: span 12;
     display:flex;
@@ -721,6 +758,18 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
         <div class="op-field op-ro col-6">
           <label>HS-término</label>
           <input id="opv_ended" type="text" readonly>
+        </div>
+
+
+        <!-- Bobinas (metros) - editavel no modo edicao -->
+        <div class="bobinas-m-wrap" id="bobinas-m-wrap" style="display:none;">
+          <div class="bobinas-m-header">
+            <div class="bobinas-m-title">Bobinas (metros)</div>
+            <button type="button" class="btn-secondary" id="bobinas-m-add">Adicionar bobina</button>
+          </div>
+          <div class="bobinas-m-list" id="bobinas-m-list">
+            <!-- preenchido via JS -->
+          </div>
         </div>
 
         <!-- Bobinas (fechamento por bobina) -->
@@ -1200,9 +1249,17 @@ function safeText(v){
   const opv_ended = document.getElementById("opv_ended");
 
   const bobinasWrap = document.getElementById("bobinas-wrap");
+  const bobinasMWrap = document.getElementById("bobinas-m-wrap");
+  const bobinasMList = document.getElementById("bobinas-m-list");
+  const bobinasMAdd = document.getElementById("bobinas-m-add");
+
   const ope_obs = document.getElementById("ope_obs");
 
   let currentOp = null;
+  let currentOpMode = "view"; // view | edit
+  let currentBobinasM = [];
+
+
 
   function num0(v){
     const n = Number(v);
@@ -1224,6 +1281,115 @@ function safeText(v){
     let res = t - (c + r + s);
     if(res < 0) res = 0;
     return res;
+  }
+
+
+  function setReadonly(el, ro){
+    if(!el) return;
+    if(ro){
+      el.setAttribute("readonly","readonly");
+    }else{
+      el.removeAttribute("readonly");
+    }
+  }
+
+  function showBobinasM(show){
+    if(!bobinasMWrap) return;
+    bobinasMWrap.style.display = show ? "" : "none";
+  }
+
+  function normalizeBobinasM(op){
+    // tentar pegar lista de bobinas em metros
+    const raw =
+      (op && (op.bobinas_m || op.bobinasM || op.bobinas_metros || op.bobinas_m_list)) ||
+      (op && (op.bobinas || op.bobinas_list || op.bobinasItens)) ||
+      [];
+    const arr = Array.isArray(raw) ? raw : [];
+    const out = [];
+    arr.forEach((x) => {
+      if(typeof x === "number" || typeof x === "string"){
+        const n = num0(x);
+        out.push(Math.floor(n));
+        return;
+      }
+      if(x && typeof x === "object"){
+        const n = num0(x.comprimento_m ?? x.metros ?? x.bobina_m ?? x.valor ?? 0);
+        out.push(Math.floor(n));
+      }
+    });
+    return out;
+  }
+
+  function renderBobinasM(){
+    if(!bobinasMList) return;
+    bobinasMList.innerHTML = "";
+
+    const list = Array.isArray(currentBobinasM) ? currentBobinasM : [];
+    list.forEach((m, idx) => {
+      const row = document.createElement("div");
+      row.className = "bobinas-m-row";
+      row.setAttribute("data-bm-idx", String(idx));
+
+      const w = document.createElement("div");
+      w.className = "op-field op-edit col-6";
+      w.style.margin = "0";
+
+      const l = document.createElement("label");
+      l.textContent = "Comprimento da bobina (m)";
+
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.inputMode = "numeric";
+      inp.min = "0";
+      inp.step = "1";
+      inp.value = String(Math.floor(num0(m)));
+      inp.addEventListener("input", function(){
+        const i = Number(row.getAttribute("data-bm-idx") || "0");
+        currentBobinasM[i] = Math.floor(num0(inp.value));
+      });
+
+      w.appendChild(l);
+      w.appendChild(inp);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary";
+      btn.textContent = "Remover";
+      btn.addEventListener("click", function(e){
+        if(e){ e.preventDefault(); e.stopPropagation(); }
+        const i = Number(row.getAttribute("data-bm-idx") || "0");
+        currentBobinasM.splice(i, 1);
+        renderBobinasM();
+      });
+
+      row.appendChild(w);
+      row.appendChild(btn);
+      bobinasMList.appendChild(row);
+    });
+
+    // atualizar resumo
+    if(opv_bobinas_resumo){
+      opv_bobinas_resumo.value = bobinasResumo(list);
+    }
+
+    if(list.length === 0){
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Nenhuma bobina adicionada.";
+      bobinasMList.appendChild(empty);
+    }
+  }
+
+  function collectBobinasMFromUI(){
+    if(!bobinasMList) return [];
+    const out = [];
+    const rows = bobinasMList.querySelectorAll("[data-bm-idx]");
+    rows.forEach((row) => {
+      const inp = row.querySelector("input");
+      if(!inp) return;
+      out.push(Math.floor(num0(inp.value)));
+    });
+    return out;
   }
 
   function clearBobinasUI(){
@@ -1391,8 +1557,76 @@ function safeText(v){
     return card;
   }
 
-  function openModal(op){
+
+  async function fetchOpGet(opId){
+    const qs = "?op_id=" + encodeURIComponent(String(opId));
+    const urls = ["/producao/op/get" + qs, "/op/get" + qs];
+    let lastErr = null;
+
+    for(const u of urls){
+      try{
+        const r = await fetch(u, { method: "GET" });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => null);
+        if(!data) return null;
+
+        // aceitar formatos: {ok:true, op:{...}} ou direto {...}
+        const op = (data.op || data.data || data) || null;
+        return op;
+      }catch(e){
+        lastErr = e;
+      }
+    }
+
+    throw lastErr || new Error("Falha ao carregar OP.");
+  }
+
+  async function openOpEdit(opId){
+    const id = Number(opId || 0);
+    if(!id){
+      alert("OP invalida.");
+      return;
+    }
+
+    try{
+      // Carregar a OP completa via /op/get
+      const op = await fetchOpGet(id);
+      if(!op){
+        alert("Nao foi possivel carregar a OP.");
+        return;
+      }
+      openModal(op, "edit");
+    }catch(err){
+      alert("Falha ao carregar OP: " + (err.message || err));
+    }
+  }
+
+  function openModal(op, mode){
     currentOp = op || null;
+    currentOpMode = (mode === "edit") ? "edit" : "view";
+
+    // no modo edicao, liberar campos principais (exceto maquina/status)
+    const isEdit = (currentOpMode === "edit");
+    setReadonly(opv_operador, !isEdit);
+    setReadonly(opv_lote, !isEdit);
+    setReadonly(opv_os, !isEdit);
+    setReadonly(opv_gr_fio, !isEdit);
+    setReadonly(opv_conv, !isEdit);
+    setReadonly(opv_started, !isEdit);
+    setReadonly(opv_ended, !isEdit);
+    showBobinasM(isEdit);
+
+    if(isEdit){
+      currentBobinasM = normalizeBobinasM(op);
+      renderBobinasM();
+    }else{
+      currentBobinasM = [];
+    }
+
+
 
     if(modalTitle){
       const osNum = safeText(op && (op.os || op.os_num || op.ordem_servico)).trim();
@@ -2002,6 +2236,19 @@ tdD.appendChild(wrap);
         bobinas: bobinasPayload
       };
 
+      if(currentOpMode === "edit"){
+        payload.os = (opv_os && opv_os.value) ? opv_os.value : "";
+        payload.lote = (opv_lote && opv_lote.value) ? opv_lote.value : "";
+        payload.operador = (opv_operador && opv_operador.value) ? opv_operador.value : "";
+        payload.gr_fio = (opv_gr_fio && opv_gr_fio.value) ? opv_gr_fio.value : "";
+        payload.conv = (opv_conv && opv_conv.value) ? opv_conv.value : "";
+        payload.started_at = (opv_started && opv_started.value) ? opv_started.value : "";
+        payload.ended_at = (opv_ended && opv_ended.value) ? opv_ended.value : "";
+
+        // bobinas em metros (add/remove no modo edicao)
+        payload.bobinas_m = collectBobinasMFromUI();
+      }
+
       modalSave.disabled = true;
 
       try{
@@ -2038,6 +2285,16 @@ tdD.appendChild(wrap);
     });
   }
 
+
+
+  if(bobinasMAdd){
+    bobinasMAdd.addEventListener("click", function(e){
+      if(e){ e.preventDefault(); e.stopPropagation(); }
+      if(currentOpMode !== "edit") return;
+      currentBobinasM.push(0);
+      renderBobinasM();
+    });
+  }
 
   function renderMsgRow(msg){
     if(!tbody) return;
@@ -2121,7 +2378,7 @@ tdD.appendChild(wrap);
         openModal(op2);
       }
 
-      function _goEdit(e){
+      async function _goEdit(e){
         if(e){
           e.preventDefault();
           e.stopPropagation();
@@ -2131,10 +2388,8 @@ tdD.appendChild(wrap);
           alert("Nao foi possivel identificar o ID da OP para editar.");
           return;
         }
-        // Editar deve abrir a tela de configuracao da maquina (modal de OP da pagina config)
-        const target = "/producao/config/" + encodeURIComponent(machineId) +
-          "?edit_op_id=" + encodeURIComponent(String(opId)) + "&from=historico";
-        window.location.href = target;
+        // Editar: abrir modal grande aqui no Historico em modo edicao
+        await openOpEdit(opId);
       }
 
       trOp.addEventListener("click", _openDetails);

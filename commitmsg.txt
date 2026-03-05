@@ -1,4 +1,5 @@
-﻿fix(historico): clique em Editar nao abre modal grande (so redireciona)
+﻿feat(op): permitir editar OP completa no Historico, incluindo bobinas
 
-- Bloqueia abertura do modal grande quando o clique for em Editar/Excluir (acoes)
-- Mantem clique na linha da OP abrindo o modal grande normalmente
+- /producao/op/get retorna bobinas_detail (fechamento por idx)
+- /producao/op/salvar aceita cadastro (os/lote/operador/gr_fio/obs), fechamento e bobinas_m (add/remove)
+- Ao reduzir bobinas, remove linhas antigas de ordens_producao_bobinas fora do range
