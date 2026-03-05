@@ -1,6 +1,5 @@
-﻿fix(op_ativar): nao sobrescrever abertura da OP; hora_inicial no evento da bobina; debug de erro e busy_timeout
+﻿fix(front-historico): preencher comprimento/hora inicial conforme regra OP
 
-- /producao/op/ativar nao altera started_at (abertura da OP)
-- hora_inicial passa a nascer ao ativar via evento seq=0 (started_at + start_abs_pcs)
-- retorno 500 agora inclui stage/detail para diagnostico rapido
-- sqlite busy_timeout para reduzir lock
+- Comprimento da bobina (Bobina 1) passa a nascer na criação via op.bobinas[idx] quando item.comprimento_m vier vazio/0
+- Hora inicial tenta started_at/hora_inicial/horaInicial (aliases) para refletir ativação
+- Mantém fallback seguro sem quebrar renderização
