@@ -1,4 +1,9 @@
 <!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Último recode: 2026-03-05 17:26:27+0000
+Motivo: Modal de edição deve renderizar todas as bobinas cadastradas (bobinas/bobinas_m), mesmo quando bobinas_eventos ainda não contém todas as sequências.
+-->
+<!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Ultima recodificacao: 2026-03-05 14:02:19 -0300
 Motivo: Renderizar todas as bobinas no modal (priorizar bobinas_eventos, fallback para bobinas_itens e bobinas_m).
@@ -1985,14 +1990,28 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     let renderItens = [];
 
-    if(evArr && evArr.length){
-      renderItens = evArr.map((ev, i) => {
+    const listM = normalizeBobinasM(op);
+    const nEv = (evArr && evArr.length) ? evArr.length : 0;
+    const nIt = (Array.isArray(itens) && itens.length) ? itens.length : 0;
+    const nM = (Array.isArray(listM) && listM.length) ? listM.length : 0;
+    const n = Math.max(nEv, nIt, nM);
+
+    if(n > 0){
+      for(let i = 0; i < n; i++){
+        const ev = (evArr && evArr[i]) ? evArr[i] : null;
+        const it = (Array.isArray(itens) && itens[i]) ? itens[i] : null;
+        const mm = (Array.isArray(listM) && listM[i] !== undefined && listM[i] !== null) ? listM[i] : null;
+
         const startAbs = num0(ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? 0));
         const endAbs = num0(ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0));
         const pcsEvt = (endAbs > 0 && startAbs >= 0 && endAbs >= startAbs) ? (endAbs - startAbs) : 0;
 
+        const compFromIt = num0(it && (it.comprimento_m ?? it.comprimentoM ?? it.bobina_m ?? it.bobinaM ?? 0));
+        const compFromEv = num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? ev.bobinaM ?? 0));
+        const compFromM = num0(mm);
+
         let base = {
-          comprimento_m: num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? 0)),
+          comprimento_m: (compFromEv > 0 ? compFromEv : (compFromM > 0 ? compFromM : compFromIt)),
           started_at: safeText(ev && (ev.started_at ?? ev.start_at ?? ev.inicio ?? "")),
           ended_at: safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? "")),
           start_abs_pcs: startAbs,
@@ -2000,22 +2019,16 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
           pcs_total: pcsEvt
         };
 
-        if(Array.isArray(itens) && itens[i]){
-          base = mergeQualidade(base, itens[i]);
+        if(it){
+          base = mergeQualidade(base, it);
         }
 
-        return base;
-      });
-    }else if(Array.isArray(itens) && itens.length){
-      renderItens = itens.slice();
-    }else{
-      const listM = normalizeBobinasM(op);
-      if(Array.isArray(listM) && listM.length){
-        renderItens = listM.map((m) => ({ comprimento_m: num0(m) }));
+        renderItens.push(base);
       }
     }
 
     if(renderItens.length){
+
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(renderItens);
       renderItens.forEach((b, i) => {
         const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
