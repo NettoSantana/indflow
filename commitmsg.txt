@@ -1,4 +1,4 @@
-﻿fix(op_get): pcs/metros ao vivo apenas na bobina ativa
+﻿fix(front/historico): bobinas ao vivo somente na bobina ativa
 
-- /producao/op/get considera ativa somente a maior seq aberta
-- evita bobinas futuras acumularem producao sem troca
+- Modal de OP: ao vivo agora calcula pcs/metragem/tempo por bobina usando start_abs_pcs do evento aberto
+- Evita replicar a producao da OP em todas as bobinas antes da troca

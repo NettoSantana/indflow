@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
-# LAST_RECODE: 2026-03-04 19:05 America/Bahia
-# MOTIVO: Implementar fila fixa de Ordens de Producao (OP) por maquina (ate 5 slots, 1 ativa).
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
+# LAST_RECODE: 2026-03-05 18:21 America/Bahia
+# MOTIVO: Aplicar pendencia de troca de bobina no primeiro /machine/update (abrir proximo evento seq) e corrigir inconsistencias.
 
 import os
 import json
@@ -446,6 +446,210 @@ def _ensure_machine_state_event_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_mse_cid_mid_day ON machine_state_event (cliente_id, effective_machine_id, data_ref, ts_ms)"
     )
+
+
+# =====================================================
+# OP / BOBINAS (APLICAR PENDENCIA NO PRIMEIRO /machine/update)
+# =====================================================
+def _ensure_op_bobina_schema(conn: sqlite3.Connection) -> None:
+    """Garante as tabelas usadas pelo modulo de producao (OP/Bobinas).
+
+    Observacao:
+    - Este arquivo (machine_routes.py) recebe o primeiro evento do chao de fabrica (/machine/update).
+    - A troca de bobina fecha o evento atual (seq N) e, no primeiro update depois disso, precisamos abrir o proximo (seq N+1).
+    - Para nao depender de ordem de import dos modulos, garantimos o schema aqui de forma defensiva.
+    """
+    cur = conn.cursor()
+
+    # ordens_producao (tabela principal) deve existir no modulo de producao; aqui apenas garante colunas minimas.
+    try:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ordens_producao (
+                op_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                machine_id TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'FILA',
+                baseline_pcs INTEGER NOT NULL DEFAULT 0,
+                bobina TEXT,
+                op_conv_m_por_pcs REAL NOT NULL DEFAULT 1.0,
+                started_at TEXT,
+                ended_at TEXT
+            )
+            """
+        )
+    except Exception:
+        pass
+
+    # eventos de bobina (seq por troca)
+    try:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ordens_producao_bobina_eventos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                op_id INTEGER NOT NULL,
+                seq INTEGER NOT NULL DEFAULT 0,
+                comprimento_m INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL DEFAULT '',
+                ended_at TEXT,
+                start_abs_pcs INTEGER NOT NULL DEFAULT 0,
+                end_abs_pcs INTEGER,
+                created_at TEXT,
+                updated_at TEXT,
+                UNIQUE(op_id, seq)
+            )
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_op_bob_evt_op_seq ON ordens_producao_bobina_eventos(op_id, seq)")
+    except Exception:
+        pass
+
+    conn.commit()
+
+
+def _parse_bobinas_csv_int(bobina_csv: str) -> list[int]:
+    s = (bobina_csv or "").strip()
+    if not s:
+        return []
+    parts = [p.strip() for p in s.replace(";", ",").split(",")]
+    out: list[int] = []
+    for p in parts:
+        if not p:
+            continue
+        if not p.isdigit():
+            return []
+        out.append(int(p))
+    return out
+
+
+def _apply_pending_bobina_on_update(conn: sqlite3.Connection, machine_id: str, esp_now: int, ts_iso: str) -> dict:
+    """Se existir uma OP ATIVA com evento de bobina fechado e proxima bobina ainda nao iniciada, abre o proximo evento.
+
+    Regras (em leigues):
+    - So existe 1 bobina consumindo por vez.
+    - Quando voce clica 'Troca de Bobina', a bobina atual (seq N) fecha (ended_at/end_abs_pcs).
+    - No PRIMEIRO /machine/update que chegar depois da troca, abrimos a bobina seguinte (seq N+1) com:
+      started_at = ts_iso
+      start_abs_pcs = esp_now
+    - Se nao houver troca pendente, nao faz nada.
+
+    Retorna um dict debug (sempre seguro).
+    """
+    out = {"applied": False}
+
+    try:
+        _ensure_op_bobina_schema(conn)
+    except Exception:
+        # schema pode falhar em ambientes read-only; nesse caso apenas nao aplica
+        return out
+
+    try:
+        cur = conn.cursor()
+
+        # 1) pega a OP ativa da maquina
+        cur.execute(
+            """
+            SELECT op_id, baseline_pcs, bobina
+            FROM ordens_producao
+            WHERE machine_id = ? AND status = 'ATIVA'
+            ORDER BY op_id DESC
+            LIMIT 1
+            """,
+            (machine_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return out
+
+        op_id = int(row[0] or 0)
+        bobina_csv = (row[2] or "")
+
+        bobinas_m = _parse_bobinas_csv_int(bobina_csv)
+        if not bobinas_m:
+            return out
+
+        # 2) ultimo evento
+        cur.execute(
+            """
+            SELECT seq, started_at, ended_at
+            FROM ordens_producao_bobina_eventos
+            WHERE op_id = ?
+            ORDER BY seq DESC
+            LIMIT 1
+            """,
+            (op_id,),
+        )
+        last = cur.fetchone()
+        if not last:
+            return out
+
+        last_seq = int(last[0] or 0)
+        last_ended_at = (last[2] or "")
+
+        # Se o ultimo evento ainda esta aberto, nao tem pendencia
+        if last_ended_at.strip() == "":
+            return out
+
+        next_seq = last_seq + 1
+
+        # Se nao existe proxima bobina cadastrada, nao abre nada
+        if next_seq >= len(bobinas_m):
+            return out
+
+        # 3) se ja existe um evento para o next_seq, nao duplica
+        cur.execute(
+            """
+            SELECT started_at, ended_at
+            FROM ordens_producao_bobina_eventos
+            WHERE op_id = ? AND seq = ?
+            LIMIT 1
+            """,
+            (op_id, next_seq),
+        )
+        exists = cur.fetchone()
+        if exists:
+            # se por algum motivo ja existe mas esta vazio, podemos completar
+            started_at = (exists[0] or "").strip()
+            ended_at = (exists[1] or "").strip()
+            if started_at == "" and ended_at == "":
+                cur.execute(
+                    """
+                    UPDATE ordens_producao_bobina_eventos
+                    SET started_at = ?, start_abs_pcs = ?, updated_at = ?
+                    WHERE op_id = ? AND seq = ?
+                    """,
+                    (ts_iso, int(esp_now), ts_iso, op_id, next_seq),
+                )
+                conn.commit()
+                out["applied"] = True
+                out["op_id"] = op_id
+                out["seq"] = next_seq
+            return out
+
+        # 4) cria o novo evento
+        comprimento_m = int(bobinas_m[next_seq] or 0)
+        cur.execute(
+            """
+            INSERT INTO ordens_producao_bobina_eventos(
+                op_id, seq, comprimento_m, started_at, ended_at,
+                start_abs_pcs, end_abs_pcs, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)
+            """,
+            (op_id, next_seq, comprimento_m, ts_iso, int(esp_now), ts_iso, ts_iso),
+        )
+        conn.commit()
+        out["applied"] = True
+        out["op_id"] = op_id
+        out["seq"] = next_seq
+        out["comprimento_m"] = comprimento_m
+        return out
+
+    except Exception as e:
+        out["error"] = str(e)
+        return out
 
 
 def _get_last_machine_state(conn: sqlite3.Connection, effective_machine_id: str, cliente_id: str | None = None) -> dict | None:
@@ -2258,6 +2462,27 @@ def update_machine():
 
         try:
             delta_evt = esp_now - esp_prev
+
+            # -------------------------------------------------
+            # APLICAR PENDENCIA DE TROCA DE BOBINA (seq N+1)
+            # -------------------------------------------------
+            try:
+                conn_op = get_db()
+                try:
+                    try:
+                        ts_iso_evt = datetime.fromtimestamp(int(effective_ts_ms) / 1000, TZ_BAHIA).isoformat(timespec="seconds")
+                    except Exception:
+                        ts_iso_evt = now_bahia().isoformat(timespec="seconds")
+                    _dbg_bob = _apply_pending_bobina_on_update(conn_op, machine_id, int(esp_now), ts_iso_evt)
+                    m["_op_bobina_pending"] = _dbg_bob
+                finally:
+                    try:
+                        conn_op.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             if delta_evt > 0:
                 created_at_evt = agora_lc.strftime("%Y-%m-%d %H:%M:%S")
                 _registrar_evento_producao(
@@ -3460,4 +3685,4 @@ def historico_producao_api():
 # - Mantem logica de producao_evento e producao_diaria
 # "@ | Set-Content commitmsg.txt -Encoding UTF8
 # git commit -F commitmsg.txt
-# git pufgf
+# git push
