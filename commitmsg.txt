@@ -1,4 +1,5 @@
-﻿fix(historico): usar America/Bahia para calcular 'hoje' no historico
+﻿ui(historico): indentar linhas de OP + separador mais escuro + acoes editar/excluir
 
-- Evita aparecer o dia seguinte na tela /producao/historico por causa do UTC do servidor (virada ~21:00)
-- Ajusta _hoje_iso e _last_n_days_iso para usar ZoneInfo('America/Bahia')
+- Linhas de OP com indentacao para indicar pertencimento ao dia
+- Separador das linhas de OP mais escuro para diferenciar do dia
+- Nova coluna Acoes com botoes Editar (abre modal) e Excluir (POST /producao/op/excluir)

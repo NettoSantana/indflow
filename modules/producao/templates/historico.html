@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-04 22:40
-MOTIVO: Ajustar visual das linhas de OP no Histórico (indentação, separador mais escuro, ações Editar/Excluir) sem mexer em backend.
+LAST_RECODE: 2026-03-05 01:52
+MOTIVO: Ajustar visual do Historico: indentar linhas de OP, escurecer separador das OPs e manter acoes Editar/Excluir a direita.
 -->
 
 <!--
@@ -147,6 +147,11 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     color:#334155;
     font-size:13px;
     font-weight:700;
+    border-bottom:1px solid #94a3b8; /* mais escuro que o dia */
+  }
+
+  /* Linha do DIA fica mais clara */
+  tr.day-row td{
     border-bottom:1px solid #e5e7eb;
   }
 
@@ -156,6 +161,24 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   .op-row:hover td{
     background:#eef2ff;
+  }
+
+  /* Indentacao: empurra o conteudo da OP para dentro, indicando que pertence ao dia */
+  td.op-cell{
+    padding-left:48px !important;
+    position:relative;
+  }
+
+  /* Guia visual (opcional): linha vertical suave na esquerda da OP */
+  td.op-cell::before{
+    content:"";
+    position:absolute;
+    left:24px;
+    top:10px;
+    bottom:10px;
+    width:2px;
+    background:#cbd5e1;
+    border-radius:2px;
   }
 
   .op-pill{
@@ -186,6 +209,40 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     border:1px solid #e2e8f0;
   }
 
+  /* Coluna Acoes (botoes a direita) */
+  td.op-actions{
+    text-align:right;
+    white-space:nowrap;
+  }
+
+  .op-action-btn{
+    display:inline-block;
+    border:1px solid #94a3b8;
+    background:#ffffff;
+    color:#0f172a;
+    border-radius:10px;
+    padding:6px 10px;
+    font-weight:800;
+    font-size:12px;
+    cursor:pointer;
+    margin-left:8px;
+  }
+
+  .op-action-btn:hover{
+    background:#f1f5f9;
+  }
+
+  .op-action-btn-danger{
+    border-color:#b91c1c;
+    color:#b91c1c;
+    background:#ffffff;
+  }
+
+  .op-action-btn-danger:hover{
+    background:#fee2e2;
+  }
+
+  /* Botao vermelho existente (reset por data) */
   .actions {
     display: flex;
     gap: 8px;
@@ -207,8 +264,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     opacity: 0.6;
     cursor: not-allowed;
   }
-
-  /* ===============================
+/* ===============================
      Modal OP (respeita layout)
      =============================== */
   .op-modal-backdrop{
