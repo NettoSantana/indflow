@@ -1,5 +1,5 @@
-﻿ui(historico): indentar linhas de OP + separador mais escuro + acoes editar/excluir
+﻿ui(historico): indentar OPs e escurecer separadores + padronizar acoes
 
 - Linhas de OP com indentacao para indicar pertencimento ao dia
-- Separador das linhas de OP mais escuro para diferenciar do dia
-- Nova coluna Acoes com botoes Editar (abre modal) e Excluir (POST /producao/op/excluir)
+- Separador das OPs mais escuro que o separador do dia
+- Acoes Editar/Excluir alinhadas a direita e com estilo consistente

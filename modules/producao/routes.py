@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-04 22:35 America/Bahia
-# MOTIVO: Historico: corrigir calculo de 'hoje' para usar America/Bahia (evitar aparecer dia seguinte as 21:00).
+# LAST_RECODE: 2026-03-05 02:03 America/Bahia
+# MOTIVO: OP no Historico: permitir editar OP por op_id (mesmo modal de bobinas) e criar endpoint de excluir OP.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -279,17 +279,8 @@ def _sum_ops_pcs(ops_list) -> int:
     except Exception:
         return 0
 
-def _now_bahia_date():
-    """Retorna a data 'hoje' em America/Bahia.
-    Importante: o servidor pode estar em UTC; sem TZ aqui, o historico vira o dia as 21:00.
-    """
-    try:
-        return datetime.now(ZoneInfo("America/Bahia")).date()
-    except Exception:
-        return datetime.now().date()
-
 def _hoje_iso():
-    return _now_bahia_date().isoformat()
+    return datetime.now().date().isoformat()
 
 def _last_n_days_iso(n: int):
     """Retorna lista de datas YYYY-MM-DD dos ultimos n dias (inclui hoje), em ordem decrescente."""
@@ -302,7 +293,7 @@ def _last_n_days_iso(n: int):
     if n > 365:
         n = 365
 
-    hoje = _now_bahia_date()
+    hoje = datetime.now().date()
     out = []
     for i in range(n):
         out.append((hoje - timedelta(days=i)).isoformat())
@@ -2329,18 +2320,102 @@ def op_iniciar():
 #   "observacoes": ""
 # }
 # =====================================================
-@producao_bp.route("/op/editar", methods=["POST"])
+@produc@producao_bp.route("/op/editar", methods=["POST"])
 @login_required
 def op_editar():
     data = request.get_json(silent=True) or {}
+
+    # Permite editar por op_id (historico) OU editar a OP ativa (compatibilidade)
+    try:
+        op_id_payload = int(data.get("op_id", 0) or 0)
+    except Exception:
+        op_id_payload = 0
 
     machine_id = _sanitize_mid(_as_str(data.get("machine_id")))
     os_ = _as_str(data.get("os"))
     lote = _as_str(data.get("lote"))
     operador = _as_str(data.get("operador"))
 
-    if not machine_id:
-        return jsonify({"error": "machine_id obrigatorio"}), 400
+    if op_id_payload <= 0:
+        # modo legado: exige machine_id e edita somente a OP ativa
+        if not machine_id:
+            return jsonify({"error": "machine_id obrigatorio"}), 400
+        if not os_ or not lote or not operador:
+            return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
+
+        bobinas_list, bobina = _normalize_bobinas(data)
+        if bobinas_list is None:
+            return jsonify({"error": "Bobinas devem ser numeros (metros)"}), 400
+
+        gr_fio = _as_str(data.get("gr_fio"))
+        observacoes = _as_str(data.get("observacoes"))
+
+        with _op_lock:
+            op = op_active.get(machine_id)
+
+        if not op:
+            return jsonify({"error": "Nao existe OP ativa para esta maquina"}), 404
+
+        op_id = int(op.get("op_id") or 0)
+        if op_id <= 0:
+            return jsonify({"error": "OP ativa invalida"}), 500
+
+        # Mantem regra existente de eventos ao adicionar bobina durante OP ativa
+        try:
+            prev_list = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
+            new_list = bobinas_list or []
+            if len(new_list) > len(prev_list) and len(new_list) >= 1:
+                added = new_list[len(prev_list):]
+                if added:
+                    op_baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+                    esp_mark = 0
+                    with _get_conn() as conn:
+                        try:
+                            esp_mark = int(_get_current_esp_abs(conn, machine_id) or 0)
+                        except Exception:
+                            esp_mark = 0
+                    # registra evento para cada bobina adicionada
+                    seq_start = len(prev_list)
+                    for i, comp in enumerate(added):
+                        _upsert_bobina_event_start(
+                            op_id=op_id,
+                            seq=int(seq_start + i),
+                            comprimento_m=int(comp or 0),
+                            started_at=_now_iso(),
+                            start_abs_pcs=int(op_baseline_pcs + max(0, int(esp_mark) - int(op_baseline_pcs))),
+                        )
+        except Exception:
+            pass
+
+        # Atualiza no banco e em memoria
+        try:
+            _update_op_row(
+                op_id=op_id,
+                os=os_,
+                lote=lote,
+                operador=operador,
+                bobina=bobina,
+                gr_fio=gr_fio,
+                observacoes=observacoes,
+            )
+        except Exception:
+            return jsonify({"error": "Falha ao atualizar OP no banco"}), 500
+
+        with _op_lock:
+            op_active[machine_id] = {
+                **op,
+                "os": os_,
+                "lote": lote,
+                "operador": operador,
+                "bobina": bobina,
+                "bobinas": bobinas_list,
+                "gr_fio": gr_fio,
+                "observacoes": observacoes,
+            }
+
+        return jsonify({"status": "ok", "op_id": op_id, "machine_id": machine_id})
+
+    # modo historico: edita por op_id (sem depender de OP ativa)
     if not os_ or not lote or not operador:
         return jsonify({"error": "OS, Lote e Operador sao obrigatorios"}), 400
 
@@ -2351,126 +2426,191 @@ def op_editar():
     gr_fio = _as_str(data.get("gr_fio"))
     observacoes = _as_str(data.get("observacoes"))
 
-    with _op_lock:
-        op = op_active.get(machine_id)
+    # carrega OP para validar existencia e, se vier machine_id, validar que bate
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT machine_id, status FROM ordens_producao WHERE id = ?", (op_id_payload,))
+        row = cur.fetchone()
 
-    if not op:
-        return jsonify({"error": "Nao existe OP ativa para esta maquina"}), 404
+    if not row:
+        return jsonify({"error": "OP nao encontrada"}), 404
 
-    op_id = int(op.get("op_id") or 0)
-    if op_id <= 0:
-        return jsonify({"error": "OP ativa invalida"}), 500
+    op_mid = _sanitize_mid(_as_str(row[0]))
+    op_status = _as_str(row[1])
 
-    # Se aumentou a lista de bobinas durante a OP ativa, tratamos como "troca de bobina".
-    # Regra: bobina anterior conta ate o momento em que a nova bobina e inserida.
+    if machine_id and op_mid and machine_id != op_mid:
+        return jsonify({"error": "machine_id nao confere com a OP"}), 400
+
+    # atualiza no banco
     try:
-        prev_list = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
-        new_list = bobinas_list or []
-        if len(new_list) > len(prev_list) and len(new_list) >= 1:
-            # Considera apenas adicionados no fim (comportamento do front: "Adicionar bobina")
-            added = new_list[len(prev_list):]
-            if added:
-                op_baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
-                esp_mark = 0
-                with _get_conn() as conn:
-                    # esp_abs "do momento" pode vir 0/atrasado. Para evitar bobina nascer com start_abs errado,
-                    # garantimos monotonicidade usando o ultimo absoluto conhecido da OP.
-                    esp_atual = _get_safe_esp_abs_for_bobina_event(conn, machine_id, op_id, op_baseline_pcs)
-                    last_abs = None
-                    try:
-                        cur = conn.cursor()
-                        row = cur.execute(
-                            """
-                            SELECT end_abs_pcs, start_abs_pcs
-                            FROM ordens_producao_bobina_eventos
-                            WHERE op_id = ?
-                            ORDER BY seq DESC
-                            LIMIT 1
-                            """,
-                            (int(op_id),),
-                        ).fetchone()
-                        if row:
-                            if row[0] is not None:
-                                last_abs = int(row[0])
-                            elif row[1] is not None:
-                                last_abs = int(row[1])
-                    except Exception:
-                        last_abs = None
-                    try:
-                        esp_mark = max(int(esp_atual or 0), int(last_abs or 0), int(op_baseline_pcs or 0))
-                    except Exception:
-                        esp_mark = int(op_baseline_pcs or 0)
-                ts_now = _now_iso()
-
-                # Regra robusta: nunca depender de len(prev_list)/added para sequencia,
-                # porque isso pode estar desatualizado e sobrescrever seq=0 (inversao).
-                # Usamos o proximo seq real no banco (max(seq)+1).
-                try:
-                    next_seq = int(_get_bobina_event_next_seq(op_id))
-                except Exception:
-                    next_seq = 0
-
-                new_total = 0
-                try:
-                    new_total = int(len(bobinas_list))
-                except Exception:
-                    new_total = 0
-
-                if new_total > next_seq:
-                    # Fecha a bobina atual (ultima aberta) com o esp_abs "seguro" (monotonico)
-                    # Somente quando realmente adicionamos novas bobinas.
-                    try:
-                        if next_seq > 0:
-                            _close_last_bobina_event(op_id=op_id, ended_at=ts_now, end_abs_pcs=int(esp_mark))
-                    except Exception:
-                        pass
-
-                    # Cria eventos para as novas bobinas que ainda nao existem no banco.
-                    for seq in range(int(next_seq), int(new_total)):
-                        try:
-                            comp = bobinas_list[seq] if seq < len(bobinas_list) else 0
-                        except Exception:
-                            comp = 0
-                        try:
-                            _upsert_bobina_event_start(
-                                op_id=op_id,
-                                seq=int(seq),
-                                comprimento_m=int(comp or 0),
-                                started_at=ts_now,
-                                start_abs_pcs=int(esp_mark),
-                            )
-                        except Exception:
-                            continue
-        payload = {
-            "os": os_,
-            "lote": lote,
-            "operador": operador,
-            "bobina": bobina,
-            "gr_fio": gr_fio,
-            "observacoes": observacoes,
-        }
-        _update_op_row(op_id, payload)
+        _update_op_row(
+            op_id=op_id_payload,
+            os=os_,
+            lote=lote,
+            operador=operador,
+            bobina=bobina,
+            gr_fio=gr_fio,
+            observacoes=observacoes,
+        )
     except Exception:
         return jsonify({"error": "Falha ao atualizar OP no banco"}), 500
 
-    with _op_lock:
-        op["os"] = os_
-        op["lote"] = lote
-        op["operador"] = operador
-        op["bobina"] = bobina
-        op["bobinas"] = bobinas_list
-        op["gr_fio"] = gr_fio
-        op["observacoes"] = observacoes
-        op_active[machine_id] = op
+    # se a OP editada for a ativa em memoria, sincroniza tambem
+    try:
+        if op_mid:
+            with _op_lock:
+                op_mem = op_active.get(op_mid)
+                if op_mem and int(op_mem.get("op_id") or 0) == int(op_id_payload):
+                    op_active[op_mid] = {
+                        **op_mem,
+                        "os": os_,
+                        "lote": lote,
+                        "operador": operador,
+                        "bobina": bobina,
+                        "bobinas": bobinas_list,
+                        "gr_fio": gr_fio,
+                        "observacoes": observacoes,
+                    }
+    except Exception:
+        pass
 
-    return jsonify({"status": "ok", "active": True, "op_id": op_id, "machine_id": machine_id})
+    return jsonify({"status": "ok", "op_id": int(op_id_payload), "machine_id": op_mid, "status_op": op_status})
+
 
 # =====================================================
-# OP - ENCERRAR (JSON)
-# POST /producao/op/encerrar
-# Body: { "machine_id": "corpo" }
+# OP - GET (JSON)
+# GET /producao/op/get?op_id=123
+# Retorna dados para preencher o modal (OS, Lote, Operador, Bobinas, etc.)
 # =====================================================
-@producao_bp.route("/op/encerrar", methods=["POST"])
+@producao_bp.route("/op/get", methods=["GET"])
+@login_required
+def op_get():
+    try:
+        op_id = int(request.args.get("op_id", "0") or 0)
+    except Exception:
+        op_id = 0
+
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes,
+                   started_at, ended_at, status, posicao, op_metros, op_pcs, op_conv_m_por_pcs,
+                   unidade_1, unidade_2
+            FROM ordens_producao
+            WHERE id = ?
+            """,
+            (op_id,),
+        )
+        r = cur.fetchone()
+
+    if not r:
+        return jsonify({"error": "OP nao encontrada"}), 404
+
+    bobina_csv = r[5] or ""
+    bobinas_m = _parse_bobinas_csv(bobina_csv)
+
+    return jsonify(
+        {
+            "op_id": int(r[0] or 0),
+            "machine_id": _sanitize_mid(_as_str(r[1])),
+            "os": _as_str(r[2]),
+            "lote": _as_str(r[3]),
+            "operador": _as_str(r[4]),
+            "bobina": _as_str(bobina_csv),
+            "bobinas": bobinas_m,
+            "gr_fio": _as_str(r[6]),
+            "observacoes": _as_str(r[7]),
+            "started_at": _as_str(r[8]),
+            "ended_at": _as_str(r[9]),
+            "status": _as_str(r[10]),
+            "posicao": int(r[11] or 0),
+            "op_metros": int(r[12] or 0),
+            "op_pcs": int(r[13] or 0),
+            "op_conv_m_por_pcs": float(r[14] or 0.0),
+            "unidade_1": _as_str(r[15]) or "m",
+            "unidade_2": _as_str(r[16]) or "pcs",
+        }
+    )
+
+
+# =====================================================
+# OP - EXCLUIR (JSON)
+# POST /producao/op/excluir
+# Body: { "op_id": 123 }
+# =====================================================
+@producao_bp.route("/op/excluir", methods=["POST"])
+@login_required
+def op_excluir():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        op_id = int(data.get("op_id", 0) or 0)
+    except Exception:
+        op_id = 0
+
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    # Busca machine_id para sincronizar memoria (se for OP ativa)
+    op_mid = ""
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT machine_id FROM ordens_producao WHERE id = ?", (op_id,))
+        row = cur.fetchone()
+        if row:
+            op_mid = _sanitize_mid(_as_str(row[0]))
+
+    if not op_mid:
+        return jsonify({"error": "OP nao encontrada"}), 404
+
+    # Exclui dependencias e a OP
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        try:
+            cur.execute("DELETE FROM ordens_producao_bobina_eventos WHERE op_id = ?", (op_id,))
+        except Exception:
+            pass
+        try:
+            cur.execute("DELETE FROM ordens_producao_bobinas WHERE op_id = ?", (op_id,))
+        except Exception:
+            pass
+
+        cur.execute("DELETE FROM ordens_producao WHERE id = ?", (op_id,))
+        deleted = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({"error": "Falha ao excluir OP"}), 500
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+    # Se era a OP ativa em memoria, remove
+    try:
+        with _op_lock:
+            op_mem = op_active.get(op_mid)
+            if op_mem and int(op_mem.get("op_id") or 0) == int(op_id):
+                op_active.pop(op_mid, None)
+    except Exception:
+        pass
+
+    return jsonify({"status": "ok", "op_id": int(op_id), "machine_id": op_mid, "deleted": int(deleted)})
+
+
+cao_bp.route("/op/encerrar", methods=["POST"])
 @login_required
 def op_encerrar():
     data = request.get_json(silent=True) or {}
