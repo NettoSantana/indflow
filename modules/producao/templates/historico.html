@@ -1,4 +1,9 @@
 <!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultima recodificacao: 2026-03-05 12:43:56 -03:00
+Motivo: Corrigir modal para usar bobinas_detail persistido (pcs_total/metro_consumido) quando OP encerrada, evitando zerar producao por esp_atual null.
+-->
+<!--
 ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 ULTIMO RECODE: 2026-03-05 19:00:00 -0300
 MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/comprimento) quando bobinas_detail vier vazio, e manter fallback seguro.
@@ -1540,6 +1545,32 @@ const modalSave = document.getElementById("op-modal-save");
     return String(bobinasItens.length) + " bobina(s) | " + String(Math.floor(totalM)) + " m";
   }
 
+
+  function pickOpBobinasItens(op){
+    if(!op) return [];
+    const cand = [
+      op.bobinas_detail,
+      op.bobinasDetail,
+      op.bobinas_itens,
+      op.bobinas_items,
+      op.bobinasItens,
+      op.bobinasItems,
+      op.bobinas
+    ];
+    for(let k=0;k<cand.length;k++){
+      const arr = cand[k];
+      if(Array.isArray(arr) && arr.length){
+        // Se vier array de numeros (ex.: [6000]), normaliza para objetos minimos
+        if(typeof arr[0] === "number"){
+          return arr.map((v) => ({ comprimento_m: num0(v) }));
+        }
+        return arr;
+      }
+    }
+    return [];
+  }
+
+
   function createBobinaCard(item, idx, convMporPcs, opts){
     opts = opts || {};
     const opCtx = opts.op || null;
@@ -1879,7 +1910,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
     let temProducaoReal = false;
     try {
-      const itensCheck = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+      const itensCheck = pickOpBobinasItens(op);
       let accPcs = 0;
       let accMetro = 0;
       let accMatBom = 0;
@@ -1927,7 +1958,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     clearBobinasUI();
 
-    const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+    const itens = pickOpBobinasItens(op);
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
@@ -2310,7 +2341,7 @@ tdD.appendChild(wrap);
     const title = (op && op.lote) ? ("OP - Lote " + escapeHtml(op.lote)) : "OP";
     const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
-    const bobinas = Array.isArray(op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) ? (op.bobinas_itens || op.bobinas_items || op.bobinas) : [];
+    const bobinas = pickOpBobinasItens(op);
 
     function row2(label, value){
       return `<tr><td class="k">${escapeHtml(label)}</td><td class="v">${escapeHtml(value)}</td></tr>`;
