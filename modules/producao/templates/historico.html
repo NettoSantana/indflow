@@ -1,10 +1,4 @@
 <!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-05 03:00
-MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, carregando OP via /op/get e permitindo editar campos e bobinas (add/remove).
--->
-
-<!--
 Caminho: indflow/modules/producao/templates/historico.html
 Último recode: 2026-02-23 22:14
 Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atualização periódica para refletir produção/parada em tempo real.
@@ -787,7 +781,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     </div>
 
     <div class="op-modal-footer">
-      <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
+      <button type="button" id="op-modal-toggle" class="btn-secondary">Ativar OP</button>
       <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
       <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
@@ -1222,8 +1216,8 @@ function safeText(v){
   /* Modal */
   const modalBackdrop = document.getElementById("op-modal-backdrop");
   const modalClose = document.getElementById("op-modal-close");
-  const modalCancel = document.getElementById("op-modal-cancel");
-  const modalSave = document.getElementById("op-modal-save");
+  const modalToggle = document.getElementById("op-modal-toggle");
+const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
 
@@ -1648,7 +1642,10 @@ function safeText(v){
     if(opv_lote) opv_lote.value = anyText(op && op.lote);
     if(opv_status) opv_status.value = anyText(op && op.status);
 
-    if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
+    
+
+    updateToggleButton();
+if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
     if(opv_gr_fio) opv_gr_fio.value = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
     if(opv_conv) opv_conv.value = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
 
@@ -2095,6 +2092,12 @@ tdD.appendChild(wrap);
     const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
 
     return `<!doctype html>
+
+<!--
+C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-03-05 00:31:39 -03:00
+MOTIVO: Substituir botão Fechar por Ativar/Encerrar OP no modal grande e remover abertura do modal ao clicar na linha da OP (acesso somente via Editar).
+-->
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -2178,9 +2181,7 @@ tdD.appendChild(wrap);
 
 
   if(modalClose) modalClose.addEventListener("click", closeModal);
-  if(modalCancel) modalCancel.addEventListener("click", closeModal);
-
-  if(modalBackdrop){
+if(modalBackdrop){
     modalBackdrop.addEventListener("click", function(e){
       if(e && e.target === modalBackdrop){
         closeModal();
@@ -2201,7 +2202,92 @@ tdD.appendChild(wrap);
     }
   });
 
-  if(modalSave){
+  
+  function isOpAtiva(statusStr){
+    const s = safeText(statusStr).toUpperCase();
+    if(!s) return false;
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return false;
+    if(s.includes("ATIV") || s.includes("ATIVA") || s.includes("PRODU") || s.includes("ANDAMENTO") || s.includes("EM PRODU")) return true;
+    // por padrao, FILA nao é ativa
+    return false;
+  }
+
+  function updateToggleButton(){
+    if(!modalToggle) return;
+    const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+    modalToggle.textContent = isOpAtiva(st) ? "Encerrar" : "Ativar OP";
+  }
+
+  async function postOpAction(opId, action){
+    const qs = "";
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+
+    const urls = [];
+    if(action === "ativar"){
+      urls.push("/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
+    }else{
+      urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
+    }
+
+    let lastErr = null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u + qs, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => ({}));
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+        return true;
+      }catch(e){
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Falha ao executar ação.");
+  }
+
+  if(modalToggle){
+    modalToggle.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+      const ativa = isOpAtiva(currentOp && currentOp.status);
+      const action = ativa ? "encerrar" : "ativar";
+
+      try{
+        modalToggle.disabled = true;
+        await postOpAction(opId, action);
+        // Recarregar OP para refletir o novo status
+        const op = await fetchOpGet(opId);
+        if(op){
+          openModal(op, "edit");
+        }else{
+          // fallback: atualizar apenas status local
+          currentOp.status = (action === "ativar") ? "ATIVA" : "ENCERRADA";
+          updateToggleButton();
+        }
+        // Recarregar tabela do histórico para refletir status
+        loadHistorico();
+      }catch(err){
+        alert("Falha ao " + (action === "ativar" ? "ativar" : "encerrar") + ": " + (err.message || err));
+      }finally{
+        modalToggle.disabled = false;
+      }
+    });
+  }
+
+if(modalSave){
     modalSave.addEventListener("click", async function(){
       const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
       if(!opId){
@@ -2391,9 +2477,7 @@ tdD.appendChild(wrap);
         // Editar: abrir modal grande aqui no Historico em modo edicao
         await openOpEdit(opId);
       }
-
-      trOp.addEventListener("click", _openDetails);
-      btnEdit.addEventListener("click", _goEdit);
+btnEdit.addEventListener("click", _goEdit);
       btnEdit.addEventListener("mousedown", function(e){ if(e){ e.stopPropagation(); } });
 
       btnDel.addEventListener("mousedown", function(e){ if(e){ e.stopPropagation(); } });
