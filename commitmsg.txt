@@ -1,7 +1,5 @@
-﻿fix(front/historico): troca de bobina com trava ate 1o machine/update + nao zerar bobina fechada
+﻿fix(front): troca de bobina com fallback de endpoints
 
-- Adiciona botao Troca de Bobina no modal da OP
-- Chama /producao/op/troca-bobina (fallback /op/troca-bobina)
-- Trata resposta {error} sem seguir fluxo (evita 404 no meio)
-- Trava nova troca ate abrir proxima bobina (primeiro machine/update)
-- ForceZeroLive so zera bobina aberta; temProducaoReal considera bobinas_eventos
+- Troca de bobina agora tenta múltiplos endpoints possíveis (producao/op, machine/op, /op)
+- Ignora resposta HTML (404) e segue tentando até encontrar o endpoint correto
+- Mensagens de erro ficam mais claras com o URL que falhou
