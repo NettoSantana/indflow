@@ -1,5 +1,4 @@
-﻿fix(historico): botao Editar abre modal grande do Historico por op_id
+﻿fix(historico): clique em Editar nao abre modal grande (so redireciona)
 
-- Editar agora chama GET /producao/op/get?op_id=... e abre o modal grande do Historico preenchido
-- Remove redirecionamento para /producao/config e evita editar o modal errado
-- Mantem Salvar no modal usando /producao/op/salvar com op_id
+- Bloqueia abertura do modal grande quando o clique for em Editar/Excluir (acoes)
+- Mantem clique na linha da OP abrindo o modal grande normalmente

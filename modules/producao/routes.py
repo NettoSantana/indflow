@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 02:03 America/Bahia
-# MOTIVO: OP no Historico: permitir editar OP por op_id (mesmo modal de bobinas) e criar endpoint de excluir OP.
+# LAST_RECODE: 2026-03-05 02:51 America/Bahia
+# MOTIVO: Permitir editar OP completa (cadastro + fechamento) no modal do Historico, incluindo adicionar/remover bobinas via /op/salvar.
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2493,6 +2493,37 @@ def op_get():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
+    # Detalhes de fechamento por bobina (se existir)
+    bobinas_detail = []
+    try:
+        with _get_conn() as conn:
+            cur2 = conn.cursor()
+            cur2.execute(
+                """
+                SELECT idx, comprimento_m, pcs_total, metro_consumido,
+                       qtd_cost_elas, refugo, qtd_saco_caixa, qtd_mat_bom
+                FROM ordens_producao_bobinas
+                WHERE op_id = ?
+                ORDER BY idx ASC
+                """,
+                (op_id,),
+            )
+            for rr in cur2.fetchall() or []:
+                bobinas_detail.append(
+                    {
+                        "idx": int(rr[0] or 0),
+                        "comprimento_m": int(rr[1] or 0),
+                        "pcs_total": int(rr[2] or 0),
+                        "metro_consumido": float(rr[3] or 0.0),
+                        "qtd_cost_elas": int(rr[4] or 0),
+                        "refugo": int(rr[5] or 0),
+                        "qtd_saco_caixa": int(rr[6] or 0),
+                        "qtd_mat_bom": int(rr[7] or 0),
+                    }
+                )
+    except Exception:
+        bobinas_detail = []
+
     with _get_conn() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -2522,6 +2553,7 @@ def op_get():
             "operador": _as_str(r[4]),
             "bobina": _as_str(bobina_csv),
             "bobinas": bobinas_m,
+            "bobinas_detail": bobinas_detail,
             "gr_fio": _as_str(r[6]),
             "observacoes": _as_str(r[7]),
             "started_at": _as_str(r[8]),
@@ -2716,6 +2748,95 @@ def op_salvar():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
+    def _float(v):
+        try:
+            return float(v)
+        except Exception:
+            return 0.0
+
+    def _clean_bobinas_list(v):
+        # Aceita lista de numeros (metros). Remove vazios/negativos e limita para int.
+        out = []
+        if not isinstance(v, list):
+            return out
+        for it in v:
+            try:
+                n = int(str(it).strip())
+            except Exception:
+                continue
+            if n <= 0:
+                continue
+            out.append(n)
+        return out
+
+    # Campos de cadastro (opcional) - permitem editar tudo pelo modal do Historico
+    os_txt = (data.get("os") or "").strip()
+    lote_txt = (data.get("lote") or "").strip()
+    operador_txt = (data.get("operador") or "").strip()
+    gr_fio_txt = (data.get("gr_fio") or "").strip()
+    observacoes = (data.get("observacoes") or "").strip()
+
+    # Campos numericos (opcional)
+    op_pcs_new = _int(data.get("op_pcs")) if data.get("op_pcs") is not None else None
+    op_conv_new = _float(data.get("op_conv_m_por_pcs")) if data.get("op_conv_m_por_pcs") is not None else None
+
+    # Bobinas (comprimentos em metros) - pode vir como lista ou como CSV
+    bobinas_m_list = _clean_bobinas_list(data.get("bobinas_m"))
+    bobina_csv_new = (data.get("bobina") or "").strip()
+
+    # Se veio lista, ela manda. Se nao, usa CSV se fornecido.
+    if bobinas_m_list:
+        bobina_csv_new = ",".join(str(x) for x in bobinas_m_list)
+
+    # Atualiza cadastro da OP antes de salvar fechamento (se algum campo veio)
+    def _update_op_cadastro(conn: sqlite3.Connection):
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM ordens_producao WHERE id = ?", (op_id,))
+        if not cur.fetchone():
+            return False
+
+        sets = []
+        args = []
+
+        if os_txt != "":
+            sets.append("os = ?")
+            args.append(os_txt)
+        if lote_txt != "":
+            sets.append("lote = ?")
+            args.append(lote_txt)
+        if operador_txt != "":
+            sets.append("operador = ?")
+            args.append(operador_txt)
+        if gr_fio_txt != "":
+            sets.append("gr_fio = ?")
+            args.append(gr_fio_txt)
+
+        # Observacoes pode ser vazia (permitir limpar)
+        if "observacoes" in data:
+            sets.append("observacoes = ?")
+            args.append(observacoes)
+
+        if op_pcs_new is not None:
+            sets.append("op_pcs = ?")
+            args.append(int(op_pcs_new or 0))
+        if op_conv_new is not None:
+            sets.append("op_conv_m_por_pcs = ?")
+            args.append(float(op_conv_new or 0.0))
+
+        if bobina_csv_new != "":
+            sets.append("bobina = ?")
+            args.append(bobina_csv_new)
+
+        if not sets:
+            return True
+
+        args.append(op_id)
+        cur.execute(
+            "UPDATE ordens_producao SET " + ", ".join(sets) + " WHERE id = ?",
+            tuple(args),
+        )
+        return True
+
     def _int(v):
         try:
             return int(v)
@@ -2731,6 +2852,10 @@ def op_salvar():
         try:
             conn = _get_conn()
             cur = conn.cursor()
+
+            # Atualiza cadastro (inclui bobinas) antes do fechamento
+            if not _update_op_cadastro(conn):
+                return jsonify({"error": "OP nao encontrada"}), 404
 
             # Garantir colunas legacy na OP (compatibilidade)
             for col, ddl in [
@@ -2764,6 +2889,15 @@ def op_salvar():
             bobinas_m = _parse_bobinas_csv(bobina_csv)
             alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
 
+            # Se removeu bobinas, limpa linhas antigas (idx fora do range)
+            try:
+                cur.execute(
+                    "DELETE FROM ordens_producao_bobinas WHERE op_id = ? AND idx >= ?",
+                    (op_id, int(len(bobinas_m) or 0)),
+                )
+            except Exception:
+                pass
+
             # UPSERT por idx
             now_iso = _now_iso()
             sum_mat_bom = 0
@@ -2780,8 +2914,11 @@ def op_salvar():
                 qtd_saco_caixa = _int(item.get("qtd_saco_caixa"))
 
                 # comprimento e pcs_total derivados da OP (fonte unica)
-                comprimento_m = bobinas_m[idx] if idx >= 0 and idx < len(bobinas_m) else 0
-                pcs_total = alloc_pcs[idx] if idx >= 0 and idx < len(alloc_pcs) else 0
+                if idx < 0 or idx >= len(bobinas_m):
+                    continue
+
+                comprimento_m = bobinas_m[idx]
+                pcs_total = alloc_pcs[idx] if idx < len(alloc_pcs) else 0
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
 
                 qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
@@ -2858,6 +2995,10 @@ def op_salvar():
     try:
         conn = _get_conn()
         cur = conn.cursor()
+
+        # Atualiza cadastro (inclui bobinas) antes do fechamento legacy
+        if not _update_op_cadastro(conn):
+            return jsonify({"error": "OP nao encontrada"}), 404
 
         # migracao defensiva
         for col, ddl in [
