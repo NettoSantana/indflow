@@ -1,34 +1,9 @@
 <!--
 ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 ULTIMO RECODE: 2026-03-05 19:00:00 -0300
-MOTIVO: Fallback no modal da bobina para preencher Comprimento da bobina e Hora inicial usando dados da OP quando o item da bobina vier vazio/0.
--->
-<!--
-ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao\historico.html
-ULTIMO RECODE: 2026-03-05 08:22
-MOTIVO: Ajustar endpoint de ativação de OP para suportar /producao/op/tivar (fallback para /ativar e /activate) e eliminar erro HTTP 404 ao clicar "Ativar OP".
--->
-<!--
-Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-03-05 07:17 -03:00
-Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
+MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/comprimento) quando bobinas_detail vier vazio, e manter fallback seguro.
 -->
 
-<!--
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 05:50
-Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
--->
-<!--
-PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-03-05 03:00
-MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, carregando OP via /op/get e permitindo editar campos e bobinas (add/remove).
--->
-
-{#
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-03-05 07:17 -03:00
-#}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
@@ -1569,8 +1544,24 @@ const modalSave = document.getElementById("op-modal-save");
     opts = opts || {};
     const opCtx = opts.op || null;
 
+    function pickEvento(op, i){
+      if(!op) return null;
+      const arr = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
+      if(!arr || !arr.length) return null;
+      const ev = arr[i] ?? arr[0] ?? null;
+      return (ev && typeof ev === "object") ? ev : null;
+    }
+
     function pickBobinaMFromOp(op, i){
       if(!op) return 0;
+
+
+      // 0) eventos (quando backend devolve bobinas_eventos)
+      const ev0 = pickEvento(op, i);
+      if(ev0){
+        const vEv = num0(ev0.comprimento_m ?? ev0.comprimentoM ?? ev0.bobina_m ?? 0);
+        if(vEv > 0) return vEv;
+      }
 
       // 1) op.bobina (legacy / principal)
       const b1 = num0(op.bobina ?? op.bobina_m ?? op.bobina_metros ?? 0);
@@ -1668,12 +1659,18 @@ const modalSave = document.getElementById("op-modal-save");
     let derivedMetroConsumido = metroConsumido;
 
     // Read-only context
+    const ev = pickEvento(opCtx, idx);
     const startedRaw = (
       (item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at)) ||
+      (ev && (ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at)) ||
       (opCtx && (opCtx.started_at ?? opCtx.hs_inicial ?? opCtx.inicio)) ||
       ""
     );
-    let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    let endedRaw = (
+      (item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at)) ||
+      (ev && (ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at)) ||
+      ""
+    );
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
     let endedStr = fmtIsoDateTimeLocal(endedRaw);
 
@@ -1938,8 +1935,32 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
-      if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
-      // Fallback legacy: cria uma bobina virtual com base no total da OP
+      // Se backend trouxe eventos de bobina, usa eles para montar os cards mesmo quando bobinas_itens/bobinas_detail vier vazio
+      const evArr = (op && (Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : [])))) || [];
+      if(evArr && evArr.length){
+        const pseudoItens = evArr.map((ev, i) => {
+          const startAbs = num0(ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? 0));
+          const endAbs = num0(ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0));
+          const pcsEvt = (endAbs > 0 && startAbs >= 0 && endAbs >= startAbs) ? (endAbs - startAbs) : 0;
+
+          return {
+            comprimento_m: num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? 0)),
+            started_at: safeText(ev && (ev.started_at ?? ev.start_at ?? ev.inicio ?? "")),
+            ended_at: safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? "")),
+            baseline_pcs: startAbs,
+            esp_last: endAbs,
+            pcs_total: pcsEvt
+          };
+        });
+
+        if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(pseudoItens);
+        pseudoItens.forEach((b, i) => {
+          const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
+          if(bobinasWrap) bobinasWrap.appendChild(card);
+        });
+      }else{
+        if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
+        // Fallback legacy: cria uma bobina virtual com base no total da OP
       const totalPcs = Math.floor(num0(op && (op.total_pcs ?? op.op_pcs ?? op.produzido ?? 0)));
       const comprimentoM = num0(op && (op.bobina ?? 0));
       const metroConsumido = (totalPcs > 0 && convMporPcs > 0) ? (totalPcs * convMporPcs) : 0;
@@ -1955,6 +1976,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
       const card = createBobinaCard(legacy, 0, convMporPcs, {op: op, forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
+      }
     }
 
     if(modalBackdrop){

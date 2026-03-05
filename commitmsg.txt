@@ -1,4 +1,5 @@
-﻿fix(historico): fallback de comprimento e hora inicial no card da bobina
+﻿fix(producao/routes): bobina inicia na ativacao e op_get inclui eventos; encerrar salva metros por pcs*conv
 
-- Comprimento da bobina (m) usa fallback para op.bobina / op.bobinas / op.bobinas_m quando item vier 0/vazio
-- Hora inicial usa fallback para op.started_at quando item.started_at vier vazio
+- Nao cria evento de bobina no criar OP (FILA); evento passa a ser ancorado na ativacao
+- /op/get retorna bobinas_eventos e faz fallback de bobinas_detail via eventos com started_at/ended_at
+- Encerramento grava op_metros = op_pcs * op_conv para evitar historico zerando
