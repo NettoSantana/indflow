@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 02:29 America/Bahia
-# MOTIVO: Validar fechamento manual e calcular QTD MAT BOM automaticamente (MAT_BOM = TOTAL_PCS - COSTURAS - REFUGO - RETRABALHO)
+# LAST_RECODE: 2026-03-05 19:00 America/Bahia
+# MOTIVO: Ajustar regras de OP (ativar/encerrar), eventos de bobina e validacao MAT_BOM = TOTAL_PCS - COSTURAS - REFUGO - RETRABALHO
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2368,20 +2368,24 @@ def op_editar():
             return jsonify({"error": "OP ativa invalida"}), 500
 
         # Mantem regra existente de eventos ao adicionar bobina durante OP ativa
+        # Regra:
+        # - Quando adiciona bobina nova durante OP ATIVA:
+        #   1) fecha o ultimo evento aberto com end_abs_pcs = esp_atual
+        #   2) abre novo evento com start_abs_pcs = esp_atual e started_at = agora
         try:
             prev_list = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
             new_list = bobinas_list or []
             if len(new_list) > len(prev_list) and len(new_list) >= 1:
                 added = new_list[len(prev_list):]
                 if added:
-                    op_baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
-                    esp_mark = 0
                     with _get_conn() as conn:
-                        try:
-                            esp_mark = int(_get_current_esp_abs(conn, machine_id) or 0)
-                        except Exception:
-                            esp_mark = 0
-                    # registra evento para cada bobina adicionada
+                        esp_atual = int(_get_current_esp_abs(conn, machine_id) or 0)
+
+                    try:
+                        _close_last_bobina_event(op_id=op_id, ended_at=_now_iso(), end_abs_pcs=int(esp_atual))
+                    except Exception:
+                        pass
+
                     seq_start = len(prev_list)
                     for i, comp in enumerate(added):
                         _upsert_bobina_event_start(
@@ -2389,7 +2393,7 @@ def op_editar():
                             seq=int(seq_start + i),
                             comprimento_m=int(comp or 0),
                             started_at=_now_iso(),
-                            start_abs_pcs=int(op_baseline_pcs + max(0, int(esp_mark) - int(op_baseline_pcs))),
+                            start_abs_pcs=int(esp_atual),
                         )
         except Exception:
             pass
@@ -2675,14 +2679,23 @@ def op_ativar():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
-    with _get_conn() as conn:
+    machine_id = ""
+    baseline_pcs = 0
+    now_iso = _now_iso()
+    op_payload = None
+    bobinas_list = []
+
+    conn = None
+    try:
+        conn = _get_conn()
         cur = conn.cursor()
+
         cur.execute(
-            "SELECT id, machine_id, status FROM ordens_producao WHERE id = ?",
+            "SELECT id, machine_id, status, bobina, os, lote, operador, gr_fio, observacoes, unidade_1, unidade_2, op_conv_m_por_pcs "
+            "FROM ordens_producao WHERE id = ?",
             (op_id,),
         )
         row = cur.fetchone()
-
         if not row:
             return jsonify({"error": "OP nao encontrada"}), 404
 
@@ -2695,42 +2708,78 @@ def op_ativar():
         if status not in ("FILA", "ATIVA"):
             return jsonify({"error": "OP nao pode ser ativada neste status", "status": status}), 409
 
-        # Se ja existe outra OP ATIVA no banco, bloqueia
         cur.execute(
-            "SELECT id FROM ordens_producao WHERE machine_id = ? AND status = ? AND id <> ? LIMIT 1",
-            (machine_id, "ATIVA", op_id),
+            "SELECT id FROM ordens_producao WHERE machine_id = ? AND status = 'ATIVA' AND id <> ? LIMIT 1",
+            (machine_id, op_id),
         )
         other = cur.fetchone()
         if other:
             return jsonify({"error": "Ja existe uma OP ATIVA para esta maquina", "op_id_ativa": int(other[0] or 0)}), 409
 
-        # Anchor baseline no contador atual
-        esp_atual = _get_current_esp_abs(conn, machine_id)
-        baseline_pcs = int(esp_atual or 0)
-
-        now_iso = _now_iso()
+        baseline_pcs = int(_get_current_esp_abs(conn, machine_id) or 0)
 
         cur.execute(
-            """
-            UPDATE ordens_producao
-            SET status = ?,
-                baseline_pcs = ?,
-                started_at = ?
-            WHERE id = ?
-            """,
+            "UPDATE ordens_producao SET status = ?, baseline_pcs = ?, started_at = ?, ended_at = NULL WHERE id = ?",
             ("ATIVA", baseline_pcs, now_iso, op_id),
         )
+
+        # Ao ativar, reinicia o relogio e reinicia os eventos de bobina a partir de agora.
+        bobina_csv = _as_str(row[3])
+        bobinas_list = _parse_bobinas_csv(bobina_csv)
+
+        try:
+            cur.execute("DELETE FROM ordens_producao_bobina_eventos WHERE op_id = ?", (op_id,))
+        except Exception:
+            pass
+
+        if bobinas_list:
+            try:
+                cur.execute(
+                    "INSERT INTO ordens_producao_bobina_eventos (op_id, seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
+                    (op_id, 0, int(bobinas_list[0] or 0), now_iso, int(baseline_pcs or 0), now_iso, now_iso),
+                )
+            except Exception:
+                pass
+
         conn.commit()
 
-    # Atualiza cache/memoria (op_active)
-    with _op_lock:
-        op_active[machine_id] = {
-            "op_id": op_id,
+        op_payload = {
+            "op_id": int(op_id),
             "machine_id": machine_id,
-            "baseline": {"pcs": baseline_pcs},
+            "os": _as_str(row[4]),
+            "lote": _as_str(row[5]),
+            "operador": _as_str(row[6]),
+            "bobina": bobina_csv,
+            "bobinas": bobinas_list,
+            "gr_fio": _as_str(row[7]),
+            "observacoes": _as_str(row[8]),
+            "started_at": now_iso,
+            "baseline": {"pcs": int(baseline_pcs or 0)},
+            "unidade_1": _as_str(row[9]) or "m",
+            "unidade_2": _as_str(row[10]) or "pcs",
+            "op_conv_m_por_pcs": float(row[11] or 0.0),
         }
 
-    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "baseline_pcs": baseline_pcs})
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({"error": "Falha ao ativar OP"}), 500
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+    with _op_lock:
+        op_active[machine_id] = op_payload
+
+    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "baseline_pcs": baseline_pcs, "started_at": now_iso})
+
 
 
 # =====================================================
@@ -2782,6 +2831,12 @@ def op_encerrar_by_id():
                 pass
 
         ended_at = _now_iso()
+
+        # Fecha o ultimo evento de bobina (congela PCS/metro/tempo)
+        try:
+            _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual or 0))
+        except Exception:
+            pass
 
         cur.execute(
             """
@@ -3071,9 +3126,9 @@ def op_salvar():
                 if not isinstance(item, dict):
                     continue
                 idx = _int(item.get("idx"))
-                qtd_cost_elas = _int(item.get("qtd_cost_elas"))
+                qtd_cost_elas = _int(item.get("costuras")) if item.get("costuras") is not None else _int(item.get("qtd_cost_elas"))
                 refugo = _int(item.get("refugo"))
-                qtd_saco_caixa = _int(item.get("qtd_saco_caixa"))
+                qtd_saco_caixa = _int(item.get("retrabalho")) if item.get("retrabalho") is not None else _int(item.get("qtd_saco_caixa"))
 
                 if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
                     conn.rollback()
@@ -3165,9 +3220,10 @@ def op_salvar():
         return jsonify({"status": "ok", "op_id": op_id, "mode": "bobinas"})
 
     # Formato antigo (compatibilidade): salvar direto na OP
-    qtd_cost_elas = _int(data.get("qtd_cost_elas"))
+    # Aceita chaves novas (costuras/retrabalho) e antigas (qtd_cost_elas/qtd_saco_caixa)
+    qtd_cost_elas = _int(data.get("costuras")) if data.get("costuras") is not None else _int(data.get("qtd_cost_elas"))
     refugo = _int(data.get("refugo"))
-    qtd_saco_caixa = _int(data.get("qtd_saco_caixa"))
+    qtd_saco_caixa = _int(data.get("retrabalho")) if data.get("retrabalho") is not None else _int(data.get("qtd_saco_caixa"))
 
     if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
         return jsonify({"error": "Valores nao podem ser negativos"}), 400
@@ -3192,6 +3248,23 @@ def op_salvar():
                 cur.execute(f"ALTER TABLE ordens_producao ADD COLUMN {col} {ddl}")
             except Exception:
                 pass
+
+        # Fonte do TOTAL_PCS (legacy): usa op_pcs gravado na OP
+        cur.execute("SELECT COALESCE(op_pcs, 0) FROM ordens_producao WHERE id = ?", (op_id,))
+        rpcs = cur.fetchone()
+        total_pcs = int(rpcs[0] or 0) if rpcs else 0
+
+        soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
+        if soma_defeitos > int(total_pcs or 0):
+            return jsonify({
+                "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL_PCS",
+                "total_pcs": int(total_pcs or 0),
+                "costuras": int(qtd_cost_elas or 0),
+                "refugo": int(refugo or 0),
+                "retrabalho": int(qtd_saco_caixa or 0),
+            }), 409
+
+        qtd_mat_bom = int(int(total_pcs or 0) - soma_defeitos)
 
         cur.execute(
             """
