@@ -1,7 +1,13 @@
 <!--
+Path: /mnt/data/historico.html
+Last recode: 2026-03-05 15:30:51 -03:00
+Reason: Corrigir logica de bobinas no modal - somente bobina ativa acumula pcs/metragem/tempo em modo live; demais usam eventos fechados.
+-->
+
+<!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 15:15:25-03:00
-Motivo: Corrigir exibicao/controle de bobinas no modal (bobinas pendentes nao devem herdar started_at da OP nem acumular producao).
+Último recode: 2026-03-05 17:26:27+0000
+Motivo: Modal de edição deve renderizar todas as bobinas cadastradas (bobinas/bobinas_m), mesmo quando bobinas_eventos ainda não contém todas as sequências.
 -->
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
@@ -1695,22 +1701,17 @@ const modalSave = document.getElementById("op-modal-save");
 
     // Read-only context
     const ev = pickEvento(opCtx, idx);
-
-    // started_at/ended_at:
-    // Regra (OP com multiplas bobinas):
-    // - Somente a bobina que realmente iniciou (tem item.started_at OU evento.started_at) deve exibir hora inicial e acumular.
-    // - Fallback para opCtx.started_at SOMENTE na Bobina 1 (idx === 0), por compatibilidade com formatos antigos.
-    const startedFromItem = (item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at)) || "";
-    const startedFromEv = (ev && (ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at)) || "";
-    const startedFromOp = (idx === 0) ? ((opCtx && (opCtx.started_at ?? opCtx.hs_inicial ?? opCtx.inicio)) || "") : "";
-
-    const hasStartedReal = !!(startedFromItem || startedFromEv || startedFromOp);
-    const startedRaw = startedFromItem || startedFromEv || startedFromOp;
-
-    const endedFromItem = (item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at)) || "";
-    const endedFromEv = (ev && (ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at)) || "";
-    let endedRaw = endedFromItem || endedFromEv || "";
-
+    const startedRaw = (
+      (item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at)) ||
+      (ev && (ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at)) ||
+      (opCtx && (opCtx.started_at ?? opCtx.hs_inicial ?? opCtx.inicio)) ||
+      ""
+    );
+    let endedRaw = (
+      (item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at)) ||
+      (ev && (ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at)) ||
+      ""
+    );
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
     let endedStr = fmtIsoDateTimeLocal(endedRaw);
 
@@ -1721,17 +1722,9 @@ const modalSave = document.getElementById("op-modal-save");
       endedStr = "";
     }
 
-    // Bobina pendente (nao iniciou): deve ficar zerada e sem horarios.
-    if(!hasStartedReal){
-      derivedPcs = 0;
-      derivedMetroConsumido = 0;
-      endedRaw = "";
-      endedStr = "";
-    }
+    const bobinaAberta = (!endedRaw) || placeholderEnd;
 
-    const bobinaAberta = hasStartedReal && ((!endedRaw) || placeholderEnd);
-
-let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
+    let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_consumo ?? 0)));
     if(!(tempoMin > 0)){
       try{
         const ds = new Date(String(startedRaw || ""));
@@ -1755,17 +1748,20 @@ let tempoMin = Math.floor(num0(item && (item.tempo_consumo_min ?? item.tempo_con
     }
 
 
-    // Atualizacao ao vivo: quando a OP esta ATIVA no dia atual e o backend envia esp_atual/baseline_pcs,
-    // calcular pcs/metragem/tempo mesmo que o item ainda esteja zerado.
-    if((!forceZeroLive) && opts && opts.isLiveHoje && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
-      derivedPcs = Math.floor(num0(opts.livePcs));
-      derivedMetroConsumido = num0(opts.liveMetros);
-      if(num0(opts.liveTempoMin) > 0) tempoMin = Math.floor(num0(opts.liveTempoMin));
-      // em modo live, nao mostrar hora final
-      endedStr = "";
+    // Atualizacao ao vivo: SOMENTE para a bobina ATIVA (a que nao tem ended_at).
+    // A metragem/pcs devem ser calculadas a partir do start_abs_pcs dessa bobina,
+    // e nao aplicadas para todas as bobinas do modal.
+    if((!forceZeroLive) && opts && opts.isLiveHoje && opts.isLiveThisBobina){
+      const livePcsThis = Math.floor(num0(opts.livePcsThis));
+      if(livePcsThis > 0 && derivedPcs <= 0){
+        derivedPcs = livePcsThis;
+        derivedMetroConsumido = num0(opts.liveMetrosThis);
+        if(num0(opts.liveTempoMinThis) > 0) tempoMin = Math.floor(num0(opts.liveTempoMinThis));
+        // em modo live, nao mostrar hora final
+        endedStr = "";
+      }
     }
-
-    const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
+const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
     const fPcs = fieldRO("Total pcs (bobina)", derivedPcs, "col-3");
     const fMetro = fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3");
     const fTempo = fieldRO("Tempo de consumo (min)", tempoMin, "col-3");
@@ -1960,17 +1956,8 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
-    const baselinePcs = num0(op && op.baseline_pcs);
     const espAtual = num0(op && op.esp_atual);
-    const livePcs = (isLiveHoje && espAtual > 0 && baselinePcs > 0) ? Math.max(0, (espAtual - baselinePcs)) : 0;
-    const liveMetros = (livePcs > 0) ? (livePcs * convMporPcs) : 0;
-    let liveTempoMin = 0;
-    if(isLiveHoje && startedIso){
-      const t0 = new Date(startedIso).getTime();
-      if(!isNaN(t0)){
-        liveTempoMin = Math.max(0, Math.floor((Date.now() - t0) / 60000));
-      }
-    }
+    const hasEspAtual = (isLiveHoje && espAtual > 0);
 
 
     clearBobinasUI();
@@ -2003,14 +1990,28 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     let renderItens = [];
 
-    if(evArr && evArr.length){
-      renderItens = evArr.map((ev, i) => {
+    const listM = normalizeBobinasM(op);
+    const nEv = (evArr && evArr.length) ? evArr.length : 0;
+    const nIt = (Array.isArray(itens) && itens.length) ? itens.length : 0;
+    const nM = (Array.isArray(listM) && listM.length) ? listM.length : 0;
+    const n = Math.max(nEv, nIt, nM);
+
+    if(n > 0){
+      for(let i = 0; i < n; i++){
+        const ev = (evArr && evArr[i]) ? evArr[i] : null;
+        const it = (Array.isArray(itens) && itens[i]) ? itens[i] : null;
+        const mm = (Array.isArray(listM) && listM[i] !== undefined && listM[i] !== null) ? listM[i] : null;
+
         const startAbs = num0(ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? 0));
         const endAbs = num0(ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0));
         const pcsEvt = (endAbs > 0 && startAbs >= 0 && endAbs >= startAbs) ? (endAbs - startAbs) : 0;
 
+        const compFromIt = num0(it && (it.comprimento_m ?? it.comprimentoM ?? it.bobina_m ?? it.bobinaM ?? 0));
+        const compFromEv = num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? ev.bobinaM ?? 0));
+        const compFromM = num0(mm);
+
         let base = {
-          comprimento_m: num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? 0)),
+          comprimento_m: (compFromEv > 0 ? compFromEv : (compFromM > 0 ? compFromM : compFromIt)),
           started_at: safeText(ev && (ev.started_at ?? ev.start_at ?? ev.inicio ?? "")),
           ended_at: safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? "")),
           start_abs_pcs: startAbs,
@@ -2018,25 +2019,47 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
           pcs_total: pcsEvt
         };
 
-        if(Array.isArray(itens) && itens[i]){
-          base = mergeQualidade(base, itens[i]);
+        if(it){
+          base = mergeQualidade(base, it);
         }
 
-        return base;
-      });
-    }else if(Array.isArray(itens) && itens.length){
-      renderItens = itens.slice();
-    }else{
-      const listM = normalizeBobinasM(op);
-      if(Array.isArray(listM) && listM.length){
-        renderItens = listM.map((m) => ({ comprimento_m: num0(m) }));
+        // Live: somente a bobina ATIVA (evento sem ended_at) deve acumular pcs/metragem/tempo enquanto a OP estiver ATIVA hoje.
+        const evEnded = safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? ""));
+        const isOpenEvt = (!!ev) && (!evEnded) && (num0(endAbs) <= 0);
+        const isLiveThisBobina = (hasEspAtual && (num0(startAbs) > 0) && isOpenEvt);
+
+        let livePcsThis = 0;
+        let liveMetrosThis = 0;
+        let liveTempoMinThis = 0;
+
+        if(isLiveThisBobina){
+          livePcsThis = Math.max(0, Math.floor(num0(espAtual) - num0(startAbs)));
+          if(livePcsThis > 0 && convMporPcs > 0){
+            liveMetrosThis = (livePcsThis * convMporPcs);
+          }
+          const sIso = base.started_at;
+          if(sIso){
+            const t0 = new Date(sIso).getTime();
+            if(!isNaN(t0)){
+              liveTempoMinThis = Math.max(0, Math.floor((Date.now() - t0) / 60000));
+            }
+          }
+        }
+
+        base._isLiveThisBobina = isLiveThisBobina;
+        base._livePcsThis = livePcsThis;
+        base._liveMetrosThis = liveMetrosThis;
+        base._liveTempoMinThis = liveTempoMinThis;
+
+        renderItens.push(base);
       }
     }
 
     if(renderItens.length){
+
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(renderItens);
       renderItens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
+        const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, isLiveThisBobina: !!b._isLiveThisBobina, livePcsThis: num0(b._livePcsThis), liveMetrosThis: num0(b._liveMetrosThis), liveTempoMinThis: num0(b._liveTempoMinThis)});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
