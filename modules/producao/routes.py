@@ -2911,6 +2911,12 @@ def op_salvar():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
+    def _int(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
     def _float(v):
         try:
             return float(v)

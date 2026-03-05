@@ -1,5 +1,6 @@
-﻿fix(front): trocar Fechar por Ativar/Encerrar no modal de OP e abrir OP só via Editar
+﻿fix(producao/op): ativar/encerrar por op_id + corrigir op_salvar
 
-- Botão do modal vira Ativar OP/Encerrar conforme status
-- Modal fecha apenas fora ou no X
-- Remove abertura do modal ao clicar na linha da OP (somente Editar abre)
+- Adiciona POST /producao/op/ativar (ativa OP da FILA e ancora baseline_pcs)
+- Adiciona POST /producao/op/encerrar-by-id (encerra OP ativa via op_id)
+- Permite editar OP em FILA no helper _update_op_row
+- Corrige bug de ordem de definicao do _int e duplicacao de observacoes em op_salvar

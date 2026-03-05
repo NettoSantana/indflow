@@ -1,7 +1,7 @@
 <!--
-Caminho: indflow/modules/producao/templates/historico.html
-Último recode: 2026-02-23 22:14
-Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atualização periódica para refletir produção/parada em tempo real.
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Último recode: 2026-03-05 19:00
+Motivo: Corrigir chamada inexistente loadHistorico() para a função real fetchHistorico() ao Ativar/Encerrar OP.
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -2278,7 +2278,7 @@ if(modalBackdrop){
           updateToggleButton();
         }
         // Recarregar tabela do histórico para refletir status
-        loadHistorico();
+        await fetchHistorico();
       }catch(err){
         alert("Falha ao " + (action === "ativar" ? "ativar" : "encerrar") + ": " + (err.message || err));
       }finally{
