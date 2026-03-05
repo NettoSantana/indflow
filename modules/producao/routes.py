@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 16:42:13 (America/Bahia)
-# MOTIVO: Implementar TROCA DE BOBINA (endpoint + pendencia) e funcao helper para iniciar a proxima bobina no primeiro machine/update apos a troca.
+# LAST_RECODE: 2026-03-05 14:47:55 (America/Bahia)
+# MOTIVO: /producao/op/get agora retorna bobinas_detail completo (1 item por bobina cadastrada), mantendo pcs/metros somente na bobina ativa ate a troca.
 
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
 # LAST_RECODE: 2026-03-05 15:22:41 (America/Bahia)
@@ -2969,6 +2969,56 @@ def op_get():
             it["ended_at"] = _as_str(ev.get("ended_at") or "")
             it["start_abs_pcs"] = int(ev.get("start_abs_pcs") or 0)
             it["end_abs_pcs"] = int(ev.get("end_abs_pcs") or 0)
+
+    # Garante que o modal receba TODAS as bobinas cadastradas, mesmo as que ainda nao iniciaram.
+    # Regra: so a bobina ativa (evento aberto) acumula pcs/metros; as demais ficam zeradas ate a troca.
+    try:
+        total_bobinas = len(bobinas_m or [])
+    except Exception:
+        total_bobinas = 0
+
+    if total_bobinas > 0:
+        map_det = {}
+        for it in bobinas_detail or []:
+            try:
+                map_det[int(it.get("idx") or 0)] = it
+            except Exception:
+                continue
+
+        new_list = []
+        for i in range(1, total_bobinas + 1):
+            it = map_det.get(i)
+            if not it:
+                comprimento = 0
+                try:
+                    comprimento = int((bobinas_m or [])[i - 1] or 0)
+                except Exception:
+                    comprimento = 0
+                new_list.append(
+                    {
+                        "idx": int(i),
+                        "comprimento_m": int(comprimento or 0),
+                        "pcs_total": 0,
+                        "metro_consumido": 0.0,
+                        "started_at": "",
+                        "ended_at": "",
+                        "start_abs_pcs": 0,
+                        "end_abs_pcs": 0,
+                        "qtd_cost_elas": 0,
+                        "refugo": 0,
+                        "qtd_saco_caixa": 0,
+                        "qtd_mat_bom": 0,
+                    }
+                )
+            else:
+                if not it.get("comprimento_m"):
+                    try:
+                        it["comprimento_m"] = int((bobinas_m or [])[i - 1] or 0)
+                    except Exception:
+                        pass
+                new_list.append(it)
+
+        bobinas_detail = new_list
     return jsonify(
         {
             "op_id": int(r[0] or 0),

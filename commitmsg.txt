@@ -1,5 +1,4 @@
-﻿fix(front-historico): renderizar todas as bobinas no modal da OP
+﻿fix(front-historico): modal renderiza todas as bobinas cadastradas
 
-- Prioriza bobinas_eventos para gerar 1 card por bobina (Bobina 1, 2, 3...)
-- Fallback para bobinas_itens/bobinas_detail
-- Fallback final para bobinas_m quando nao houver eventos
+- Modal agora usa max(bobinas_eventos, bobinas_detail, bobinas/bobinas_m)
+- Mesmo com bobina pendente (sem evento seq=1 ainda), o card aparece no modal
