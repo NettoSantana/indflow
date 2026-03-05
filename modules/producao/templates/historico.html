@@ -1637,7 +1637,8 @@ const modalSave = document.getElementById("op-modal-save");
         alert("Nao foi possivel carregar a OP.");
         return;
       }
-      openModal(op, "edit");
+          openModal(op, "view");
+          startOpModalLiveRefresh();
     }catch(err){
       alert("Falha ao carregar OP: " + (err.message || err));
     }
@@ -2379,7 +2380,8 @@ if(modalBackdrop){
         // Recarregar OP para refletir o novo status
         const op = await fetchOpGet(opId);
         if(op){
-          openModal(op, "edit");
+          openModal(op, "view");
+          startOpModalLiveRefresh();
         }else{
           // fallback: atualizar apenas status local
           currentOp.status = (action === "ativar") ? "ATIVA" : "ENCERRADA";
