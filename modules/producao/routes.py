@@ -1,15 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 14:47:55 (America/Bahia)
-# MOTIVO: /producao/op/get agora retorna bobinas_detail completo (1 item por bobina cadastrada), mantendo pcs/metros somente na bobina ativa ate a troca.
-
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 15:22:41 (America/Bahia)
-# MOTIVO: Encerramento OP: resolver esp_atual (JSON > snapshot DB > safe), calcular op_pcs/op_metros (pcs*conv) e persistir op_metros como float; fechamento do evento de bobina usa esp final.
-
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 08:34 America/Bahia
-# MOTIVO: Corrigir /producao/op/ativar para nao sobrescrever abertura da OP e registrar hora_inicial no evento da bobina; adicionar debug stage/detail e busy_timeout
-
+# LAST_RECODE: 2026-03-05 15:00:30 (America/Bahia)
+# MOTIVO: Garantir que /producao/op/get aplique pcs/metros ao vivo somente na bobina realmente ativa (maior seq aberta), evitando duplicidade no modal.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -2914,17 +2905,40 @@ def op_get():
             op_metros_live = 0.0
 
     # Se nao houver fechamento em ordens_producao_bobinas, monta bobinas_detail via eventos (com started_at/ended_at)
+    # Regra de seguranca: somente UMA bobina pode estar "aberta" (ended_at vazio) ao mesmo tempo.
+    # Se por qualquer motivo existir mais de uma aberta, consideramos como ativa apenas a de maior seq.
+    active_seq = None
+    try:
+        open_seqs = []
+        for _ev in bobinas_eventos or []:
+            try:
+                _seq = int(_ev.get("seq") or 0)
+            except Exception:
+                _seq = 0
+            _ended = _as_str(_ev.get("ended_at") or "")
+            if not _ended:
+                open_seqs.append(_seq)
+        if open_seqs:
+            active_seq = max(open_seqs)
+    except Exception:
+        active_seq = None
+
     if (not bobinas_detail) and bobinas_eventos:
         for ev in bobinas_eventos:
             seq = int(ev.get("seq") or 0)
             start_abs = int(ev.get("start_abs_pcs") or 0)
             end_abs_raw = int(ev.get("end_abs_pcs") or 0)
             end_abs = end_abs_raw
+            # Somente a bobina ativa (evento aberto e de maior seq) pode usar o ESP atual como fim "ao vivo".
+            # Qualquer outro evento com end_abs_pcs vazio fica travado (pcs_total = 0) ate ser realmente fechado/iniciado corretamente.
             if end_abs <= 0 and status == "ATIVA":
-                try:
-                    end_abs = int(esp_atual or 0)
-                except Exception:
-                    end_abs = 0
+                if active_seq is not None and int(seq) == int(active_seq):
+                    try:
+                        end_abs = int(esp_atual or 0)
+                    except Exception:
+                        end_abs = 0
+                else:
+                    end_abs = int(start_abs or 0)
             pcs_total = max(0, int(end_abs) - int(start_abs))
             try:
                 metro_consumido = round(float(pcs_total) * float(op_conv or 0.0), 3)
