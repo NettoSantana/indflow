@@ -1,13 +1,13 @@
 <!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-03-05 03:50 -03:00
-Motivo: corrigir erro de sintaxe JavaScript (chave extra) no live refresh da OP
+Ultimo recode: 2026-03-05 07:17 -03:00
+Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
 -->
 
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Último recode: 2026-03-05 05:50
-Motivo: Modal OP: calcular PCS/metros/tempo ao vivo via /machine/status quando backend ainda nao popula
+Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -17,7 +17,7 @@ MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, 
 
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-21 22:30 America/Bahia
+Ultimo recode: 2026-03-05 07:17 -03:00
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -1634,6 +1634,17 @@ const modalSave = document.getElementById("op-modal-save");
       endedStr = "";
     }
 
+
+    // Atualizacao ao vivo: quando a OP esta ATIVA no dia atual e o backend envia esp_atual/baseline_pcs,
+    // calcular pcs/metragem/tempo mesmo que o item ainda esteja zerado.
+    if((!forceZeroLive) && opts && opts.isLiveHoje && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
+      derivedPcs = Math.floor(num0(opts.livePcs));
+      derivedMetroConsumido = num0(opts.liveMetros);
+      if(num0(opts.liveTempoMin) > 0) tempoMin = Math.floor(num0(opts.liveTempoMin));
+      // em modo live, nao mostrar hora final
+      endedStr = "";
+    }
+
     const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
     const fPcs = fieldRO("Total pcs (bobina)", derivedPcs, "col-3");
     const fMetro = fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3");
@@ -1787,7 +1798,10 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     const opStatus = safeText(op && op.status).toUpperCase();
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
-    const diaRef = safeText(op && op.__dia_ref);
+    const diaRefBruta = safeText(op && (op.__dia_ref || op.data_ref || op.data));
+    const startedIso = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const diaRefDerivada = (startedIso && startedIso.length >= 10) ? startedIso.slice(0,10) : "";
+    const diaRef = diaRefBruta || diaRefDerivada;
     const isHoje = (diaRef && diaRef === todayIsoLocal());
     // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
     // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
@@ -1808,7 +1822,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
       }
       const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
       const opMetros = num0(op && (op.op_metros ?? op.total_m ?? 0));
-      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0);
+      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0) || (Math.max(0, (num0(op && op.esp_atual) - num0(op && op.baseline_pcs))) > 0);
     } catch(e) { temProducaoReal = false; }
 
     const isLiveHoje = (!opEncerrada) && isHoje;
@@ -1826,13 +1840,26 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
+    const baselinePcs = num0(op && op.baseline_pcs);
+    const espAtual = num0(op && op.esp_atual);
+    const livePcs = (isLiveHoje && espAtual > 0 && baselinePcs > 0) ? Math.max(0, (espAtual - baselinePcs)) : 0;
+    const liveMetros = (livePcs > 0) ? (livePcs * convMporPcs) : 0;
+    let liveTempoMin = 0;
+    if(isLiveHoje && startedIso){
+      const t0 = new Date(startedIso).getTime();
+      if(!isNaN(t0)){
+        liveTempoMin = Math.max(0, Math.floor((Date.now() - t0) / 60000));
+      }
+    }
+
+
     clearBobinasUI();
 
     const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive});
+        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{

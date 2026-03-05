@@ -1,5 +1,4 @@
-﻿fix(op-get): incluir baseline_pcs e calcular op_pcs/op_metros ao vivo quando ATIVA
+﻿fix(front-op): corrigir erro de sintaxe JS no historico.html (try/catch)
 
-- /producao/op/get passa a devolver baseline_pcs
-- quando status=ATIVA: calcula op_pcs = esp_atual - baseline_pcs e op_metros = op_pcs * conv_m_por_pcs
-- inclui esp_atual no payload para conferência
+- remove chave extra antes do catch no live refresh da OP
+- elimina erros do VSCode ('catch or finally expected') e cascata no fim do arquivo
