@@ -1,9 +1,8 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 03:20
-Motivo: Corrigir modal OP: abrir sempre via /op/get, live refresh usando status ATIVA, e validacoes/salvar consistentes.
+Último recode: 2026-03-05 05:17
+Motivo: Corrigir recarga/validacoes do modal OP (live refresh em view, validacao de duplicidade de OS via cache local e consistencia dos campos manuais por bobina).
 -->
-
 <!--
 PATH: modules/producao/templates/historico.html
 LAST_RECODE: 2026-03-05 03:00
@@ -895,6 +894,29 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return y + "-" + m + "-" + day;
   }
 
+  function opStatusUpper(op){
+    return String(op && (op.status ?? op.op_status ?? "") || "").trim().toUpperCase();
+  }
+
+  function opIsAtiva(op){
+    const st = opStatusUpper(op);
+    if(st) return st === "ATIVA";
+    return !!(op && op.ativa);
+  }
+
+  function opDiaRef(op){
+    const dr = String(op && (op.__dia_ref ?? op.dia_ref ?? op.data_ref ?? "") || "").trim();
+    if(dr) return dr;
+    const sa = String(op && op.started_at || "").trim();
+    if(sa && sa.length >= 10) return sa.slice(0, 10);
+    return todayIsoLocal();
+  }
+
+  function opIsHoje(op){
+    return opDiaRef(op) === todayIsoLocal();
+  }
+
+
 
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
@@ -1615,6 +1637,10 @@ const modalSave = document.getElementById("op-modal-save");
 
         // aceitar formatos: {ok:true, op:{...}} ou direto {...}
         const op = (data.op || data.data || data) || null;
+        if(op){
+          if(!op.__dia_ref) op.__dia_ref = opDiaRef(op);
+          if(op.ativa === undefined) op.ativa = opIsAtiva(op);
+        }
         return op;
       }catch(e){
         lastErr = e;
@@ -1638,20 +1664,7 @@ const modalSave = document.getElementById("op-modal-save");
         alert("Nao foi possivel carregar a OP.");
         return;
       }
-
-      // garante __dia_ref para o modo "hoje" funcionar (mesmo sem vir no payload)
-      if(!op.__dia_ref){
-        const started = safeText(op.started_at).trim();
-        if(started && started.length >= 10){
-          const ymd = started.slice(0, 10);
-          if(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(ymd)){
-            op.__dia_ref = ymd;
-          }
-        }
-      }
-
       openModal(op, "view");
-      startOpModalLiveRefresh();
     }catch(err){
       alert("Falha ao carregar OP: " + (err.message || err));
     }
@@ -2286,26 +2299,6 @@ if(modalBackdrop){
     return false;
   }
 
-  function isHoje(op){
-    // Regra: OP é "do dia" quando __dia_ref existe e bate com hoje (tz America/Bahia).
-    // Fallback: usa started_at (YYYY-MM-DD) quando __dia_ref não existir.
-    const hoje = todayIsoLocal();
-    const diaRef = safeText(op && op.__dia_ref).trim();
-    if(diaRef){
-      return diaRef === hoje;
-    }
-
-    const started = safeText(op && (op.started_at || op.hs_inicial || op.inicio)).trim();
-    if(started && started.length >= 10){
-      const ymd = started.slice(0, 10);
-      if(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(ymd)){
-        return ymd === hoje;
-      }
-    }
-
-    return false;
-  }
-
   function updateToggleButton(){
     if(!modalToggle) return;
     const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
@@ -2369,8 +2362,8 @@ if(modalBackdrop){
     if(!opId) return;
 
     // so atualiza ao vivo enquanto estiver ativa e for hoje
-    if(!isOpAtiva(currentOp && currentOp.status)) return;
-    if(!isHoje(currentOp)) return;
+    if(!opIsAtiva(currentOp)) return;
+    if(!opIsHoje(currentOp)) return;
 
     opModalTimer = setInterval(async ()=>{
       if(opModalRefreshing) return;
@@ -2413,8 +2406,7 @@ if(modalBackdrop){
         // Recarregar OP para refletir o novo status
         const op = await fetchOpGet(opId);
         if(op){
-          openModal(op, "view");
-          startOpModalLiveRefresh();
+          openModal(op, "edit");
         }else{
           // fallback: atualizar apenas status local
           currentOp.status = (action === "ativar") ? "ATIVA" : "ENCERRADA";
@@ -2440,7 +2432,8 @@ if(modalSave){
 
 
       // valida duplicidade de OS (no escopo cliente + maquina) usando cache local do historico
-      const osValue = (opv_os && opv_os.value) ? opv_os.value : "";
+      const osInput = document.getElementById("op-os");
+      const osValue = osInput ? osInput.value : "";
       const dup = findDuplicateOsInCache(osValue, opId);
       if(dup){
         alert("Ja existe uma OP com esse numero (OS): " + safeText(osValue));
@@ -2488,22 +2481,17 @@ if(modalSave){
       }
 
 
-      // validacao basica: COSTURAS + REFUGO + RETRABALHO nao pode ultrapassar TOTAL_PCS (por bobina)
+      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (bobina)
       if(bobinasWrap){
         const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
         for(const card of cards){
           const idxBob = Number(card.getAttribute("data-bobina-idx") || 0);
-
           const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
           const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
 
-          const costInp = card.querySelector("input[data-field='qtd_cost_elas']");
-          const refInp = card.querySelector("input[data-field='refugo']");
-          const retInp = card.querySelector("input[data-field='qtd_saco_caixa']");
-
-          const cost = Number((costInp && costInp.value) || 0) || 0;
-          const refugo = Number((refInp && refInp.value) || 0) || 0;
-          const retrabalho = Number((retInp && retInp.value) || 0) || 0;
+          const cost = Number((card.querySelector("input[data-field='qtd_costuras']") || {}).value || 0) || 0;
+          const refugo = Number((card.querySelector("input[data-field='qtd_refugo']") || {}).value || 0) || 0;
+          const retrabalho = Number((card.querySelector("input[data-field='qtd_retrabalho']") || {}).value || 0) || 0;
 
           const soma = cost + refugo + retrabalho;
 

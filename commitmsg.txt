@@ -1,15 +1,6 @@
-﻿fix(front-op): ativacao de OP nao atualizava dados do modal
+﻿fix(front-historico): modal OP ativa em tempo real apos ativar
 
-modal reabria em modo edit após ativar OP
-
-live refresh nao iniciava
-
-PCS/tempo/metros nao atualizavam
-
-Agora:
-
-modal abre em modo view
-
-inicia startOpModalLiveRefresh
-
-contadores atualizam imediatamente
+- Live refresh passa a depender de status ATIVA (nao de currentOp.ativa)
+- Garante __dia_ref ao carregar via /op/get para modo "hoje" funcionar
+- Corrige validacao COSTURAS/REFUGO/RETRABALHO por bobina com campos reais do form
+- Ajuste de leitura do campo OS no salvar
