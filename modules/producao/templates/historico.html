@@ -1,4 +1,9 @@
 <!--
+ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+ULTIMO RECODE: 2026-03-05 19:00:00 -0300
+MOTIVO: Fallback no modal da bobina para preencher Comprimento da bobina e Hora inicial usando dados da OP quando o item da bobina vier vazio/0.
+-->
+<!--
 ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao\historico.html
 ULTIMO RECODE: 2026-03-05 08:22
 MOTIVO: Ajustar endpoint de ativação de OP para suportar /producao/op/tivar (fallback para /ativar e /activate) e eliminar erro HTTP 404 ao clicar "Ativar OP".
@@ -1561,7 +1566,39 @@ const modalSave = document.getElementById("op-modal-save");
   }
 
   function createBobinaCard(item, idx, convMporPcs, opts){
-    const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
+    opts = opts || {};
+    const opCtx = opts.op || null;
+
+    function pickBobinaMFromOp(op, i){
+      if(!op) return 0;
+
+      // 1) op.bobina (legacy / principal)
+      const b1 = num0(op.bobina ?? op.bobina_m ?? op.bobina_metros ?? 0);
+      if(b1 > 0) return b1;
+
+      // 2) op.bobinas[0] (legacy list)
+      const arrLegacy = Array.isArray(op.bobinas) ? op.bobinas : (Array.isArray(op.bobinas_list) ? op.bobinas_list : []);
+      if(arrLegacy && arrLegacy.length){
+        const v = num0(arrLegacy[i] ?? arrLegacy[0] ?? 0);
+        if(v > 0) return v;
+      }
+
+      // 3) op.bobinas_m[0] (new format list)
+      const arrM = Array.isArray(op.bobinas_m) ? op.bobinas_m : (Array.isArray(op.bobinasM) ? op.bobinasM : []);
+      if(arrM && arrM.length){
+        const v = num0(arrM[i] ?? arrM[0] ?? 0);
+        if(v > 0) return v;
+      }
+
+      return 0;
+    }
+
+    // Comprimento da bobina: primeiro tenta no item; se vier 0/vazio, faz fallback usando dados da OP
+    let comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
+    if(!(comprimentoM > 0)){
+      comprimentoM = pickBobinaMFromOp(opCtx, idx);
+    }
+
     const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
     const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
 
@@ -1623,7 +1660,6 @@ const modalSave = document.getElementById("op-modal-save");
     }
 
     const conv = num0(convMporPcs);
-    opts = opts || {};
     const forceZeroLive = !!opts.forceZeroLive;
 
     // Opcao 1: nao estimar pcs/metragem por comprimento/conv.
@@ -1632,7 +1668,11 @@ const modalSave = document.getElementById("op-modal-save");
     let derivedMetroConsumido = metroConsumido;
 
     // Read-only context
-    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
+    const startedRaw = (
+      (item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at)) ||
+      (opCtx && (opCtx.started_at ?? opCtx.hs_inicial ?? opCtx.inicio)) ||
+      ""
+    );
     let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
     let endedStr = fmtIsoDateTimeLocal(endedRaw);
@@ -1894,7 +1934,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
+        const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
@@ -1913,7 +1953,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
         qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
       };
 
-      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive});
+      const card = createBobinaCard(legacy, 0, convMporPcs, {op: op, forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
     }
 

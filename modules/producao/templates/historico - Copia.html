@@ -1,8 +1,30 @@
 <!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-ULTIMO RECODE: 2026-03-05 05:45 (-03:00)
-MOTIVO: (1) corrigir preenchimento do COMPRIMENTO da bobina (usar bobinas_itens/comprimento_m ou bobinas[0]) e HORA INICIAL (usar bobinas_itens[0].started_at), mantendo ABERTURA OP como data de criacao; (2) corrigir POST de ativar/encerrar para chamar somente /producao/op/ativar e /producao/op/encerrar-by-id.
+ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao\historico.html
+ULTIMO RECODE: 2026-03-05 08:22
+MOTIVO: Ajustar endpoint de ativação de OP para suportar /producao/op/tivar (fallback para /ativar e /activate) e eliminar erro HTTP 404 ao clicar "Ativar OP".
 -->
+<!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-05 07:17 -03:00
+Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
+-->
+
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Último recode: 2026-03-05 05:50
+Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
+-->
+<!--
+PATH: modules/producao/templates/historico.html
+LAST_RECODE: 2026-03-05 03:00
+MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, carregando OP via /op/get e permitindo editar campos e bobinas (add/remove).
+-->
+
+{#
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-05 07:17 -03:00
+#}
+{% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
 
@@ -828,21 +850,11 @@ MOTIVO: (1) corrigir preenchimento do COMPRIMENTO da bobina (usar bobinas_itens/
 
   function getOpAtivacaoIso(op){
     if(!op) return "";
-
-    // Regra: HORA INICIAL nasce quando ATIVA a OP.
-    // No backend atual, o timestamp de ativacao fica no primeiro item de bobina.
-    try{
-      const itens = Array.isArray(op.bobinas_itens) ? op.bobinas_itens : (Array.isArray(op.bobinas_items) ? op.bobinas_items : (Array.isArray(op.bobinas_detail) ? op.bobinas_detail : null));
-      if(itens && itens.length > 0){
-        const s0 = itens[0] && (itens[0].started_at || itens[0].start_at || itens[0].inicio);
-        if(s0) return s0;
-      }
-    }catch(e){}
-
     return (
       op.ativada_at ||
       op.ativacao_at ||
       op.activated_at ||
+      op.started_at ||
       ""
     );
   }
@@ -1822,12 +1834,8 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     const opStatus = safeText(op && op.status).toUpperCase();
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
     const diaRefBruta = safeText(op && (op.__dia_ref || op.data_ref || op.data));
-    // ABERTURA OP = timestamp de criacao (nao sobrescreve ao ativar)
-    const createdIso = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
-    const diaRefDerivada = (createdIso && createdIso.length >= 10) ? createdIso.slice(0,10) : "";
-
-    // HORA INICIAL (ativacao) = timestamp do primeiro item de bobina
-    const startedIso = getOpAtivacaoIso(op);
+    const startedIso = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const diaRefDerivada = (startedIso && startedIso.length >= 10) ? startedIso.slice(0,10) : "";
     const diaRef = diaRefBruta || diaRefDerivada;
     const isHoje = (diaRef && diaRef === todayIsoLocal());
     // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
@@ -1882,19 +1890,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     clearBobinasUI();
 
-    // Preferir lista detalhada de bobinas; op.bobinas pode ser apenas [6000, 4000] (numeros).
-    let itens = [];
-    try{
-      if(op && Array.isArray(op.bobinas_itens)) itens = op.bobinas_itens;
-      else if(op && Array.isArray(op.bobinas_items)) itens = op.bobinas_items;
-      else if(op && Array.isArray(op.bobinas_detail)) itens = op.bobinas_detail;
-      else if(op && Array.isArray(op.bobinas)){
-        itens = op.bobinas.map((v, idx) => ({ idx: idx, comprimento_m: num0(v) }));
-      }else if(op && (op.bobina !== undefined && op.bobina !== null)){
-        itens = [{ idx: 0, comprimento_m: num0(op.bobina) }];
-      }
-    }catch(e){ itens = []; }
-
+    const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
@@ -2436,29 +2432,39 @@ if(modalBackdrop){
   }
 
   async function postOpAction(opId, action){
-    // Regra: chamar apenas o endpoint oficial do backend atual.
-    // Evita spam de tentativas em endpoints inexistentes.
-    const payload = { op_id: Number(opId || 0) };
-    const url = (action === "ativar") ? "/producao/op/ativar" : "/producao/op/encerrar-by-id";
+    const qs = "";
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
 
-    const r = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    if(!r.ok){
-      let txt = "";
-      try{ txt = await r.text(); }catch(e){ txt = ""; }
-      throw new Error(("HTTP " + r.status + (txt ? (" " + txt) : "")).trim());
+    const urls = [];
+    if(action === "ativar"){
+      urls.push("/producao/op/tivar", "/op/tivar", "/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
+    }else{
+      urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
     }
 
-    let data = {};
-    try{ data = await r.json(); }catch(e){ data = {}; }
-    if(data && (data.ok === false)){
-      throw new Error(data.error || "Falha.");
+    let lastErr = null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u + qs, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => ({}));
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+        return true;
+      }catch(e){
+        lastErr = e;
+      }
     }
-    return true;
+    throw lastErr || new Error("Falha ao executar ação.");
   }
 
   function stopOpModalLiveRefresh(){

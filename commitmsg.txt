@@ -1,5 +1,3 @@
-﻿fix(front-historico): corrigir campos da OP e endpoint de ativar/encerrar
+﻿fix(front): ativar OP tenta /producao/op/tivar (fallback /ativar e /activate)
 
-- Comprimento da bobina: usar bobinas_itens.comprimento_m (fallback bobinas[])
-- Hora inicial: usar bobinas_itens[0].started_at (ativacao), mantendo abertura como criacao
-- Ativar/Encerrar: chamar somente /producao/op/ativar e /producao/op/encerrar-by-id
+- Corrige erro HTTP 404 ao clicar "Ativar OP" quando backend usa endpoint /tivar
