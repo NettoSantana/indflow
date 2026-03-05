@@ -1,6 +1,5 @@
-﻿fix(machine_update): iniciar bobina seq seguinte no primeiro update apos troca
+﻿fix(machine_update): abrir proxima bobina no primeiro update apos troca
 
-- /machine/update agora aplica pendencia de troca de bobina:
-  ao detectar ultimo evento fechado e existir bobina seguinte cadastrada,
-  cria/atualiza ordens_producao_bobina_eventos seq N+1 com started_at e start_abs_pcs
-- Mantem regra: somente 1 bobina consome por vez
+- /machine/update passa a criar ordens_producao_bobina_eventos seq N+1
+  quando ultimo evento (seq N) estiver fechado e houver pulso (esp_now > end_abs_pcs)
+- Garante regra: iniciar apenas bobina 1 no ativar; bobina 2 somente apos troca + primeiro update
