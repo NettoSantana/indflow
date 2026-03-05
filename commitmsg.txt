@@ -1,5 +1,4 @@
-﻿style(front): mover fila de OP para dentro do card OP (chips compactos)
+﻿style(front): remover botao Abrir do card OP e aumentar chips sem crescer card
 
-- Remove barra de OPs do topo
-- Exibe 5 slots dentro do card OP em layout compacto (2 linhas)
-- Mantem clique no slot para abrir OP naquele slot
+- Remove botao Abrir do card OP (slots clicaveis bastam)
+- Chips maiores (padding/gap/status) mantendo caber no card
