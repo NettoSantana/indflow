@@ -1,5 +1,5 @@
-﻿fix(front-historico): live refresh OP ATIVA e preenchimento via esp_atual/baseline_pcs
+﻿fix(op): nao sobrescrever abertura ao ativar; gravar hora_inicial
 
-- Detecta "hoje" via started_at quando __dia_ref nao existir
-- Habilita live refresh para OP ATIVA do dia
-- Calcula pcs/metros/tempo ao vivo com esp_atual - baseline_pcs (quando houver producao)
+- started_at passa a representar ABERTURA_OP (criacao) e nao muda na ativacao
+- adiciona coluna hora_inicial em ordens_producao (gravada ao ativar)
+- /producao/op/get passa a retornar hora_inicial para o frontend
