@@ -1,5 +1,5 @@
-﻿chore(ui-op): renomeia labels no modal/print da OP
+﻿fix(op): bloquear OS duplicada por maquina
 
-- HS-inicial -> ABERTURA OP
-- HS-término -> FINAL OP
-- Qtd. saco ou caixa -> Retrabalho
+- Valida machine_id + OS em /producao/op/iniciar
+- Valida troca de OS em /producao/op/editar (ativo e historico)
+- Tenta criar UNIQUE INDEX (machine_id, os) no SQLite (fallback para validacao no endpoint)
