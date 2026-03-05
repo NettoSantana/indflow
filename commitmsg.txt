@@ -1,5 +1,4 @@
-﻿fix(producao/routes): bobina inicia na ativacao e op_get inclui eventos; encerrar salva metros por pcs*conv
+﻿fix(front-historico): usar bobinas_eventos para hora/comprimento e render quando bobinas_itens vier vazio
 
-- Nao cria evento de bobina no criar OP (FILA); evento passa a ser ancorado na ativacao
-- /op/get retorna bobinas_eventos e faz fallback de bobinas_detail via eventos com started_at/ended_at
-- Encerramento grava op_metros = op_pcs * op_conv para evitar historico zerando
+- Card da bobina: started_at e comprimento_m usam fallback via op.bobinas_eventos antes de cair em op.started_at / op.bobina
+- Modal: se bobinas_itens/bobinas_detail vier vazio, renderiza cards a partir de bobinas_eventos
