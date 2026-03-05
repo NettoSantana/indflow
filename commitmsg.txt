@@ -1,6 +1,5 @@
-﻿fix(config_maquina): remover chips da OP e restaurar botao Abrir
+﻿fix(op): fila sem limite e posicao automatica no /producao/op/iniciar
 
-- Header (PATH/LAST_RECODE/MOTIVO) em comentario HTML para nao renderizar
-- Card OP volta ao fluxo simples com botao Abrir (btn-op-manage)
-- Removida renderizacao de fila/chips no card OP
-- Removidas chamadas JS de carregarOpFila() e interval de fila
+- Remove limite 1..5 e erro de fila cheia
+- Trata posicao=0 como nao informado (front manda 0 quando vazio)
+- Auto-atribui posicao como (max ocupadas + 1), mantendo unicidade

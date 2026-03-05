@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-04 22:17 America/Bahia
-# MOTIVO: OP por fila incremental: remover limite 1..5 e permitir criar quantas OPs forem necessarias (sem fila cheia).
+# LAST_RECODE: 2026-03-04 22:35 America/Bahia
+# MOTIVO: Historico: corrigir calculo de 'hoje' para usar America/Bahia (evitar aparecer dia seguinte as 21:00).
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -279,8 +279,17 @@ def _sum_ops_pcs(ops_list) -> int:
     except Exception:
         return 0
 
+def _now_bahia_date():
+    """Retorna a data 'hoje' em America/Bahia.
+    Importante: o servidor pode estar em UTC; sem TZ aqui, o historico vira o dia as 21:00.
+    """
+    try:
+        return datetime.now(ZoneInfo("America/Bahia")).date()
+    except Exception:
+        return datetime.now().date()
+
 def _hoje_iso():
-    return datetime.now().date().isoformat()
+    return _now_bahia_date().isoformat()
 
 def _last_n_days_iso(n: int):
     """Retorna lista de datas YYYY-MM-DD dos ultimos n dias (inclui hoje), em ordem decrescente."""
@@ -293,7 +302,7 @@ def _last_n_days_iso(n: int):
     if n > 365:
         n = 365
 
-    hoje = datetime.now().date()
+    hoje = _now_bahia_date()
     out = []
     for i in range(n):
         out.append((hoje - timedelta(days=i)).isoformat())
