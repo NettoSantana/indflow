@@ -1,5 +1,5 @@
-﻿fix(op): OP sempre inicia como FILA
+﻿fix(front): restaurar botao Abrir no card OP e remover chips sem deletar blocos grandes
 
-- Remove regra que tornava slot 1 automaticamente ATIVO
-- Agora todas as OPs (1..5) nascem como FILA
-- Ativacao passa a ser manual
+- Remove bloco HTML dos chips da fila no card OP
+- Restaura botao Abrir (btn-op-manage) no card OP
+- Mantem CSS/JS existentes (alteracao minima, sem corte de linhas)

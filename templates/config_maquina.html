@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-LAST_RECODE: 2026-03-04 22:00 (America/Bahia)
-MOTIVO: Voltar fluxo simples: remover visualizacao de fila (chips) no card OP e restaurar botao Abrir, sem deletar blocos grandes de CSS/JS (alteracao minima).
+LAST_RECODE: 2026-03-04 21:25 (America/Bahia)
+MOTIVO: Remover botao Abrir apenas do card OP; manter Abrir dos demais cards; garantir chips da fila dentro do card OP; maximizar chips sem aumentar o card; remover restos da barra de OP do topo.
 -->
 
 <!DOCTYPE html>
@@ -410,10 +410,9 @@ MOTIVO: Voltar fluxo simples: remover visualizacao de fila (chips) no card OP e 
         <div class="machine-card">
           <div class="machine-card-title">OP</div>
           <p class="machine-card-desc">Abrir, editar ou encerrar Ordem de Produção da máquina.</p>
-          <div class="machine-card-actions">
-            <button id="btn-op-manage" class="btn btn-primary">Abrir</button>
-          </div>
-<div id="op-fila-opcard" class="op-card-fila-chips"></div>
+          <div class="op-card-fila-wrap">
+            <div class="op-card-fila-label">Fila de OP (slots 1 a 5)</div>
+            <div id="op-fila-opcard" class="op-card-fila-chips"></div>
             <div class="op-card-fila-help">Clique em um slot para abrir uma nova OP naquele slot.</div>
           </div></div>
 
@@ -824,9 +823,6 @@ function initOpUI(){  const box = document.getElementById("op-ativo-box");
   if(box) box.addEventListener("click", openOpModal);
 
 
-
-  const btnManage = document.getElementById("btn-op-manage");
-  if(btnManage) btnManage.addEventListener("click", openOpModal);
   const bd = document.getElementById("opModalBackdrop");
   const bc = document.getElementById("btnCloseOpModal");
   const bx = document.getElementById("btnCancelOp");
