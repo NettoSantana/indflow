@@ -1,12 +1,18 @@
 <!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-05 05:55 (-03:00)
-MOTIVO: Corrigir regra de preenchimento (comprimento nasce na criação via op.bobinas[idx]; hora inicial usa started_at/hora_inicial do item) e manter fallback seguro.
+ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao\historico.html
+ULTIMO RECODE: 2026-03-05 08:22
+MOTIVO: Ajustar endpoint de ativação de OP para suportar /producao/op/tivar (fallback para /ativar e /activate) e eliminar erro HTTP 404 ao clicar "Ativar OP".
 -->
 <!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-05 07:17 -03:00
+Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
+-->
+
+<!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 05:17
-Motivo: Corrigir recarga/validacoes do modal OP (live refresh em view, validacao de duplicidade de OS via cache local e consistencia dos campos manuais por bobina).
+Último recode: 2026-03-05 05:50
+Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -16,7 +22,7 @@ MOTIVO: No Historico, botao Editar passa a abrir o modal grande em modo edicao, 
 
 {#
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-21 22:30 America/Bahia
+Ultimo recode: 2026-03-05 07:17 -03:00
 #}
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
@@ -827,6 +833,36 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 (function(){
   "use strict";
 
+  // Helpers: datas da OP
+  // ABERTURA_OP: nasce ao criar (nao deve ser sobrescrita na ativacao)
+  // ATIVACAO_OP: nasce ao ativar
+  function getOpAberturaIso(op){
+    if(!op) return "";
+    return (
+      op.abertura_op ||
+      op.abertura_at ||
+      op.created_at ||
+      op.createdAt ||
+      op.started_at ||
+      ""
+    );
+  }
+
+  function getOpAtivacaoIso(op){
+    if(!op) return "";
+    return (
+      op.ativada_at ||
+      op.ativacao_at ||
+      op.activated_at ||
+      op.started_at ||
+      ""
+    );
+  }
+
+  // Exporta para debug (evita erro de escopo em handlers)
+  window.getOpAberturaIso = getOpAberturaIso;
+  window.getOpAtivacaoIso = getOpAtivacaoIso;
+
   const IND_TZ = "America/Bahia";
 
   function nowPartsInTz(tz, utcMs){
@@ -899,6 +935,91 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return y + "-" + m + "-" + day;
   }
 
+
+
+  function opDiaISO(op){
+    // Usa __dia_ref quando existir (backend)
+    const dr = safeText(op && (op.__dia_ref || op.data_ref || op.data));
+    if(dr) return normalizeDateInput(dr);
+
+    // Fallback: tenta extrair do started_at
+    const st = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const d = normalizeDateInput(st);
+    return d || "";
+  }
+
+  function opIsHoje(op){
+    const d = opDiaISO(op);
+    return (d && d === todayIsoLocal());
+  }
+
+  function espFromStatus(status){
+    const v = Number(status && (
+      status.esp_absoluto ?? status._bd_esp_last ?? status._last_esp_abs_seen ?? status._ph_esp_last_seen ?? status._last_esp_abs
+    ));
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function enrichOpWithLive(op){
+    try{
+      if(!op) return op;
+
+      const statusTxt = safeText(op.status).toUpperCase();
+      const ativa = statusTxt.includes("ATIV");
+      if(!ativa) return op;
+
+      if(!opIsHoje(op)) return op;
+
+      const base = Number(op.baseline_pcs);
+      if(!Number.isFinite(base)) return op;
+
+      const st = lastMachineStatus;
+      if(!st) return op;
+
+      const esp = espFromStatus(st);
+      if(esp === null) return op;
+
+      const delta = Math.max(0, Math.floor(esp - base));
+      const conv = num0(op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? st.conv_m_por_pcs ?? st.conv_m_per_pcs ?? 0);
+
+      // Clona leve (evita mutar cache original)
+      const op2 = Object.assign({}, op);
+      op2.esp_atual = esp;
+      op2.op_pcs = delta;
+      op2.op_metros = round2(delta * conv);
+
+      const itens = Array.isArray(op2.bobinas_itens) ? op2.bobinas_itens.slice() : [];
+      if(itens.length > 0){
+        const now = nowInTzDate(IND_TZ);
+        const nowMs = now.getTime();
+
+        // Atualiza apenas a primeira bobina "aberta" (a regra do backend hoje é 1 bobina ativa por OP)
+        const it0 = Object.assign({}, itens[0]);
+        it0.pcs_total = delta;
+        it0.metro_consumido = round2(delta * conv);
+
+        // Tempo: diferenca entre started_at e agora
+        const startedRaw = safeText(it0.started_at || op2.started_at || "");
+        try{
+          const ds = new Date(startedRaw);
+          if(!isNaN(ds.getTime())){
+            const diffMin = Math.max(0, Math.floor((nowMs - ds.getTime()) / 60000));
+            it0.tempo_consumo_min = diffMin;
+          }
+        }catch(e){}
+
+        // Enquanto ativa, nao fixa hora final
+        it0.ended_at = "";
+
+        itens[0] = it0;
+        op2.bobinas_itens = itens;
+      }
+
+      return op2;
+    }catch(e){
+      return op;
+    }
+  }
 
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
@@ -1440,14 +1561,7 @@ const modalSave = document.getElementById("op-modal-save");
   }
 
   function createBobinaCard(item, idx, convMporPcs, opts){
-    let comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
-    // Regra: comprimento nasce ao criar (vem do array op.bobinas[idx]). Se o item nao trouxer, usa o da OP.
-    try{
-      const opBobinas = opts && (opts.opBobinas || opts.bobinas || opts.op_bobinas);
-      if((!comprimentoM || comprimentoM <= 0) && Array.isArray(opBobinas) && opBobinas[idx] != null){
-        comprimentoM = num0(opBobinas[idx]);
-      }
-    }catch(e){}
+    const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
     const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
     const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
 
@@ -1518,10 +1632,7 @@ const modalSave = document.getElementById("op-modal-save");
     let derivedMetroConsumido = metroConsumido;
 
     // Read-only context
-    const startedRaw = (
-      (item && (item.started_at ?? item.hora_inicial ?? item.horaInicial ?? item.inicio ?? item.hs_inicial ?? item.start_at))
-      ?? ((opts && (opts.opActivatedAt ?? opts.activated_at ?? opts.op_activated_at)) || "")
-    ) || "";
+    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
     let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
     let endedStr = fmtIsoDateTimeLocal(endedRaw);
@@ -1555,6 +1666,17 @@ const modalSave = document.getElementById("op-modal-save");
       derivedPcs = 0;
       derivedMetroConsumido = 0;
       tempoMin = 0;
+      endedStr = "";
+    }
+
+
+    // Atualizacao ao vivo: quando a OP esta ATIVA no dia atual e o backend envia esp_atual/baseline_pcs,
+    // calcular pcs/metragem/tempo mesmo que o item ainda esteja zerado.
+    if((!forceZeroLive) && opts && opts.isLiveHoje && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
+      derivedPcs = Math.floor(num0(opts.livePcs));
+      derivedMetroConsumido = num0(opts.liveMetros);
+      if(num0(opts.liveTempoMin) > 0) tempoMin = Math.floor(num0(opts.liveTempoMin));
+      // em modo live, nao mostrar hora final
       endedStr = "";
     }
 
@@ -1659,7 +1781,7 @@ const modalSave = document.getElementById("op-modal-save");
   }
 
   function openModal(op, mode, opts){
-    currentOp = op || null;
+    currentOp = enrichOpWithLive(op || null);
     currentOpMode = (mode === "edit") ? "edit" : "view";
 
     // no modo edicao, liberar campos principais (exceto maquina/status)
@@ -1711,7 +1833,10 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     const opStatus = safeText(op && op.status).toUpperCase();
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
-    const diaRef = safeText(op && op.__dia_ref);
+    const diaRefBruta = safeText(op && (op.__dia_ref || op.data_ref || op.data));
+    const startedIso = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const diaRefDerivada = (startedIso && startedIso.length >= 10) ? startedIso.slice(0,10) : "";
+    const diaRef = diaRefBruta || diaRefDerivada;
     const isHoje = (diaRef && diaRef === todayIsoLocal());
     // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
     // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
@@ -1732,7 +1857,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
       }
       const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
       const opMetros = num0(op && (op.op_metros ?? op.total_m ?? 0));
-      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0);
+      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0) || (Math.max(0, (num0(op && op.esp_atual) - num0(op && op.baseline_pcs))) > 0);
     } catch(e) { temProducaoReal = false; }
 
     const isLiveHoje = (!opEncerrada) && isHoje;
@@ -1750,13 +1875,26 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
+    const baselinePcs = num0(op && op.baseline_pcs);
+    const espAtual = num0(op && op.esp_atual);
+    const livePcs = (isLiveHoje && espAtual > 0 && baselinePcs > 0) ? Math.max(0, (espAtual - baselinePcs)) : 0;
+    const liveMetros = (livePcs > 0) ? (livePcs * convMporPcs) : 0;
+    let liveTempoMin = 0;
+    if(isLiveHoje && startedIso){
+      const t0 = new Date(startedIso).getTime();
+      if(!isNaN(t0)){
+        liveTempoMin = Math.max(0, Math.floor((Date.now() - t0) / 60000));
+      }
+    }
+
+
     clearBobinasUI();
 
     const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive, opBobinas: op && op.bobinas, opActivatedAt: op && (op.activated_at || op.op_activated_at)});
+        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
@@ -1775,7 +1913,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
         qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
       };
 
-      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive, opBobinas: op && op.bobinas, opActivatedAt: op && (op.activated_at || op.op_activated_at)});
+      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
     }
 
@@ -2299,7 +2437,7 @@ if(modalBackdrop){
 
     const urls = [];
     if(action === "ativar"){
-      urls.push("/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
+      urls.push("/producao/op/tivar", "/op/tivar", "/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
     }else{
       urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
     }
@@ -2351,7 +2489,7 @@ if(modalBackdrop){
 
     // so atualiza ao vivo enquanto estiver ativa e for hoje
     if(!currentOp.ativa) return;
-    if(!isHoje(currentOp)) return;
+    if(!opIsHoje(currentOp)) return;
 
     opModalTimer = setInterval(async ()=>{
       if(opModalRefreshing) return;
@@ -2365,7 +2503,7 @@ if(modalBackdrop){
         const fresh = await fetchOpGet(opId);
         if(fresh){
           // re-render em view mantendo o timer
-          openModal(fresh, "view", { skipLiveStart: true });
+          openModal(enrichOpWithLive(fresh), "view", { skipLiveStart: true });
         }
       }catch(e){
         // ignora falha pontual
@@ -2805,6 +2943,8 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+      
+      lastMachineStatus = status;
       const runVal = (status && (status.run === 1 || status.run === true)) ? 1 : ((status && (status.run === 0 || status.run === false)) ? 0 : null);
       if(runVal !== null){
         appendTrailState(runVal === 1 ? "RUN" : "STOP", Date.now());
