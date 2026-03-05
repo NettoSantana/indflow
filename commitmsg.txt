@@ -1,3 +1,6 @@
-﻿fix(front): ativar OP tenta /producao/op/tivar (fallback /ativar e /activate)
+﻿fix(op_ativar): nao sobrescrever abertura da OP; hora_inicial no evento da bobina; debug de erro e busy_timeout
 
-- Corrige erro HTTP 404 ao clicar "Ativar OP" quando backend usa endpoint /tivar
+- /producao/op/ativar nao altera started_at (abertura da OP)
+- hora_inicial passa a nascer ao ativar via evento seq=0 (started_at + start_abs_pcs)
+- retorno 500 agora inclui stage/detail para diagnostico rapido
+- sqlite busy_timeout para reduzir lock
