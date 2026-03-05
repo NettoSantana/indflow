@@ -1,5 +1,5 @@
-﻿fix(frontend): remove OP ativa no topo e remove encerrar OP na tela de config
+﻿fix(frontend): corrige sintaxe JS no config_maquina e mantém somente Nova OP
 
-- Remove box "OP ativa" no canto superior
-- Remove botao/acao de encerrar OP no modal
-- Modal passa a apenas iniciar nova OP via /producao/op/iniciar
+- Corrige chaves soltas/blocos duplicados e restos de try/catch
+- Mantém removido o box OP ativa no topo
+- Mantém removido o encerrar OP; modal só inicia nova OP (/producao/op/iniciar)

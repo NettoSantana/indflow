@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 19:00
-Motivo: Corrigir chamada inexistente loadHistorico() para a função real fetchHistorico() ao Ativar/Encerrar OP.
+Último recode: 2026-03-05 04:37
+Motivo: Renomear labels no modal/print: HS-inicial->ABERTURA OP, HS-término->FINAL OP, QTD. SACO OU CAIXA->RETRABALHO.
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -746,11 +746,11 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
         <!-- Linha 3 (read-only / azul) -->
         <div class="op-field op-ro col-6">
-          <label>HS-inicial</label>
+          <label>ABERTURA OP</label>
           <input id="opv_started" type="text" readonly>
         </div>
         <div class="op-field op-ro col-6">
-          <label>HS-término</label>
+          <label>FINAL OP</label>
           <input id="opv_ended" type="text" readonly>
         </div>
 
@@ -1520,7 +1520,7 @@ const modalSave = document.getElementById("op-modal-save");
     // Editable (yellow)
     const fCost = fieldEdit("Qtd. cost. elas.", vCost, "col-3", "qtd_cost_elas");
     const fRef = fieldEdit("Refugo", vRef, "col-3", "refugo");
-    const fSaco = fieldEdit("Qtd. saco ou caixa", vSaco, "col-3", "qtd_saco_caixa");
+    const fSaco = fieldEdit("Retrabalho", vSaco, "col-3", "qtd_saco_caixa");
 
     // Computed (read-only)
     const fMat = fieldRO("Qtd. mat bom", calcMatBom(derivedPcs, vCost, vRef, vSaco), "col-3");
@@ -2049,8 +2049,8 @@ tdD.appendChild(wrap);
     infoRows += row2("OS", anyText(op && (op.os || op.os_num || op.ordem_servico)));
     infoRows += row2("GR e/ou fio", anyText(op && (op.gr_fio || op.gr_e_ou_fio)));
     infoRows += row2("Conversao m/pcs", anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs)));
-    infoRows += row2("HS-inicial", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
-    infoRows += row2("HS-termino", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
+    infoRows += row2("ABERTURA OP", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
+    infoRows += row2("FINAL OP", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
 
     let bobinasHtml = "";
     if(bobinas.length === 0){
@@ -2083,7 +2083,7 @@ tdD.appendChild(wrap);
             <td></td>
             <td colspan="2">Qtd. cost. elas.: <b>${cost}</b></td>
             <td colspan="2">Refugo: <b>${ref}</b></td>
-            <td colspan="3">Qtd. saco/caixa: <b>${saco}</b></td>
+            <td colspan="3">Retrabalho: <b>${saco}</b></td>
           </tr>
         `;
       }).join("");
