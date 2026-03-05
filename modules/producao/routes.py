@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 04:47 America/Bahia
-# MOTIVO: Impedir OP duplicada por maquina (machine_id + os) no banco e nos endpoints /op/iniciar e /op/editar
+# LAST_RECODE: 2026-03-05 02:29 America/Bahia
+# MOTIVO: Validar fechamento manual e calcular QTD MAT BOM automaticamente (MAT_BOM = TOTAL_PCS - COSTURAS - REFUGO - RETRABALHO)
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -664,16 +664,6 @@ def init_op_db():
         except Exception:
             pass
 
-
-    # -------------------------------------------------
-    # REGRA: nao permitir OS duplicada por maquina (machine_id + os)
-    # Observacao: se ja existir duplicidade historica no banco, o CREATE UNIQUE INDEX pode falhar.
-    # Neste caso, mantemos a validacao no endpoint para bloquear novas duplicidades.
-    # -------------------------------------------------
-    try:
-        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_ordens_producao_machine_os ON ordens_producao(machine_id, os)")
-    except Exception:
-        pass
     # -------------------------------------------------
     # TABELA: FECHAMENTO POR BOBINA (1 OP pode ter N bobinas)
     # -------------------------------------------------
@@ -773,32 +763,6 @@ except Exception:
     pass
 
 
-
-def _op_os_exists(conn, machine_id, os_num, exclude_op_id=0):
-    """
-    Retorna True se ja existir alguma OP com a mesma OS (numero) para a mesma maquina.
-    Regra (escopo escolhido): machine_id + os.
-    """
-    mid = _sanitize_mid(_as_str(machine_id))
-    os_ = _as_str(os_num)
-    try:
-        ex_id = int(exclude_op_id or 0)
-    except Exception:
-        ex_id = 0
-    if not mid or not os_:
-        return False
-    cur = conn.cursor()
-    if ex_id > 0:
-        cur.execute(
-            "SELECT 1 FROM ordens_producao WHERE machine_id = ? AND os = ? AND id <> ? LIMIT 1",
-            (mid, os_, ex_id),
-        )
-    else:
-        cur.execute(
-            "SELECT 1 FROM ordens_producao WHERE machine_id = ? AND os = ? LIMIT 1",
-            (mid, os_),
-        )
-    return cur.fetchone() is not None
 def _now_iso():
     tz = _get_tz()
     if tz is None:
@@ -2245,10 +2209,6 @@ def op_iniciar():
             )
             ocupadas = {int(r[0]) for r in cur.fetchall() if r[0] is not None}
 
-            # Regra: nao permitir OP com a mesma OS na mesma maquina
-            if _op_os_exists(conn, machine_id, os_):
-                return jsonify({"error": "Ja existe uma OP com essa OS nesta maquina"}), 409
-
         if posicao is None:
             posicao = (max(ocupadas) + 1) if ocupadas else 1
 
@@ -2434,14 +2394,6 @@ def op_editar():
         except Exception:
             pass
 
-        # Regra: nao permitir trocar para uma OS que ja exista em outra OP da mesma maquina
-        try:
-            with _get_conn() as conn_chk:
-                if _op_os_exists(conn_chk, machine_id, os_, exclude_op_id=op_id):
-                    return jsonify({"error": "Ja existe uma OP com essa OS nesta maquina"}), 409
-        except Exception:
-            pass
-
         # Atualiza no banco e em memoria
         try:
             _update_op_row(
@@ -2495,14 +2447,6 @@ def op_editar():
 
     if machine_id and op_mid and machine_id != op_mid:
         return jsonify({"error": "machine_id nao confere com a OP"}), 400
-
-    # Regra: nao permitir trocar para uma OS que ja exista em outra OP da mesma maquina
-    try:
-        with _get_conn() as conn_chk:
-            if _op_os_exists(conn_chk, op_mid, os_, exclude_op_id=op_id_payload):
-                return jsonify({"error": "Ja existe uma OP com essa OS nesta maquina"}), 409
-    except Exception:
-        pass
 
     # atualiza no banco
     try:
@@ -3131,6 +3075,13 @@ def op_salvar():
                 refugo = _int(item.get("refugo"))
                 qtd_saco_caixa = _int(item.get("qtd_saco_caixa"))
 
+                if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
+                    conn.rollback()
+                    return jsonify({
+                        "error": "Valores nao podem ser negativos",
+                        "idx": int(idx),
+                    }), 400
+
                 # comprimento e pcs_total derivados da OP (fonte unica)
                 if idx < 0 or idx >= len(bobinas_m):
                     continue
@@ -3139,9 +3090,19 @@ def op_salvar():
                 pcs_total = alloc_pcs[idx] if idx < len(alloc_pcs) else 0
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
 
-                qtd_mat_bom = int(pcs_total - (qtd_cost_elas + refugo + qtd_saco_caixa))
-                if qtd_mat_bom < 0:
-                    qtd_mat_bom = 0
+                soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
+                if soma_defeitos > int(pcs_total or 0):
+                    conn.rollback()
+                    return jsonify({
+                        "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL PCS da bobina",
+                        "idx": int(idx),
+                        "pcs_total": int(pcs_total or 0),
+                        "qtd_cost_elas": int(qtd_cost_elas or 0),
+                        "refugo": int(refugo or 0),
+                        "qtd_saco_caixa": int(qtd_saco_caixa or 0),
+                    }), 409
+
+                qtd_mat_bom = int(int(pcs_total or 0) - soma_defeitos)
 
                 cur.execute(
                     """
@@ -3204,10 +3165,12 @@ def op_salvar():
         return jsonify({"status": "ok", "op_id": op_id, "mode": "bobinas"})
 
     # Formato antigo (compatibilidade): salvar direto na OP
-    qtd_mat_bom = _int(data.get("qtd_mat_bom"))
     qtd_cost_elas = _int(data.get("qtd_cost_elas"))
     refugo = _int(data.get("refugo"))
     qtd_saco_caixa = _int(data.get("qtd_saco_caixa"))
+
+    if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
+        return jsonify({"error": "Valores nao podem ser negativos"}), 400
 
     conn = None
     try:

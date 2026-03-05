@@ -1,12 +1,5 @@
-﻿feat(op): lógica de ativação de OP e recarga segura do histórico
+﻿fix(front/historico): live refresh e validacoes no modal OP
 
-- Ajuste no historico.html para suportar fluxo Ativar OP → Encerrar OP
-- Preparação da tela para cálculo de PCS da OP baseado no contador do ESP
-- Estrutura para cálculo de metro linear consumido (pcs × conversão)
-- Estrutura para cálculo de tempo de consumo a partir da hora inicial
-- Campos manuais de classificação: costuras, refugo e retrabalho
-- Removida chamada incorreta de loadHistorico()
-- Mantida recarga segura do histórico após salvar OP
-
-Arquivo alterado:
-templates/historico.html
+- Modal OP em modo view faz refresh a cada 5s via /op/get quando OP ativa e dia atual
+- Valida duplicidade de OS usando cache do historico (frontend)
+- Valida consistencia por bobina: costuras+refugo+retrabalho <= total pcs (quando total pcs > 0)
