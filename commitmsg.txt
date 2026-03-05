@@ -1,4 +1,6 @@
-﻿fix(front/historico): bobinas ao vivo somente na bobina ativa
+﻿fix(machine_update): iniciar bobina seq seguinte no primeiro update apos troca
 
-- Modal de OP: ao vivo agora calcula pcs/metragem/tempo por bobina usando start_abs_pcs do evento aberto
-- Evita replicar a producao da OP em todas as bobinas antes da troca
+- /machine/update agora aplica pendencia de troca de bobina:
+  ao detectar ultimo evento fechado e existir bobina seguinte cadastrada,
+  cria/atualiza ordens_producao_bobina_eventos seq N+1 com started_at e start_abs_pcs
+- Mantem regra: somente 1 bobina consome por vez
