@@ -1,3 +1,4 @@
-﻿fix(front): ativar OP tenta /producao/op/tivar (fallback /ativar e /activate)
+﻿fix(historico): fallback de comprimento e hora inicial no card da bobina
 
-- Corrige erro HTTP 404 ao clicar "Ativar OP" quando backend usa endpoint /tivar
+- Comprimento da bobina (m) usa fallback para op.bobina / op.bobinas / op.bobinas_m quando item vier 0/vazio
+- Hora inicial usa fallback para op.started_at quando item.started_at vier vazio
