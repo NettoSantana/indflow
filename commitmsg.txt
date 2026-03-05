@@ -1,5 +1,5 @@
-﻿fix(front-historico): usar bobinas_detail persistido no modal (evita zerar ao encerrar)
+﻿fix(front-historico): renderizar todas as bobinas no modal da OP
 
-- Modal passa a priorizar op.bobinas_detail (pcs_total/metro_consumido persistidos)
-- Normaliza op.bobinas quando vier como array de numeros (ex.: [6000])
-- Evita mostrar producao 0 ao encerrar por esp_atual null
+- Prioriza bobinas_eventos para gerar 1 card por bobina (Bobina 1, 2, 3...)
+- Fallback para bobinas_itens/bobinas_detail
+- Fallback final para bobinas_m quando nao houver eventos
