@@ -1,5 +1,7 @@
-﻿fix(machine_update): abrir proxima bobina no primeiro update apos troca
+﻿fix(front/historico): troca de bobina com trava ate 1o machine/update + nao zerar bobina fechada
 
-- /machine/update passa a criar ordens_producao_bobina_eventos seq N+1
-  quando ultimo evento (seq N) estiver fechado e houver pulso (esp_now > end_abs_pcs)
-- Garante regra: iniciar apenas bobina 1 no ativar; bobina 2 somente apos troca + primeiro update
+- Adiciona botao Troca de Bobina no modal da OP
+- Chama /producao/op/troca-bobina (fallback /op/troca-bobina)
+- Trata resposta {error} sem seguir fluxo (evita 404 no meio)
+- Trava nova troca ate abrir proxima bobina (primeiro machine/update)
+- ForceZeroLive so zera bobina aberta; temProducaoReal considera bobinas_eventos
