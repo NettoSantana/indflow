@@ -1,4 +1,9 @@
 <!--
+ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\producao\historico.html
+ULTIMO RECODE: 2026-03-05 08:22
+MOTIVO: Ajustar endpoint de ativação de OP para suportar /producao/op/tivar (fallback para /ativar e /activate) e eliminar erro HTTP 404 ao clicar "Ativar OP".
+-->
+<!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Ultimo recode: 2026-03-05 07:17 -03:00
 Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
@@ -2432,7 +2437,7 @@ if(modalBackdrop){
 
     const urls = [];
     if(action === "ativar"){
-      urls.push("/producao/op/ativar", "/op/ativar", "/producao/op/ativar", "/op/ativar");
+      urls.push("/producao/op/tivar", "/op/tivar", "/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
     }else{
       urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
     }
