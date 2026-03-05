@@ -1,10 +1,6 @@
-# File: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# Last recode: 2026-03-05 07:48:08 -0300
-# Reason: OP nao deve sobrescrever ABERTURA_OP ao ativar; adicionar hora_inicial (ativacao) e expor no /op/get
-
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 19:35 America/Bahia
-# MOTIVO: OP GET deve devolver baseline_pcs e calcular PCS/metros ao vivo quando status=ATIVA
+# LAST_RECODE: 2026-03-05 08:34 America/Bahia
+# MOTIVO: Corrigir /producao/op/ativar para nao sobrescrever abertura da OP e registrar hora_inicial no evento da bobina; adicionar debug stage/detail e busy_timeout
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -607,7 +603,12 @@ op_active = {}
 
 
 def _get_conn():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
+    try:
+        conn.execute("PRAGMA busy_timeout=3000")
+    except Exception:
+        pass
+    return conn
 
 
 def init_op_db():
@@ -635,7 +636,6 @@ def init_op_db():
             observacoes TEXT,
 
             started_at TEXT NOT NULL,
-            hora_inicial TEXT,
             ended_at TEXT,
             status TEXT NOT NULL,
 
@@ -663,7 +663,6 @@ def init_op_db():
         "ALTER TABLE ordens_producao ADD COLUMN refugo INTEGER DEFAULT 0",
         "ALTER TABLE ordens_producao ADD COLUMN qtd_saco_caixa INTEGER DEFAULT 0",
         "ALTER TABLE ordens_producao ADD COLUMN posicao INTEGER NOT NULL DEFAULT 1",
-        "ALTER TABLE ordens_producao ADD COLUMN hora_inicial TEXT",
     ]:
         try:
             cur.execute(sql)
@@ -731,7 +730,6 @@ def init_op_db():
             comprimento_m INTEGER NOT NULL DEFAULT 0,
 
             started_at TEXT NOT NULL,
-            hora_inicial TEXT,
             ended_at TEXT,
             start_abs_pcs INTEGER NOT NULL DEFAULT 0,
             end_abs_pcs INTEGER,
@@ -908,11 +906,11 @@ def _insert_op_row(payload: dict) -> int:
         """
         INSERT INTO ordens_producao (
             machine_id, posicao, os, lote, operador, bobina, gr_fio, observacoes,
-            started_at, hora_inicial, ended_at, status,
+            started_at, ended_at, status,
             baseline_pcs, baseline_u1, baseline_u2,
             op_metros, op_pcs, op_conv_m_por_pcs,
             unidade_1, unidade_2
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             payload.get("machine_id"),
@@ -924,7 +922,6 @@ def _insert_op_row(payload: dict) -> int:
             payload.get("gr_fio"),
             payload.get("observacoes"),
             payload.get("started_at"),
-            payload.get("hora_inicial"),
             payload.get("ended_at"),
             payload.get("status"),
             int(payload.get("baseline_pcs") or 0),
@@ -2260,7 +2257,6 @@ def op_iniciar():
         "gr_fio": gr_fio,
         "observacoes": observacoes,
         "started_at": started_at,
-        "hora_inicial": None,
         "ended_at": None,
         "posicao": posicao,
         "status": ("ATIVA" if is_active else "FILA"),
@@ -2306,7 +2302,6 @@ def op_iniciar():
         "gr_fio": gr_fio,
         "observacoes": observacoes,
         "started_at": started_at,
-        "hora_inicial": None,
         "baseline": {"pcs": baseline_pcs, "u1": baseline_u1, "u2": baseline_u2},
         "unidade_1": unidade_1,
         "unidade_2": unidade_2,
@@ -2556,7 +2551,7 @@ def op_get():
         cur.execute(
             """
             SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes,
-                   started_at, hora_inicial, ended_at, baseline_pcs, status, posicao, op_metros, op_pcs, op_conv_m_por_pcs,
+                   started_at, ended_at, baseline_pcs, status, posicao, op_metros, op_pcs, op_conv_m_por_pcs,
                    unidade_1, unidade_2
             FROM ordens_producao
             WHERE id = ?
@@ -2573,23 +2568,23 @@ def op_get():
 
     # Normaliza campos principais
     machine_id = _sanitize_mid(_as_str(r[1]))
-    status = _as_str(r[12])
-    baseline_pcs = _int(r[11])
+    status = _as_str(r[11])
+    baseline_pcs = _int(r[10])
 
     op_conv = 0.0
     try:
-        op_conv = float(r[16] or 0.0)
+        op_conv = float(r[15] or 0.0)
     except Exception:
         op_conv = 0.0
 
     # Valores persistidos (usados quando OP nao esta ATIVA)
     op_metros_db = 0.0
     try:
-        op_metros_db = float(r[14] or 0.0)
+        op_metros_db = float(r[13] or 0.0)
     except Exception:
         op_metros_db = 0.0
 
-    op_pcs_db = _int(r[15])
+    op_pcs_db = _int(r[14])
 
     # Valores ao vivo quando ATIVA
     esp_atual = None
@@ -2627,17 +2622,16 @@ def op_get():
             "gr_fio": _as_str(r[6]),
             "observacoes": _as_str(r[7]),
             "started_at": _as_str(r[8]),
-            "hora_inicial": _as_str(r[9]),
-            "ended_at": _as_str(r[10]),
+            "ended_at": _as_str(r[9]),
             "baseline_pcs": int(baseline_pcs or 0),
             "status": status,
-            "posicao": int(r[13] or 0),
+            "posicao": int(r[12] or 0),
             "op_metros": op_metros_live,
             "op_pcs": int(op_pcs_live or 0),
             "op_conv_m_por_pcs": op_conv,
             "esp_atual": esp_atual,
-            "unidade_1": _as_str(r[17]) or "m",
-            "unidade_2": _as_str(r[18]) or "pcs",
+            "unidade_1": _as_str(r[16]) or "m",
+            "unidade_2": _as_str(r[17]) or "pcs",
         }
     )
 
@@ -2735,6 +2729,7 @@ def op_ativar():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
+    stage = "init"
     machine_id = ""
     baseline_pcs = 0
     now_iso = _now_iso()
@@ -2743,11 +2738,13 @@ def op_ativar():
 
     conn = None
     try:
+        stage = "conn"
         conn = _get_conn()
         cur = conn.cursor()
 
+        stage = "fetch_op"
         cur.execute(
-            "SELECT id, machine_id, status, bobina, os, lote, operador, gr_fio, observacoes, unidade_1, unidade_2, op_conv_m_por_pcs "
+            "SELECT id, machine_id, status, bobina, os, lote, operador, gr_fio, observacoes, unidade_1, unidade_2, op_conv_m_por_pcs, started_at "
             "FROM ordens_producao WHERE id = ?",
             (op_id,),
         )
@@ -2757,7 +2754,7 @@ def op_ativar():
 
         machine_id = _sanitize_mid(_as_str(row[1]))
         status = _as_str(row[2])
-        abertura_at = _as_str(row[12])
+        op_started_at = _as_str(row[12])
 
         if not machine_id:
             return jsonify({"error": "machine_id invalido"}), 400
@@ -2765,6 +2762,7 @@ def op_ativar():
         if status not in ("FILA", "ATIVA"):
             return jsonify({"error": "OP nao pode ser ativada neste status", "status": status}), 409
 
+        stage = "check_other_active"
         cur.execute(
             "SELECT id FROM ordens_producao WHERE machine_id = ? AND status = 'ATIVA' AND id <> ? LIMIT 1",
             (machine_id, op_id),
@@ -2773,32 +2771,43 @@ def op_ativar():
         if other:
             return jsonify({"error": "Ja existe uma OP ATIVA para esta maquina", "op_id_ativa": int(other[0] or 0)}), 409
 
+        stage = "baseline"
         baseline_pcs = int(_get_current_esp_abs(conn, machine_id) or 0)
 
+        stage = "update_op"
+        # Regra: NAO sobrescreve started_at (abertura da OP). Apenas ancora baseline e marca ATIVA.
         cur.execute(
-            "UPDATE ordens_producao SET status = ?, baseline_pcs = ?, hora_inicial = ?, ended_at = NULL WHERE id = ?",
-            ("ATIVA", baseline_pcs, now_iso, op_id),
+            "UPDATE ordens_producao SET status = ?, baseline_pcs = ?, ended_at = NULL WHERE id = ?",
+            ("ATIVA", baseline_pcs, op_id),
         )
 
-        # Ao ativar, reinicia o relogio e reinicia os eventos de bobina a partir de agora.
+        stage = "bobinas_parse"
         bobina_csv = _as_str(row[3])
         bobinas_list = _parse_bobinas_csv(bobina_csv)
 
-        try:
-            cur.execute("DELETE FROM ordens_producao_bobina_eventos WHERE op_id = ?", (op_id,))
-        except Exception:
-            pass
+        # Regra: HORA_INICIAL nasce ao ATIVAR.
+        # Isso fica no evento da primeira bobina (seq=0): started_at e start_abs_pcs.
+        stage = "bobina_event_upsert"
+        first_len = int(bobinas_list[0] or 0) if bobinas_list else 0
 
-        if bobinas_list:
-            try:
-                cur.execute(
-                    "INSERT INTO ordens_producao_bobina_eventos (op_id, seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
-                    (op_id, 0, int(bobinas_list[0] or 0), now_iso, int(baseline_pcs or 0), now_iso, now_iso),
-                )
-            except Exception:
-                pass
+        # tenta atualizar evento existente
+        cur.execute(
+            "UPDATE ordens_producao_bobina_eventos "
+            "SET started_at = ?, ended_at = NULL, start_abs_pcs = ?, end_abs_pcs = NULL, "
+            "updated_at = ?, comprimento_m = CASE WHEN (comprimento_m IS NULL OR comprimento_m = 0) THEN ? ELSE comprimento_m END "
+            "WHERE op_id = ? AND seq = 0",
+            (now_iso, baseline_pcs, now_iso, first_len, op_id),
+        )
+        if cur.rowcount == 0:
+            # cria evento se ainda nao existir
+            cur.execute(
+                "INSERT INTO ordens_producao_bobina_eventos "
+                "(op_id, seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs, created_at, updated_at) "
+                "VALUES (?, 0, ?, ?, NULL, ?, NULL, ?, ?)",
+                (op_id, first_len, now_iso, baseline_pcs, now_iso, now_iso),
+            )
 
+        stage = "commit"
         conn.commit()
 
         op_payload = {
@@ -2811,22 +2820,24 @@ def op_ativar():
             "bobinas": bobinas_list,
             "gr_fio": _as_str(row[7]),
             "observacoes": _as_str(row[8]),
-            "started_at": abertura_at,
-            "hora_inicial": now_iso,
+            # abertura da OP (nao muda ao ativar)
+            "started_at": op_started_at,
+            # timestamp de ativacao (relogio)
+            "activated_at": now_iso,
             "baseline": {"pcs": int(baseline_pcs or 0)},
-            "hora_inicial": now_iso,
             "unidade_1": _as_str(row[9]) or "m",
             "unidade_2": _as_str(row[10]) or "pcs",
             "op_conv_m_por_pcs": float(row[11] or 0.0),
         }
 
-    except Exception:
+    except Exception as e:
         try:
             if conn:
                 conn.rollback()
         except Exception:
             pass
-        return jsonify({"error": "Falha ao ativar OP"}), 500
+        # devolve detalhe minimo para diagnostico (sem vazar stacktrace)
+        return jsonify({"error": "Falha ao ativar OP", "stage": stage, "detail": str(e)[:200]}), 500
     finally:
         try:
             if conn:
@@ -2837,7 +2848,7 @@ def op_ativar():
     with _op_lock:
         op_active[machine_id] = op_payload
 
-    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "baseline_pcs": baseline_pcs, "hora_inicial": now_iso, "started_at": abertura_at})
+    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "baseline_pcs": baseline_pcs, "activated_at": now_iso})
 
 
 

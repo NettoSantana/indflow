@@ -1,4 +1,3 @@
-﻿fix(front-historico): define getOpAberturaIso/getOpAtivacaoIso no escopo global
+﻿fix(front): ativar OP tenta /producao/op/tivar (fallback /ativar e /activate)
 
-- Evita erro 'getOpAberturaIso is not defined' ao carregar OP no modal
-- Exporta helpers para window para uso seguro em handlers/async
+- Corrige erro HTTP 404 ao clicar "Ativar OP" quando backend usa endpoint /tivar
