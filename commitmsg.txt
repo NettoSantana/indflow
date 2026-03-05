@@ -1,5 +1,5 @@
-﻿fix(producao-op): aliases de ativar + encerrar por op_id no banco
+﻿fix(producao/routes): op_get monta bobinas_detail via eventos + encerrar grava metros por pcs*conv
 
-- Adiciona rotas /op/tivar e /op/activate (compat com front antigo)
-- Em /op/encerrar: se vier op_id, encerra via op_encerrar_by_id (sem depender do cache op_active)
-- Em /op/ativar: imprime erro/stage no log do Railway pra diagnosticar 500
+- /producao/op/get agora busca ordens_producao_bobina_eventos e retorna bobinas_detail com started_at/ended_at por bobina
+- Calcula pcs_total/metro_consumido por evento (ao vivo quando OP ATIVA)
+- /op/encerrar-by-id e /op/encerrar passam a gravar op_metros como pcs*conv (nao soma 6000)
