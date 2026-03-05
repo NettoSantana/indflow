@@ -1,4 +1,6 @@
-﻿style(front): remover botao Abrir do card OP e aumentar chips sem crescer card
+﻿fix(front): manter botoes dos outros cards e exibir chips no card OP
 
-- Remove botao Abrir do card OP (slots clicaveis bastam)
-- Chips maiores (padding/gap/status) mantendo caber no card
+- Remove somente o botao Abrir do card OP
+- Mantem Abrir do Historico/Chamados/Configuracao/etc
+- Chips da fila no card OP maiores (3+2) sem aumentar card
+- Remove restos da barra de OP do topo
