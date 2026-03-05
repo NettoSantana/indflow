@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-LAST_RECODE: 2026-03-05 01:07 (America/Bahia)
-MOTIVO: Remover exibicao de OP ativa no topo e remover acao/botao de encerrar; modal passa a apenas iniciar nova OP.
+LAST_RECODE: 2026-03-05 01:16 (America/Bahia)
+MOTIVO: Corrigir erros de sintaxe JavaScript apos recode; manter apenas fluxo de Nova OP (sem box OP ativa e sem encerrar OP).
 -->
 
 <!DOCTYPE html>
@@ -557,6 +557,7 @@ function _fillOpFormFromData(d){
   _syncHiddenBobinaFirst();
 }
 
+
 async function _getJson(url){
   try{
     const r = await fetch(url);
@@ -574,13 +575,6 @@ function _normalizeMachineStatusPayload(payload){
   return { machine: payload, op: null };
 }
 
-  const d = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(d && d.active){
-    opAtiva = d;
-    const info = `OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
-}else{
-    opAtiva = null;
-}
 
 
 
@@ -797,21 +791,12 @@ function initOpUI(){
       payload.bobinas = bobinas;
       payload.bobina = bobinas.length ? bobinas[0] : payload.bobina;
       await _postJson("/producao/op/iniciar", payload);
-      closeOpModal();
-    }catch(err){
+closeOpModal();
+}catch(err){
       alert(String(err && err.message ? err.message : err));
     }
   });
 }
-
-(async () => {
-  const d = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(d && d.active){
-    opAtiva = d;
-  }else{
-    opAtiva = null;
-  }
-})();
 
 initOpUI();
 </script>

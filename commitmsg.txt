@@ -1,6 +1,5 @@
-﻿fix(producao/op): ativar/encerrar por op_id + corrigir op_salvar
+﻿fix(frontend): remove OP ativa no topo e remove encerrar OP na tela de config
 
-- Adiciona POST /producao/op/ativar (ativa OP da FILA e ancora baseline_pcs)
-- Adiciona POST /producao/op/encerrar-by-id (encerra OP ativa via op_id)
-- Permite editar OP em FILA no helper _update_op_row
-- Corrige bug de ordem de definicao do _int e duplicacao de observacoes em op_salvar
+- Remove box "OP ativa" no canto superior
+- Remove botao/acao de encerrar OP no modal
+- Modal passa a apenas iniciar nova OP via /producao/op/iniciar
