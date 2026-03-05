@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-05 02:15
-MOTIVO: Ajustar acao Editar do historico para abrir modal de OP na tela de configuracao (redirecionar).
+LAST_RECODE: 2026-03-05 02:28
+MOTIVO: Botao Editar no Historico deve abrir o modal grande do Historico (carregar OP por op_id via /producao/op/get) e salvar via /producao/op/salvar.
 -->
 
 <!--
@@ -2119,21 +2119,48 @@ tdD.appendChild(wrap);
           e.preventDefault();
           e.stopPropagation();
         }
+
         const opId = Number((op && (op.op_id ?? op.id ?? op.opId ?? op.opid)) || 0);
         if(!opId){
           alert("Nao foi possivel identificar o ID da OP para editar.");
           return;
         }
-        // Editar deve abrir a tela de configuracao da maquina (modal de OP da pagina config)
-        const target = "/producao/config/" + encodeURIComponent(machineId) +
-          "?edit_op_id=" + encodeURIComponent(String(opId)) + "&from=historico";
-        window.location.href = target;
+
+        // Editar deve abrir o modal grande do Historico, carregando os dados por op_id
+        (async function(){
+          try{
+            const resp = await fetch("/producao/op/get?op_id=" + encodeURIComponent(String(opId)), {
+              method: "GET",
+              headers: { "Accept": "application/json" }
+            });
+
+            const data = await resp.json().catch(() => null);
+
+            if(!resp.ok){
+              const msg = data && (data.error || data.message)
+                ? (data.error || data.message)
+                : ("Erro HTTP " + resp.status);
+              throw new Error(msg);
+            }
+
+            const opLoaded = (data && (data.op || data)) ? (data.op || data) : {};
+            const op2 = Object.assign({}, opLoaded || {});
+            op2.__dia_ref = getRowDateISO(r);
+
+            if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
+              closeDayModal();
+            }
+
+            openModal(op2);
+          }catch(err){
+            alert("Falha ao carregar OP para editar: " + (err && err.message ? err.message : String(err)));
+          }
+        })();
       }
 
       trOp.addEventListener("click", _openDetails);
       btnEdit.addEventListener("click", _goEdit);
-
-      btnDel.addEventListener("click", async function(e){
+btnDel.addEventListener("click", async function(e){
         if(e){
           e.preventDefault();
           e.stopPropagation();

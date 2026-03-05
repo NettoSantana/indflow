@@ -1,5 +1,5 @@
-﻿feat(op): editar por op_id e excluir OP no historico
+﻿fix(historico): botao Editar redireciona para config_maquina (modal OP correto)
 
-- /producao/op/get?op_id=... para carregar dados no modal (OS/Lote/Operador/Bobinas)
-- /producao/op/excluir para apagar OP e dependencias (bobinas/eventos)
-- /producao/op/editar passa a aceitar op_id para editar OP do historico (sem depender de OP ativa)
+- Editar no Historico nao abre mais o modal de detalhes do Historico
+- Editar agora redireciona para /producao/config/<machine_id>?edit_op_id=<op_id>
+- Clique na linha da OP continua abrindo o modal de detalhes do Historico
