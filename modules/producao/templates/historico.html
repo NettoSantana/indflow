@@ -1,7 +1,13 @@
 <!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-05 03:50 -03:00
+Motivo: corrigir erro de sintaxe JavaScript (chave extra) no live refresh da OP
+-->
+
+<!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 05:17
-Motivo: Corrigir recarga/validacoes do modal OP (live refresh em view, validacao de duplicidade de OS via cache local e consistencia dos campos manuais por bobina).
+Último recode: 2026-03-05 05:50
+Motivo: Modal OP: calcular PCS/metros/tempo ao vivo via /machine/status quando backend ainda nao popula
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -894,29 +900,91 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return y + "-" + m + "-" + day;
   }
 
-  function opStatusUpper(op){
-    return String(op && (op.status ?? op.op_status ?? "") || "").trim().toUpperCase();
-  }
 
-  function opIsAtiva(op){
-    const st = opStatusUpper(op);
-    if(st) return st === "ATIVA";
-    return !!(op && op.ativa);
-  }
 
-  function opDiaRef(op){
-    const dr = String(op && (op.__dia_ref ?? op.dia_ref ?? op.data_ref ?? "") || "").trim();
-    if(dr) return dr;
-    const sa = String(op && op.started_at || "").trim();
-    if(sa && sa.length >= 10) return sa.slice(0, 10);
-    return todayIsoLocal();
+  function opDiaISO(op){
+    // Usa __dia_ref quando existir (backend)
+    const dr = safeText(op && (op.__dia_ref || op.data_ref || op.data));
+    if(dr) return normalizeDateInput(dr);
+
+    // Fallback: tenta extrair do started_at
+    const st = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const d = normalizeDateInput(st);
+    return d || "";
   }
 
   function opIsHoje(op){
-    return opDiaRef(op) === todayIsoLocal();
+    const d = opDiaISO(op);
+    return (d && d === todayIsoLocal());
   }
 
+  function espFromStatus(status){
+    const v = Number(status && (
+      status.esp_absoluto ?? status._bd_esp_last ?? status._last_esp_abs_seen ?? status._ph_esp_last_seen ?? status._last_esp_abs
+    ));
+    return Number.isFinite(v) ? v : null;
+  }
 
+  function enrichOpWithLive(op){
+    try{
+      if(!op) return op;
+
+      const statusTxt = safeText(op.status).toUpperCase();
+      const ativa = statusTxt.includes("ATIV");
+      if(!ativa) return op;
+
+      if(!opIsHoje(op)) return op;
+
+      const base = Number(op.baseline_pcs);
+      if(!Number.isFinite(base)) return op;
+
+      const st = lastMachineStatus;
+      if(!st) return op;
+
+      const esp = espFromStatus(st);
+      if(esp === null) return op;
+
+      const delta = Math.max(0, Math.floor(esp - base));
+      const conv = num0(op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? st.conv_m_por_pcs ?? st.conv_m_per_pcs ?? 0);
+
+      // Clona leve (evita mutar cache original)
+      const op2 = Object.assign({}, op);
+      op2.esp_atual = esp;
+      op2.op_pcs = delta;
+      op2.op_metros = round2(delta * conv);
+
+      const itens = Array.isArray(op2.bobinas_itens) ? op2.bobinas_itens.slice() : [];
+      if(itens.length > 0){
+        const now = nowInTzDate(IND_TZ);
+        const nowMs = now.getTime();
+
+        // Atualiza apenas a primeira bobina "aberta" (a regra do backend hoje é 1 bobina ativa por OP)
+        const it0 = Object.assign({}, itens[0]);
+        it0.pcs_total = delta;
+        it0.metro_consumido = round2(delta * conv);
+
+        // Tempo: diferenca entre started_at e agora
+        const startedRaw = safeText(it0.started_at || op2.started_at || "");
+        try{
+          const ds = new Date(startedRaw);
+          if(!isNaN(ds.getTime())){
+            const diffMin = Math.max(0, Math.floor((nowMs - ds.getTime()) / 60000));
+            it0.tempo_consumo_min = diffMin;
+          }
+        }catch(e){}
+
+        // Enquanto ativa, nao fixa hora final
+        it0.ended_at = "";
+
+        itens[0] = it0;
+        op2.bobinas_itens = itens;
+      }
+
+      return op2;
+    }catch(e){
+      return op;
+    }
+  }
 
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
@@ -1637,10 +1705,6 @@ const modalSave = document.getElementById("op-modal-save");
 
         // aceitar formatos: {ok:true, op:{...}} ou direto {...}
         const op = (data.op || data.data || data) || null;
-        if(op){
-          if(!op.__dia_ref) op.__dia_ref = opDiaRef(op);
-          if(op.ativa === undefined) op.ativa = opIsAtiva(op);
-        }
         return op;
       }catch(e){
         lastErr = e;
@@ -1664,14 +1728,14 @@ const modalSave = document.getElementById("op-modal-save");
         alert("Nao foi possivel carregar a OP.");
         return;
       }
-      openModal(op, "view");
+      openModal(op, "edit");
     }catch(err){
       alert("Falha ao carregar OP: " + (err.message || err));
     }
   }
 
   function openModal(op, mode, opts){
-    currentOp = op || null;
+    currentOp = enrichOpWithLive(op || null);
     currentOpMode = (mode === "edit") ? "edit" : "view";
 
     // no modo edicao, liberar campos principais (exceto maquina/status)
@@ -2362,7 +2426,7 @@ if(modalBackdrop){
     if(!opId) return;
 
     // so atualiza ao vivo enquanto estiver ativa e for hoje
-    if(!opIsAtiva(currentOp)) return;
+    if(!currentOp.ativa) return;
     if(!opIsHoje(currentOp)) return;
 
     opModalTimer = setInterval(async ()=>{
@@ -2377,7 +2441,7 @@ if(modalBackdrop){
         const fresh = await fetchOpGet(opId);
         if(fresh){
           // re-render em view mantendo o timer
-          openModal(fresh, "view", { skipLiveStart: true });
+          openModal(enrichOpWithLive(fresh), "view", { skipLiveStart: true });
         }
       }catch(e){
         // ignora falha pontual
@@ -2817,6 +2881,8 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+      
+      lastMachineStatus = status;
       const runVal = (status && (status.run === 1 || status.run === true)) ? 1 : ((status && (status.run === 0 || status.run === false)) ? 0 : null);
       if(runVal !== null){
         appendTrailState(runVal === 1 ? "RUN" : "STOP", Date.now());

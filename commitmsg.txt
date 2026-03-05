@@ -1,5 +1,5 @@
-﻿fix(front-op): OP ativa nao atualizava modal (refresh travado)
+﻿fix(op-get): incluir baseline_pcs e calcular op_pcs/op_metros ao vivo quando ATIVA
 
-- fetchOpGet hidrata __dia_ref e ativa a partir de status
-- startOpModalLiveRefresh usa status ATIVA e dia via started_at/__dia_ref (remove chamada isHoje inexistente)
-- apos ativar/encerrar reabre modal em view para refresh funcionar
+- /producao/op/get passa a devolver baseline_pcs
+- quando status=ATIVA: calcula op_pcs = esp_atual - baseline_pcs e op_metros = op_pcs * conv_m_por_pcs
+- inclui esp_atual no payload para conferência
