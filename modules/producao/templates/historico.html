@@ -1,9 +1,4 @@
 <!--
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 05:00:12 -0300
-Motivo: Corrigir regras de origem para ABERTURA OP, COMPRIMENTO da bobina e HORA INICIAL; usar bobinas[] como fallback de comprimento e tempo live baseado na ativação.
--->
-<!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Ultimo recode: 2026-03-05 07:17 -03:00
 Motivo: corrigir live-refresh da OP ATIVA (dia ref) e preencher campos ao vivo via esp_atual/baseline_pcs
@@ -833,6 +828,36 @@ Ultimo recode: 2026-03-05 07:17 -03:00
 (function(){
   "use strict";
 
+  // Helpers: datas da OP
+  // ABERTURA_OP: nasce ao criar (nao deve ser sobrescrita na ativacao)
+  // ATIVACAO_OP: nasce ao ativar
+  function getOpAberturaIso(op){
+    if(!op) return "";
+    return (
+      op.abertura_op ||
+      op.abertura_at ||
+      op.created_at ||
+      op.createdAt ||
+      op.started_at ||
+      ""
+    );
+  }
+
+  function getOpAtivacaoIso(op){
+    if(!op) return "";
+    return (
+      op.ativada_at ||
+      op.ativacao_at ||
+      op.activated_at ||
+      op.started_at ||
+      ""
+    );
+  }
+
+  // Exporta para debug (evita erro de escopo em handlers)
+  window.getOpAberturaIso = getOpAberturaIso;
+  window.getOpAtivacaoIso = getOpAtivacaoIso;
+
   const IND_TZ = "America/Bahia";
 
   function nowPartsInTz(tz, utcMs){
@@ -1326,41 +1351,6 @@ function safeText(v){
     if(/^\d{4}-\d{2}-\d{2}T/.test(s)){
       return s.replace("T", " ").slice(0, 19);
     }
-
-  // Regras de origem dos timestamps/valores (OP/Bobina)
-  // - ABERTURA OP: nasce na criacao (nao deve ser sobrescrita na ativacao)
-  // - HORA INICIAL (bobina): nasce na ativacao
-  // - COMPRIMENTO (bobina): nasce na criacao (ex.: bobinas[0])
-  function getOpAberturaIso(op){
-    if(!op) return "";
-    return (
-      op.abertura_op ||
-      op.abertura_at ||
-      op.created_at ||
-      op.createdAt ||
-      op.started_at || // fallback
-      ""
-    );
-  }
-
-  function getOpAtivacaoIso(op){
-    if(!op) return "";
-    // se o backend expor um campo explicito, usamos ele
-    return (
-      op.ativada_at ||
-      op.ativacao_at ||
-      op.activated_at ||
-      op.activatedAt ||
-      op.hs_inicial ||
-      ""
-    );
-  }
-
-  function getOpBobinasArray(op){
-    if(!op) return [];
-    const arr = op.bobinas_m || op.bobinasM || op.bobinas || [];
-    return Array.isArray(arr) ? arr : [];
-  }
     return s;
   }
 
@@ -1566,11 +1556,7 @@ const modalSave = document.getElementById("op-modal-save");
   }
 
   function createBobinaCard(item, idx, convMporPcs, opts){
-    let comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
-    // Se o backend ainda nao preencheu comprimento_m no item, usar o array bobinas[] da OP
-    if((comprimentoM <= 0) && opts && Array.isArray(opts.opBobinas) && (opts.opBobinas.length > idx)){
-      comprimentoM = num0(opts.opBobinas[idx]);
-    }
+    const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
     const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
     const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
 
@@ -1641,13 +1627,7 @@ const modalSave = document.getElementById("op-modal-save");
     let derivedMetroConsumido = metroConsumido;
 
     // Read-only context
-        let startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
-    // Regra: HORA INICIAL da bobina nasce na ATIVACAO. Se nao vier no item, tentar usar a ativacao da OP.
-    if(opts && opts.opAtivacaoIso){
-      const s0 = safeText(startedRaw).trim();
-      const ab0 = safeText(opts.opAberturaIso).trim();
-      if(!s0 || (ab0 && s0 === ab0)) startedRaw = opts.opAtivacaoIso;
-    }
+    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
     let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
     let endedStr = fmtIsoDateTimeLocal(endedRaw);
@@ -1849,8 +1829,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     const opStatus = safeText(op && op.status).toUpperCase();
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
     const diaRefBruta = safeText(op && (op.__dia_ref || op.data_ref || op.data));
-        const startedIso = safeText(getOpAberturaIso(op));
-    const ativacaoIsoBase = safeText(getOpAtivacaoIso(op));
+    const startedIso = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
     const diaRefDerivada = (startedIso && startedIso.length >= 10) ? startedIso.slice(0,10) : "";
     const diaRef = diaRefBruta || diaRefDerivada;
     const isHoje = (diaRef && diaRef === todayIsoLocal());
@@ -1879,9 +1858,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     const isLiveHoje = (!opEncerrada) && isHoje;
     const forceZeroLive = isLiveHoje && !temProducaoReal;
 
-        const opAberturaIso = getOpAberturaIso(op);
-    const opAtivacaoIso = getOpAtivacaoIso(op);
-    const opStartedStr = fmtIsoDateTimeLocal(opAberturaIso);
+    const opStartedStr = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
     let opEndedStr = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
     if(opEndedStr && opEndedStr !== "-" && opEndedStr === opStartedStr) opEndedStr = "";
     if(forceZeroLive) opEndedStr = "";
@@ -1898,9 +1875,8 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     const livePcs = (isLiveHoje && espAtual > 0 && baselinePcs > 0) ? Math.max(0, (espAtual - baselinePcs)) : 0;
     const liveMetros = (livePcs > 0) ? (livePcs * convMporPcs) : 0;
     let liveTempoMin = 0;
-        const ativacaoIsoTempo = ativacaoIsoBase || startedIso;
-    if(isLiveHoje && ativacaoIsoTempo){
-      const t0 = new Date(ativacaoIsoTempo).getTime();
+    if(isLiveHoje && startedIso){
+      const t0 = new Date(startedIso).getTime();
       if(!isNaN(t0)){
         liveTempoMin = Math.max(0, Math.floor((Date.now() - t0) / 60000));
       }
@@ -1913,7 +1889,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin, opBobinas: getOpBobinasArray(op), opAberturaIso: safeText(getOpAberturaIso(op)), opAtivacaoIso: safeText(getOpAtivacaoIso(op))});
+        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
