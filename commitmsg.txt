@@ -1,5 +1,4 @@
-﻿fix(op): nao sobrescrever abertura ao ativar; gravar hora_inicial
+﻿fix(front-historico): define getOpAberturaIso/getOpAtivacaoIso no escopo global
 
-- started_at passa a representar ABERTURA_OP (criacao) e nao muda na ativacao
-- adiciona coluna hora_inicial em ordens_producao (gravada ao ativar)
-- /producao/op/get passa a retornar hora_inicial para o frontend
+- Evita erro 'getOpAberturaIso is not defined' ao carregar OP no modal
+- Exporta helpers para window para uso seguro em handlers/async
