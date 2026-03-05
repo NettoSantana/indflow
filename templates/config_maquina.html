@@ -1,3 +1,7 @@
+C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
+LAST_RECODE: 2026-03-04 22:05 (America/Bahia)
+MOTIVO: Voltar fluxo simples no card OP: remover fila em chips e restaurar botão Abrir para abrir o modal de OP.
+
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
 LAST_RECODE: 2026-03-04 21:25 (America/Bahia)
@@ -410,9 +414,11 @@ MOTIVO: Remover botao Abrir apenas do card OP; manter Abrir dos demais cards; ga
         <div class="machine-card">
           <div class="machine-card-title">OP</div>
           <p class="machine-card-desc">Abrir, editar ou encerrar Ordem de Produção da máquina.</p>
-          <div class="op-card-fila-wrap">
-            <div class="op-card-fila-label">Fila de OP (slots 1 a 5)</div>
-            <div id="op-fila-opcard" class="op-card-fila-chips"></div>
+          <div class="machine-card-actions">
+            <button id="btn-op-manage" class="btn-primary">Abrir</button>
+          </div>
+
+<div id="op-fila-opcard" class="op-card-fila-chips"></div>
             <div class="op-card-fila-help">Clique em um slot para abrir uma nova OP naquele slot.</div>
           </div></div>
 
@@ -819,7 +825,10 @@ async function _postJson(url,p){
   return j;
 }
 
-function initOpUI(){  const box = document.getElementById("op-ativo-box");
+function initOpUI(){  const btnManage = document.getElementById("btn-op-manage");
+  if(btnManage) btnManage.addEventListener("click", openOpModal);
+
+  const box = document.getElementById("op-ativo-box");
   if(box) box.addEventListener("click", openOpModal);
 
 
@@ -856,8 +865,7 @@ function initOpUI(){  const box = document.getElementById("op-ativo-box");
       await _postJson("/producao/op/encerrar", {machine_id: machine_id});
       closeOpModal();
       await carregarOpStatus();
-      await carregarOpFila();
-    }catch(err){
+}catch(err){
       alert(String(err && err.message ? err.message : err));
     }
   });
@@ -898,19 +906,15 @@ function initOpUI(){  const box = document.getElementById("op-ativo-box");
 
       closeOpModal();
       await carregarOpStatus();
-      await carregarOpFila();
-    }catch(err){
+}catch(err){
       alert(String(err && err.message ? err.message : err));
     }
   });
+
 }
 
 initOpUI();
 carregarOpStatus();
-carregarOpFila();
-
-// Atualiza a fila periodicamente (somente leitura)
-setInterval(() => { carregarOpFila(); }, 15000);
 </script>
 
 </body>
