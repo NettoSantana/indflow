@@ -1,5 +1,12 @@
-﻿fix(op): bloquear OS duplicada por maquina
+﻿feat(op): lógica de ativação de OP e recarga segura do histórico
 
-- Valida machine_id + OS em /producao/op/iniciar
-- Valida troca de OS em /producao/op/editar (ativo e historico)
-- Tenta criar UNIQUE INDEX (machine_id, os) no SQLite (fallback para validacao no endpoint)
+- Ajuste no historico.html para suportar fluxo Ativar OP → Encerrar OP
+- Preparação da tela para cálculo de PCS da OP baseado no contador do ESP
+- Estrutura para cálculo de metro linear consumido (pcs × conversão)
+- Estrutura para cálculo de tempo de consumo a partir da hora inicial
+- Campos manuais de classificação: costuras, refugo e retrabalho
+- Removida chamada incorreta de loadHistorico()
+- Mantida recarga segura do histórico após salvar OP
+
+Arquivo alterado:
+templates/historico.html

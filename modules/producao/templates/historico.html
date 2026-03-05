@@ -1,7 +1,7 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Último recode: 2026-03-05 02:10:26 -03:00
-Motivo: Entrega do arquivo completo do historico.html (mantendo recarga via fetchHistorico e sem referência a loadHistorico).
+Último recode: 2026-03-05 05:17
+Motivo: Corrigir recarga/validacoes do modal OP (live refresh em view, validacao de duplicidade de OS via cache local e consistencia dos campos manuais por bobina).
 -->
 <!--
 PATH: modules/producao/templates/historico.html
@@ -1138,6 +1138,37 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
   }
 
+  function normalizeOsValue(v){
+    const s = safeText(v).trim();
+    return s;
+  }
+
+  function findDuplicateOsInCache(osValue, currentOpId){
+    const osNorm = normalizeOsValue(osValue);
+    if(!osNorm) return null;
+
+    const curId = Number(currentOpId || 0) || 0;
+
+    if(!Array.isArray(cache)) return null;
+
+    for(const r of cache){
+      const ops = r && r.ops;
+      if(!Array.isArray(ops)) continue;
+
+      for(const op of ops){
+        const opId = Number((op && (op.op_id ?? op.id ?? op.opId ?? op.opid)) || 0) || 0;
+        if(curId && opId && opId === curId) continue;
+
+        const opOs = normalizeOsValue(op && (op.os || op.os_num || op.ordem_servico));
+        if(opOs && opOs === osNorm){
+          return { op_id: opId, os: opOs, dia: getRowDateISO(r) };
+        }
+      }
+    }
+
+    return null;
+  }
+
   function fmtInt(n){
     return fmtNum(n);
   }
@@ -1229,6 +1260,9 @@ const modalSave = document.getElementById("op-modal-save");
 
   let dayModalTimer = null;
   let dayModalCurrentDay = null;
+
+  let opModalTimer = null;
+  let opModalRefreshing = false;
 
 
   const opv_machine = document.getElementById("opv_machine");
@@ -1509,10 +1543,21 @@ const modalSave = document.getElementById("op-modal-save");
       endedStr = "";
     }
 
-    grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
-    grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
-    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3"));
-    grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
+    const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
+    const fPcs = fieldRO("Total pcs (bobina)", derivedPcs, "col-3");
+    const fMetro = fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3");
+    const fTempo = fieldRO("Tempo de consumo (min)", tempoMin, "col-3");
+
+    // marca campos para leitura/validacao
+    try{
+      const pcsInp = fPcs && fPcs.querySelector("input");
+      if(pcsInp) pcsInp.setAttribute("data-field", "pcs_total");
+    }catch(e){}
+
+    grid.appendChild(fLen);
+    grid.appendChild(fPcs);
+    grid.appendChild(fMetro);
+    grid.appendChild(fTempo);
 
     grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
     grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
@@ -1598,7 +1643,7 @@ const modalSave = document.getElementById("op-modal-save");
     }
   }
 
-  function openModal(op, mode){
+  function openModal(op, mode, opts){
     currentOp = op || null;
     currentOpMode = (mode === "edit") ? "edit" : "view";
 
@@ -1723,10 +1768,25 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
       modalBackdrop.style.display = "flex";
       modalBackdrop.setAttribute("aria-hidden", "false");
     }
+    // live refresh enquanto estiver em view e OP ativa
+    try{
+      const _opts = opts || {};
+      if(!_opts.skipLiveStart){
+        startOpModalLiveRefresh();
+      }
+    }catch(e){}
+
   }
 
   function closeModal(){
     currentOp = null;
+
+    if(opModalTimer){
+      clearInterval(opModalTimer);
+      opModalTimer = null;
+    }
+    opModalRefreshing = false;
+
     if(modalBackdrop){
       modalBackdrop.style.display = "none";
       modalBackdrop.setAttribute("aria-hidden", "true");
@@ -2254,6 +2314,54 @@ if(modalBackdrop){
     throw lastErr || new Error("Falha ao executar ação.");
   }
 
+  function stopOpModalLiveRefresh(){
+    if(opModalTimer){
+      clearInterval(opModalTimer);
+      opModalTimer = null;
+    }
+    opModalRefreshing = false;
+  }
+
+  function startOpModalLiveRefresh(){
+    stopOpModalLiveRefresh();
+
+    if(!modalBackdrop) return;
+    if(modalBackdrop.style.display !== "flex") return;
+
+    if(!currentOp) return;
+    if(currentOpMode !== "view") return; // evita sobrescrever campos durante edicao
+
+    const opId = Number(currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId ?? currentOp.opid) || 0) || 0;
+    if(!opId) return;
+
+    // so atualiza ao vivo enquanto estiver ativa e for hoje
+    if(!currentOp.ativa) return;
+    if(!isHoje(currentOp)) return;
+
+    opModalTimer = setInterval(async ()=>{
+      if(opModalRefreshing) return;
+      if(!modalBackdrop || modalBackdrop.style.display !== "flex") return;
+
+      const stillId = Number(currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId ?? currentOp.opid) || 0) || 0;
+      if(stillId !== opId) return;
+
+      opModalRefreshing = true;
+      try{
+        const fresh = await fetchOpGet(opId);
+        if(fresh){
+          // re-render em view mantendo o timer
+          openModal(fresh, "view", { skipLiveStart: true });
+        }
+      }catch(e){
+        // ignora falha pontual
+      }finally{
+        opModalRefreshing = false;
+      }
+    }, 5000);
+  }
+
+
+
   if(modalToggle){
     modalToggle.addEventListener("click", async function(){
       const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
@@ -2295,6 +2403,16 @@ if(modalSave){
         return;
       }
 
+
+      // valida duplicidade de OS (no escopo cliente + maquina) usando cache local do historico
+      const osInput = document.getElementById("op-os");
+      const osValue = osInput ? osInput.value : "";
+      const dup = findDuplicateOsInCache(osValue, opId);
+      if(dup){
+        alert("Ja existe uma OP com esse numero (OS): " + safeText(osValue));
+        return;
+      }
+
       const bobinasPayload = [];
       if(bobinasWrap){
         const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
@@ -2333,6 +2451,28 @@ if(modalSave){
 
         // bobinas em metros (add/remove no modo edicao)
         payload.bobinas_m = collectBobinasMFromUI();
+      }
+
+
+      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (bobina)
+      if(bobinasWrap){
+        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
+        for(const card of cards){
+          const idxBob = Number(card.getAttribute("data-bobina-idx") || 0);
+          const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
+          const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
+
+          const cost = Number((card.querySelector("input[data-field='qtd_costuras']") || {}).value || 0) || 0;
+          const refugo = Number((card.querySelector("input[data-field='qtd_refugo']") || {}).value || 0) || 0;
+          const retrabalho = Number((card.querySelector("input[data-field='qtd_retrabalho']") || {}).value || 0) || 0;
+
+          const soma = cost + refugo + retrabalho;
+
+          if(pcsTotal > 0 && soma > pcsTotal){
+            alert("Bobina " + (idxBob + 1) + ": costuras + refugo + retrabalho nao pode ser maior que Total pcs.");
+            return;
+          }
+        }
       }
 
       modalSave.disabled = true;
