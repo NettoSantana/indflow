@@ -2320,7 +2320,7 @@ def op_iniciar():
 #   "observacoes": ""
 # }
 # =====================================================
-@produc@producao_bp.route("/op/editar", methods=["POST"])
+@producao_bp.route("/op/editar", methods=["POST"])
 @login_required
 def op_editar():
     data = request.get_json(silent=True) or {}

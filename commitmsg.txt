@@ -1,5 +1,5 @@
-﻿ui(historico): indentar OPs e escurecer separadores + padronizar acoes
+﻿feat(op): editar por op_id e excluir OP no historico
 
-- Linhas de OP com indentacao para indicar pertencimento ao dia
-- Separador das OPs mais escuro que o separador do dia
-- Acoes Editar/Excluir alinhadas a direita e com estilo consistente
+- /producao/op/get?op_id=... para carregar dados no modal (OS/Lote/Operador/Bobinas)
+- /producao/op/excluir para apagar OP e dependencias (bobinas/eventos)
+- /producao/op/editar passa a aceitar op_id para editar OP do historico (sem depender de OP ativa)
