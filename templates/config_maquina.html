@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-LAST_RECODE: 2026-03-04 20:40 (America/Bahia)
-MOTIVO: Clique no slot abre OP naquele slot (posicao) e botao Abrir usa o primeiro slot vazio.
+LAST_RECODE: 2026-03-04 21:10 (America/Bahia)
+MOTIVO: Mover visualizacao dos 5 slots de OP para dentro do card OP (chips compactos em 2 linhas), removendo a barra do topo, sem alterar o tamanho do card.
 -->
 
 <!DOCTYPE html>
@@ -209,7 +209,7 @@ MOTIVO: Clique no slot abre OP naquele slot (posicao) e botao Abrir usa o primei
       line-height:1.3;
     }
 
-    /* ===== FILA DE OP NO TOPO (5 SLOTS FIXOS) ===== */
+    /* ===== FILA DE OP (SLOTS FIXOS) ===== */
     .op-fila-top{
       display:flex;
       align-items:center;
@@ -294,7 +294,53 @@ MOTIVO: Clique no slot abre OP naquele slot (posicao) e botao Abrir usa o primei
       white-space:nowrap;
     }
 
-    .op-fila-top-updated{
+    
+
+    /* ===== FILA DE OP DENTRO DO CARD OP (5 SLOTS) ===== */
+    .op-card-fila-wrap{
+      margin-top:10px;
+      margin-bottom:12px;
+    }
+    .op-card-fila-label{
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      text-transform:uppercase;
+      letter-spacing:0.03em;
+      margin-bottom:8px;
+    }
+    .op-card-fila-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .op-card-fila-help{
+      font-size:12px;
+      font-weight:700;
+      color:#64748b;
+      margin-top:8px;
+      line-height:1.25;
+    }
+
+    /* Chips compactos para caber no card sem aumentar tamanho */
+    .op-chip{
+      gap:6px;
+      padding:6px 8px;
+      border-radius:12px;
+    }
+    .op-chip-op{
+      max-width:80px;
+      font-size:11px;
+    }
+    .op-chip-pos{
+      font-size:11px;
+      min-width:10px;
+    }
+    .op-chip-status{
+      padding:3px 7px;
+      font-size:9px;
+    }
+.op-fila-top-updated{
       font-size:12px;
       font-weight:800;
       color:#64748b;
@@ -326,11 +372,6 @@ MOTIVO: Clique no slot abre OP naquele slot (posicao) e botao Abrir usa o primei
 
       <div class="top-row">
         <h1 class="section-title" id="titulo-maquina">MAQUINA</h1>
-
-
-
-        <div id="op-fila-top" class="op-fila-top" style="display:none;">
-          <div class="op-fila-top-label">OPs</div>
           <div id="op-fila-top-slots" class="op-fila-top-slots"></div>
           <div class="op-fila-top-actions">
             <button id="btn-op-fila-refresh" type="button" class="btn btn-secondary">Atualizar</button>
@@ -351,6 +392,11 @@ MOTIVO: Clique no slot abre OP naquele slot (posicao) e botao Abrir usa o primei
         <div class="machine-card">
           <div class="machine-card-title">OP</div>
           <p class="machine-card-desc">Abrir, editar ou encerrar Ordem de Produção da máquina.</p>
+          <div class="op-card-fila-wrap">
+            <div class="op-card-fila-label">Fila de OP (slots 1 a 5)</div>
+            <div id="op-fila-opcard" class="op-card-fila-chips"></div>
+            <div class="op-card-fila-help">Clique em um slot vazio para abrir uma nova OP naquele slot.</div>
+          </div>
           <div class="machine-card-actions">
             <button id="btn-op-manage" type="button" class="btn btn-primary">Abrir</button>
           </div>
@@ -667,9 +713,8 @@ function abrirOpSlot(pos){
 
 
 function _renderOpFilaTop(rows){
-  const wrap = document.getElementById("op-fila-top");
-  const slots = document.getElementById("op-fila-top-slots");
-  if(!wrap || !slots) return;
+  const slots = document.getElementById("op-fila-opcard");
+  if(!slots) return;
 
   opFilaByPos = {};
   (rows || []).forEach((r) => {
@@ -697,24 +742,15 @@ function _renderOpFilaTop(rows){
   }
 
   slots.innerHTML = out.join("");
-  wrap.style.display = "flex";
 }
 
 async function carregarOpFila(){
-  const btn = document.getElementById("btn-op-fila-refresh");
-  if(btn) btn.disabled = true;
-
   try{
     const payload = await _getJson(`/machine/op/fila?machine_id=${encodeURIComponent(machine_id)}`);
     const rows = _normalizeOpFilaPayload(payload);
     _renderOpFilaTop(rows);
-
-    const up = document.getElementById("op-fila-top-updated");
-    if(up) up.textContent = `Atualizado: ${_formatNowHHMM()}`;
   }catch(err){
     console.error("Falha ao carregar fila de OP", err);
-  }finally{
-    if(btn) btn.disabled = false;
   }
 }
 
@@ -786,9 +822,6 @@ function initOpUI(){
     openOpModalNew(p);
   });
   if(box) box.addEventListener("click", openOpModal);
-
-  const btnFilaRefresh = document.getElementById("btn-op-fila-refresh");
-  if(btnFilaRefresh) btnFilaRefresh.addEventListener("click", () => { carregarOpFila(); });
 
 
   const bd = document.getElementById("opModalBackdrop");

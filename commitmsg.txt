@@ -1,5 +1,5 @@
-﻿feat(front): abrir OP por slot e Abrir direcionado ao primeiro slot vazio
+﻿feat(op): permitir OP por slot (1 ativa, 2-5 fila) via /producao/op/iniciar
 
-- Clique no slot 1..5 abre modal Nova OP com posicao preenchida
-- Botao Abrir usa automaticamente o primeiro slot vazio
-- Envia posicao no payload do /producao/op/iniciar
+- Payload aceita posicao (1..5); se nao vier, usa primeiro slot vazio
+- Slot 1 cria OP ativa (se nao existir ativa); slots 2..5 criam OP em fila
+- DB: adiciona coluna posicao (ALTER TABLE) e grava posicao na ordem
