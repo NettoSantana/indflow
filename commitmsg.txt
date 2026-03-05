@@ -1,6 +1,7 @@
-﻿fix(op): calcular MAT BOM automaticamente e validar fechamento
+﻿recode(producao/op): regras oficiais de OP + eventos de bobina + MAT_BOM
 
-- Regra: MAT_BOM = TOTAL_PCS - COSTURAS - REFUGO - RETRABALHO
-- Bloqueia salvamento se defeitos > TOTAL_PCS (legacy e por bobinas)
-- Bloqueia valores negativos nos campos manuais
-- Atualiza header LAST_RECODE/MOTIVO no routes.py
+- ATIVAR OP: status=ATIVA, baseline_pcs=esp_atual, started_at=agora e reinicia eventos
+- Durante OP: PCS = esp_atual - baseline_pcs; tempo por started_at/ended_at; comprimento_m apenas registro
+- ENCERRAR OP: ended_at, op_pcs/op_metros e fecha ultimo evento com end_abs_pcs=esp_atual
+- Fechamento manual: COSTURAS/REFUGO/RETRABALHO com validacao e MAT_BOM automatico
+- Compatibilidade: aceita chaves antigas e corrige MAT_BOM no formato legacy
