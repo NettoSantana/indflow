@@ -1,6 +1,5 @@
-﻿fix(front-historico): modal OP ativa em tempo real apos ativar
+﻿fix(front-op): OP ativa nao atualizava modal (refresh travado)
 
-- Live refresh passa a depender de status ATIVA (nao de currentOp.ativa)
-- Garante __dia_ref ao carregar via /op/get para modo "hoje" funcionar
-- Corrige validacao COSTURAS/REFUGO/RETRABALHO por bobina com campos reais do form
-- Ajuste de leitura do campo OS no salvar
+- fetchOpGet hidrata __dia_ref e ativa a partir de status
+- startOpModalLiveRefresh usa status ATIVA e dia via started_at/__dia_ref (remove chamada isHoje inexistente)
+- apos ativar/encerrar reabre modal em view para refresh funcionar

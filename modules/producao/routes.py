@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 19:00 America/Bahia
-# MOTIVO: Ajustar regras de OP (ativar/encerrar), eventos de bobina e validacao MAT_BOM = TOTAL_PCS - COSTURAS - REFUGO - RETRABALHO
+# LAST_RECODE: 2026-03-05 19:35 America/Bahia
+# MOTIVO: OP GET deve devolver baseline_pcs e calcular PCS/metros ao vivo quando status=ATIVA
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2546,7 +2546,7 @@ def op_get():
         cur.execute(
             """
             SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes,
-                   started_at, ended_at, status, posicao, op_metros, op_pcs, op_conv_m_por_pcs,
+                   started_at, ended_at, baseline_pcs, status, posicao, op_metros, op_pcs, op_conv_m_por_pcs,
                    unidade_1, unidade_2
             FROM ordens_producao
             WHERE id = ?
@@ -2561,10 +2561,53 @@ def op_get():
     bobina_csv = r[5] or ""
     bobinas_m = _parse_bobinas_csv(bobina_csv)
 
+    # Normaliza campos principais
+    machine_id = _sanitize_mid(_as_str(r[1]))
+    status = _as_str(r[11])
+    baseline_pcs = _int(r[10])
+
+    op_conv = 0.0
+    try:
+        op_conv = float(r[15] or 0.0)
+    except Exception:
+        op_conv = 0.0
+
+    # Valores persistidos (usados quando OP nao esta ATIVA)
+    op_metros_db = 0.0
+    try:
+        op_metros_db = float(r[13] or 0.0)
+    except Exception:
+        op_metros_db = 0.0
+
+    op_pcs_db = _int(r[14])
+
+    # Valores ao vivo quando ATIVA
+    esp_atual = None
+    op_pcs_live = op_pcs_db
+    op_metros_live = op_metros_db
+
+    if status == "ATIVA":
+        try:
+            with _get_conn() as conn3:
+                esp_atual = int(_get_current_esp_abs(conn3, machine_id) or 0)
+        except Exception:
+            esp_atual = None
+
+        try:
+            esp_val = int(esp_atual or 0)
+        except Exception:
+            esp_val = 0
+
+        op_pcs_live = max(0, int(esp_val) - int(baseline_pcs or 0))
+        try:
+            op_metros_live = round(float(op_pcs_live) * float(op_conv or 0.0), 3)
+        except Exception:
+            op_metros_live = 0.0
+
     return jsonify(
         {
             "op_id": int(r[0] or 0),
-            "machine_id": _sanitize_mid(_as_str(r[1])),
+            "machine_id": machine_id,
             "os": _as_str(r[2]),
             "lote": _as_str(r[3]),
             "operador": _as_str(r[4]),
@@ -2575,13 +2618,15 @@ def op_get():
             "observacoes": _as_str(r[7]),
             "started_at": _as_str(r[8]),
             "ended_at": _as_str(r[9]),
-            "status": _as_str(r[10]),
-            "posicao": int(r[11] or 0),
-            "op_metros": int(r[12] or 0),
-            "op_pcs": int(r[13] or 0),
-            "op_conv_m_por_pcs": float(r[14] or 0.0),
-            "unidade_1": _as_str(r[15]) or "m",
-            "unidade_2": _as_str(r[16]) or "pcs",
+            "baseline_pcs": int(baseline_pcs or 0),
+            "status": status,
+            "posicao": int(r[12] or 0),
+            "op_metros": op_metros_live,
+            "op_pcs": int(op_pcs_live or 0),
+            "op_conv_m_por_pcs": op_conv,
+            "esp_atual": esp_atual,
+            "unidade_1": _as_str(r[16]) or "m",
+            "unidade_2": _as_str(r[17]) or "pcs",
         }
     )
 
