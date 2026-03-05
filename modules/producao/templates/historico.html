@@ -1,14 +1,19 @@
 <!--
-Path: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Last recode: 2026-03-05 19:35:00 -03:00
-Reason: Troca de Bobina no modal com trava ate primeiro machine/update; evitar zerar metragem/pcs em bobinas fechadas; incluir eventos no detect de producao real
--->
-<!--
-ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-ULTIMO RECODE: 2026-03-05 19:00:00 -0300
-MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/comprimento) quando bobinas_detail vier vazio, e manter fallback seguro.
+Path: /mnt/data/historico.html
+Last recode: 2026-03-05 15:30:51 -03:00
+Reason: Corrigir logica de bobinas no modal - somente bobina ativa acumula pcs/metragem/tempo em modo live; demais usam eventos fechados.
 -->
 
+<!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Último recode: 2026-03-05 17:26:27+0000
+Motivo: Modal de edição deve renderizar todas as bobinas cadastradas (bobinas/bobinas_m), mesmo quando bobinas_eventos ainda não contém todas as sequências.
+-->
+<!--
+Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultima recodificacao: 2026-03-05 14:02:19 -0300
+Motivo: Renderizar todas as bobinas no modal (priorizar bobinas_eventos, fallback para bobinas_itens e bobinas_m).
+-->
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
@@ -1361,7 +1366,7 @@ function safeText(v){
   const modalClose = document.getElementById("op-modal-close");
   const modalToggle = document.getElementById("op-modal-toggle");
   const modalSwap = document.getElementById("op-modal-swap");
-  const modalSave = document.getElementById("op-modal-save");
+const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
 
@@ -1399,31 +1404,6 @@ function safeText(v){
   let currentOp = null;
   let currentOpMode = "view"; // view | edit
   let currentBobinasM = [];
-  let swapLockActive = false;
-  let swapLockOpId = 0;
-  let swapLockNextSeq = null;
-
-  function resetSwapLock(){
-    swapLockActive = false;
-    swapLockOpId = 0;
-    swapLockNextSeq = null;
-  }
-
-  function opHasStartedSeq(op, seq){
-    if(!op) return false;
-    const arr = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
-    if(!Array.isArray(arr) || !arr.length) return false;
-    for(const ev of arr){
-      if(!ev || typeof ev !== "object") continue;
-      const evSeq = Number(ev.seq ?? ev.idx ?? -1);
-      if(evSeq !== Number(seq)) continue;
-      const sa = String(ev.started_at ?? "").trim();
-      const abs = num0(ev.start_abs_pcs ?? 0);
-      if(sa && sa !== "-" && abs > 0) return true;
-    }
-    return false;
-  }
-
 
 
 
@@ -1587,9 +1567,12 @@ function safeText(v){
     for(let k=0;k<cand.length;k++){
       const arr = cand[k];
       if(Array.isArray(arr) && arr.length){
-        // Se vier array de numeros (ex.: [6000]), normaliza para objetos minimos
+        // Se vier array de numeros (ex.: [6000]), isso NAO e lista de itens/fechamento.
+        // Normalmente e apenas a lista de bobinas (metros). O render detalhado deve usar:
+        // - bobinas_eventos (preferencial), ou
+        // - bobinas_m (lista de metros) como fallback.
         if(typeof arr[0] === "number"){
-          return arr.map((v) => ({ comprimento_m: num0(v) }));
+          return [];
         }
         return arr;
       }
@@ -1757,7 +1740,7 @@ function safeText(v){
 
     // Forcar inicio zerado/vazio no modal para OP ativa do dia (evita valores fantasmas antes do primeiro update)
     // Nao depender de ended_at da bobina, porque o backend pode popular ended_at prematuramente.
-    if(forceZeroLive && bobinaAberta){
+    if(forceZeroLive){
       derivedPcs = 0;
       derivedMetroConsumido = 0;
       tempoMin = 0;
@@ -1765,17 +1748,20 @@ function safeText(v){
     }
 
 
-    // Atualizacao ao vivo: quando a OP esta ATIVA no dia atual e o backend envia esp_atual/baseline_pcs,
-    // calcular pcs/metragem/tempo mesmo que o item ainda esteja zerado.
-    if((!forceZeroLive) && opts && opts.isLiveHoje && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
-      derivedPcs = Math.floor(num0(opts.livePcs));
-      derivedMetroConsumido = num0(opts.liveMetros);
-      if(num0(opts.liveTempoMin) > 0) tempoMin = Math.floor(num0(opts.liveTempoMin));
-      // em modo live, nao mostrar hora final
-      endedStr = "";
+    // Atualizacao ao vivo: SOMENTE para a bobina ATIVA (a que nao tem ended_at).
+    // A metragem/pcs devem ser calculadas a partir do start_abs_pcs dessa bobina,
+    // e nao aplicadas para todas as bobinas do modal.
+    if((!forceZeroLive) && opts && opts.isLiveHoje && opts.isLiveThisBobina){
+      const livePcsThis = Math.floor(num0(opts.livePcsThis));
+      if(livePcsThis > 0 && derivedPcs <= 0){
+        derivedPcs = livePcsThis;
+        derivedMetroConsumido = num0(opts.liveMetrosThis);
+        if(num0(opts.liveTempoMinThis) > 0) tempoMin = Math.floor(num0(opts.liveTempoMinThis));
+        // em modo live, nao mostrar hora final
+        endedStr = "";
+      }
     }
-
-    const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
+const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
     const fPcs = fieldRO("Total pcs (bobina)", derivedPcs, "col-3");
     const fMetro = fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3");
     const fTempo = fieldRO("Tempo de consumo (min)", tempoMin, "col-3");
@@ -1831,14 +1817,27 @@ function safeText(v){
 
   async function fetchOpGet(opId){
     const qs = "?op_id=" + encodeURIComponent(String(opId));
-    const urls = ["/producao/op/get" + qs, "/op/get" + qs];
+    const urls = [
+      "/producao/op/troca-bobina",
+      "/producao/op/fechar-bobina",
+      "/producao/op/fechar",
+      "/producao/op/close",
+      "/machine/op/troca-bobina",
+      "/machine/op/fechar-bobina",
+      "/machine/op/fechar",
+      "/machine/op/close",
+      "/op/troca-bobina",
+      "/op/fechar-bobina",
+      "/op/fechar",
+      "/op/close",
+    ];
     let lastErr = null;
 
     for(const u of urls){
       try{
         const r = await fetch(u, { method: "GET" });
         if(!r.ok){
-          lastErr = new Error("HTTP " + r.status);
+          lastErr = new Error("HTTP " + r.status + " em " + u);
           continue;
         }
         const data = await r.json().catch(() => null);
@@ -1853,51 +1852,6 @@ function safeText(v){
     }
 
     throw lastErr || new Error("Falha ao carregar OP.");
-  }
-
-  async function postOpSwapBobina(opId){
-    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
-    const urls = ["/producao/op/troca-bobina", "/op/troca-bobina"];
-    let lastErr = null;
-
-    for(const u of urls){
-      try{
-        const r = await fetch(u, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-
-        if(!r.ok){
-          lastErr = new Error("HTTP " + r.status);
-          continue;
-        }
-
-        const data = await r.json().catch(() => ({}));
-
-        // Backend pode responder {status:"ok", ...} OU {ok:true, ...} OU {error:"..."}
-        if(data && (data.error || data.err)){
-          lastErr = new Error(data.error || data.err);
-          continue;
-        }
-
-        if(data && (data.ok === false)){
-          lastErr = new Error(data.error || "Falha.");
-          continue;
-        }
-
-        if(data && data.status && String(data.status).toLowerCase() !== "ok"){
-          lastErr = new Error(data.error || ("Falha: " + String(data.status)));
-          continue;
-        }
-
-        return data || {};
-      }catch(e){
-        lastErr = e;
-      }
-    }
-
-    throw lastErr || new Error("Falha ao executar troca de bobina.");
   }
 
   async function openOpEdit(opId){
@@ -1922,18 +1876,6 @@ function safeText(v){
 
   function openModal(op, mode, opts){
     currentOp = enrichOpWithLive(op || null);
-    // Controle de trava de troca: se abriu outra OP, limpa trava.
-    const openedId = Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)) || 0;
-    if(swapLockActive && swapLockOpId && openedId && swapLockOpId !== openedId){
-      resetSwapLock();
-    }
-
-    // Se ja chegou o primeiro update que abriu a proxima bobina, libera a troca novamente.
-    if(swapLockActive && openedId && swapLockOpId === openedId && swapLockNextSeq != null){
-      if(opHasStartedSeq(currentOp, swapLockNextSeq)){
-        resetSwapLock();
-      }
-    }
     currentOpMode = (mode === "edit") ? "edit" : "view";
 
     // no modo edicao, liberar campos principais (exceto maquina/status)
@@ -1995,7 +1937,6 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
     let temProducaoReal = false;
     try {
       const itensCheck = pickOpBobinasItens(op);
-      const evCheck = (op && (Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : [])))) || [];
       let accPcs = 0;
       let accMetro = 0;
       let accMatBom = 0;
@@ -2006,12 +1947,6 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
           accMetro += num0(it && (it.metro_consumido ?? it.metro_linear_consumido ?? 0));
           accMatBom += num0(it && (it.qtd_mat_bom ?? it.mat_bom ?? 0));
           accTempo += num0(it && (it.tempo_consumo_min ?? it.tempo_min ?? 0));
-        });
-      }
-      if(Array.isArray(evCheck)){
-        evCheck.forEach((ev) => {
-          accPcs += num0(ev && (ev.pcs_total ?? ev.total_pcs ?? 0));
-          accMetro += num0(ev && (ev.metro_consumido ?? ev.metro_linear_consumido ?? 0));
         });
       }
       const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
@@ -2034,55 +1969,116 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
     const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
-    const baselinePcs = num0(op && op.baseline_pcs);
     const espAtual = num0(op && op.esp_atual);
-    const livePcs = (isLiveHoje && espAtual > 0 && baselinePcs > 0) ? Math.max(0, (espAtual - baselinePcs)) : 0;
-    const liveMetros = (livePcs > 0) ? (livePcs * convMporPcs) : 0;
-    let liveTempoMin = 0;
-    if(isLiveHoje && startedIso){
-      const t0 = new Date(startedIso).getTime();
-      if(!isNaN(t0)){
-        liveTempoMin = Math.max(0, Math.floor((Date.now() - t0) / 60000));
-      }
-    }
+    const hasEspAtual = (isLiveHoje && espAtual > 0);
 
 
     clearBobinasUI();
 
+    clearBobinasUI();
+
+    // Preferencia de render:
+    // 1) bobinas_eventos (gera 1 card por bobina real: bobina 1, 2, 3...)
+    // 2) bobinas_itens/bobinas_detail (quando backend ja entrega fechamento completo por bobina)
+    // 3) bobinas_m (lista de metros) como fallback para exibir N bobinas sem eventos
+    // 4) legacy: 1 bobina virtual pelo total da OP
+
+    const evArr = (op && (Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : [])))) || [];
     const itens = pickOpBobinasItens(op);
-    if(Array.isArray(itens) && itens.length > 0){
-      if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
-      itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
+
+    function mergeQualidade(dst, src){
+      if(!dst || !src) return dst;
+      const out = Object.assign({}, dst);
+
+      const vCost = (src.qtd_cost_elas ?? src.cost_elas ?? src.qtd_costuras ?? src.costuras);
+      const vRef = (src.refugo ?? src.qtd_refugo);
+      const vSaco = (src.qtd_saco_caixa ?? src.saco_caixa ?? src.qtd_retrabalho ?? src.retrabalho);
+
+      if(vCost !== undefined && vCost !== null) out.qtd_cost_elas = vCost;
+      if(vRef !== undefined && vRef !== null) out.refugo = vRef;
+      if(vSaco !== undefined && vSaco !== null) out.qtd_saco_caixa = vSaco;
+
+      return out;
+    }
+
+    let renderItens = [];
+
+    const listM = normalizeBobinasM(op);
+    const nEv = (evArr && evArr.length) ? evArr.length : 0;
+    const nIt = (Array.isArray(itens) && itens.length) ? itens.length : 0;
+    const nM = (Array.isArray(listM) && listM.length) ? listM.length : 0;
+    const n = Math.max(nEv, nIt, nM);
+
+    if(n > 0){
+      for(let i = 0; i < n; i++){
+        const ev = (evArr && evArr[i]) ? evArr[i] : null;
+        const it = (Array.isArray(itens) && itens[i]) ? itens[i] : null;
+        const mm = (Array.isArray(listM) && listM[i] !== undefined && listM[i] !== null) ? listM[i] : null;
+
+        const startAbs = num0(ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? 0));
+        const endAbs = num0(ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0));
+        const pcsEvt = (endAbs > 0 && startAbs >= 0 && endAbs >= startAbs) ? (endAbs - startAbs) : 0;
+
+        const compFromIt = num0(it && (it.comprimento_m ?? it.comprimentoM ?? it.bobina_m ?? it.bobinaM ?? 0));
+        const compFromEv = num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? ev.bobinaM ?? 0));
+        const compFromM = num0(mm);
+
+        let base = {
+          comprimento_m: (compFromEv > 0 ? compFromEv : (compFromM > 0 ? compFromM : compFromIt)),
+          started_at: safeText(ev && (ev.started_at ?? ev.start_at ?? ev.inicio ?? "")),
+          ended_at: safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? "")),
+          start_abs_pcs: startAbs,
+          end_abs_pcs: endAbs,
+          pcs_total: pcsEvt
+        };
+
+        if(it){
+          base = mergeQualidade(base, it);
+        }
+
+        // Live: somente a bobina ATIVA (evento sem ended_at) deve acumular pcs/metragem/tempo enquanto a OP estiver ATIVA hoje.
+        const evEnded = safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? ""));
+        const isOpenEvt = (!!ev) && (!evEnded) && (num0(endAbs) <= 0);
+        const isLiveThisBobina = (hasEspAtual && (num0(startAbs) > 0) && isOpenEvt);
+
+        let livePcsThis = 0;
+        let liveMetrosThis = 0;
+        let liveTempoMinThis = 0;
+
+        if(isLiveThisBobina){
+          livePcsThis = Math.max(0, Math.floor(num0(espAtual) - num0(startAbs)));
+          if(livePcsThis > 0 && convMporPcs > 0){
+            liveMetrosThis = (livePcsThis * convMporPcs);
+          }
+          const sIso = base.started_at;
+          if(sIso){
+            const t0 = new Date(sIso).getTime();
+            if(!isNaN(t0)){
+              liveTempoMinThis = Math.max(0, Math.floor((Date.now() - t0) / 60000));
+            }
+          }
+        }
+
+        base._isLiveThisBobina = isLiveThisBobina;
+        base._livePcsThis = livePcsThis;
+        base._liveMetrosThis = liveMetrosThis;
+        base._liveTempoMinThis = liveTempoMinThis;
+
+        renderItens.push(base);
+      }
+    }
+
+    if(renderItens.length){
+
+      if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(renderItens);
+      renderItens.forEach((b, i) => {
+        const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, isLiveThisBobina: !!b._isLiveThisBobina, livePcsThis: num0(b._livePcsThis), liveMetrosThis: num0(b._liveMetrosThis), liveTempoMinThis: num0(b._liveTempoMinThis)});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
-      // Se backend trouxe eventos de bobina, usa eles para montar os cards mesmo quando bobinas_itens/bobinas_detail vier vazio
-      const evArr = (op && (Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : [])))) || [];
-      if(evArr && evArr.length){
-        const pseudoItens = evArr.map((ev, i) => {
-          const startAbs = num0(ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? 0));
-          const endAbs = num0(ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0));
-          const pcsEvt = (endAbs > 0 && startAbs >= 0 && endAbs >= startAbs) ? (endAbs - startAbs) : 0;
+      if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
 
-          return {
-            comprimento_m: num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? 0)),
-            started_at: safeText(ev && (ev.started_at ?? ev.start_at ?? ev.inicio ?? "")),
-            ended_at: safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? "")),
-            baseline_pcs: startAbs,
-            esp_last: endAbs,
-            pcs_total: pcsEvt
-          };
-        });
-
-        if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(pseudoItens);
-        pseudoItens.forEach((b, i) => {
-          const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
-          if(bobinasWrap) bobinasWrap.appendChild(card);
-        });
-      }else{
-        if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
-        // Fallback legacy: cria uma bobina virtual com base no total da OP
+      // Fallback legacy: cria uma bobina virtual com base no total da OP
       const totalPcs = Math.floor(num0(op && (op.total_pcs ?? op.op_pcs ?? op.produzido ?? 0)));
       const comprimentoM = num0(op && (op.bobina ?? 0));
       const metroConsumido = (totalPcs > 0 && convMporPcs > 0) ? (totalPcs * convMporPcs) : 0;
@@ -2098,7 +2094,6 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
       const card = createBobinaCard(legacy, 0, convMporPcs, {op: op, forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
-      }
     }
 
     if(modalBackdrop){
@@ -2610,28 +2605,11 @@ if(modalBackdrop){
   }
 
   function updateToggleButton(){
-    if(modalToggle){
-      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
-      modalToggle.textContent = isOpAtiva(st) ? "Encerrar" : "Ativar OP";
-    }
-
+    if(!modalToggle) return;
+    const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+    modalToggle.textContent = isOpAtiva(st) ? "Encerrar" : "Ativar OP";
     if(modalSwap){
-      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
-      const ativa = isOpAtiva(st);
-
-      // swap so faz sentido com OP ativa e bobinas cadastradas
-      const hasBobinas = Array.isArray(currentOp && currentOp.bobinas) ? (currentOp.bobinas.length > 0) : (Array.isArray(currentOp && currentOp.bobinas_m) ? (currentOp.bobinas_m.length > 0) : false);
-
-      modalSwap.style.display = (ativa ? "" : "none");
-      modalSwap.disabled = (!ativa) || (!hasBobinas) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
-
-      if(!hasBobinas){
-        modalSwap.title = "Sem bobina cadastrada.";
-      }else if(modalSwap.disabled && swapLockActive){
-        modalSwap.title = "Aguardando primeiro machine/update apos a troca.";
-      }else{
-        modalSwap.title = "";
-      }
+      modalSwap.disabled = !isOpAtiva(st);
     }
   }
 
@@ -2669,6 +2647,37 @@ if(modalBackdrop){
       }
     }
     throw lastErr || new Error("Falha ao executar ação.");
+  }
+
+  async function postOpSwapBobina(opId){
+    const qs = "";
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+
+    const urls = ["/producao/op/troca-bobina", "/op/troca-bobina"];
+
+    let lastErr = null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u + qs, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => ({}));
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+        return true;
+      }catch(e){
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Falha ao executar troca de bobina.");
   }
 
   function stopOpModalLiveRefresh(){
@@ -2761,41 +2770,25 @@ if(modalBackdrop){
         return;
       }
 
-      const ativa = isOpAtiva(currentOp && currentOp.status);
-      if(!ativa){
-        alert("A OP precisa estar ATIVA para trocar bobina.");
+      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+      if(!isOpAtiva(st)){
+        alert("Nao permitido: OP encerrada.");
         return;
       }
 
-      if(swapLockActive && swapLockOpId === opId){
-        alert("Troca ja solicitada. Aguardando primeiro machine/update.");
-        return;
-      }
-
-      const ok = confirm("Confirmar troca de bobina?");
+      const ok = confirm("Confirmar troca de bobina? Isso encerra a bobina atual e inicia a proxima somente no primeiro update da maquina.");
       if(!ok) return;
 
       try{
         modalSwap.disabled = true;
-        const resp = await postOpSwapBobina(opId);
+        await postOpSwapBobina(opId);
 
-        // Travar nova troca ate chegar o primeiro machine/update e abrir a proxima bobina (seq next_seq)
-        const nextSeq = (resp && (resp.next_seq ?? resp.nextSeq ?? resp.next)) ?? null;
-        swapLockActive = true;
-        swapLockOpId = opId;
-        swapLockNextSeq = (nextSeq != null) ? Number(nextSeq) : null;
-
-        // Recarregar OP (pode ainda nao ter a proxima bobina aberta - depende do primeiro update)
-        try{
-          const op = await fetchOpGet(opId);
-          if(op){
-            openModal(op, "edit");
-          }
-        }catch(e){
-          // ignora
+        const op = await fetchOpGet(opId);
+        if(op){
+          openModal(enrichOpWithLive(op), "view");
         }
 
-        alert("Troca registrada. Aguardando primeiro machine/update para iniciar a proxima bobina.");
+        await fetchHistorico();
       }catch(err){
         alert("Falha ao trocar bobina: " + (err.message || err));
       }finally{
