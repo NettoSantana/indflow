@@ -1,7 +1,6 @@
 <!--
 Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultima recodificacao: 2026-03-05 12:43:56 -03:00
-Motivo: Corrigir modal para usar bobinas_detail persistido (pcs_total/metro_consumido) quando OP encerrada, evitando zerar producao por esp_atual null.
+Ultima recodificacao: 2026-03-05 19:15:00 -03:00Motivo: Adicionar botão e chamada de endpoint para Troca de Bobina (com confirmação) no modal grande da OP.
 -->
 <!--
 ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
@@ -778,6 +777,7 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
 
     <div class="op-modal-footer">
       <button type="button" id="op-modal-toggle" class="btn-secondary">Ativar OP</button>
+      <button type="button" id="op-modal-swap" class="btn-secondary">Troca de Bobina</button>
       <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
       <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
@@ -1359,6 +1359,7 @@ function safeText(v){
   const modalBackdrop = document.getElementById("op-modal-backdrop");
   const modalClose = document.getElementById("op-modal-close");
   const modalToggle = document.getElementById("op-modal-toggle");
+  const modalSwap = document.getElementById("op-modal-swap");
 const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
@@ -2522,6 +2523,9 @@ if(modalBackdrop){
     if(!modalToggle) return;
     const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
     modalToggle.textContent = isOpAtiva(st) ? "Encerrar" : "Ativar OP";
+    if(modalSwap){
+      modalSwap.disabled = !isOpAtiva(st);
+    }
   }
 
   async function postOpAction(opId, action){
@@ -2558,6 +2562,37 @@ if(modalBackdrop){
       }
     }
     throw lastErr || new Error("Falha ao executar ação.");
+  }
+
+  async function postOpSwapBobina(opId){
+    const qs = "";
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+
+    const urls = ["/producao/op/troca-bobina", "/op/troca-bobina"];
+
+    let lastErr = null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u + qs, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => ({}));
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+        return true;
+      }catch(e){
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Falha ao executar troca de bobina.");
   }
 
   function stopOpModalLiveRefresh(){
@@ -2637,6 +2672,43 @@ if(modalBackdrop){
         alert("Falha ao " + (action === "ativar" ? "ativar" : "encerrar") + ": " + (err.message || err));
       }finally{
         modalToggle.disabled = false;
+      }
+    });
+  }
+
+
+  if(modalSwap){
+    modalSwap.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+      if(!isOpAtiva(st)){
+        alert("Nao permitido: OP encerrada.");
+        return;
+      }
+
+      const ok = confirm("Confirmar troca de bobina? Isso encerra a bobina atual e inicia a proxima somente no primeiro update da maquina.");
+      if(!ok) return;
+
+      try{
+        modalSwap.disabled = true;
+        await postOpSwapBobina(opId);
+
+        const op = await fetchOpGet(opId);
+        if(op){
+          openModal(enrichOpWithLive(op), "view");
+        }
+
+        await fetchHistorico();
+      }catch(err){
+        alert("Falha ao trocar bobina: " + (err.message || err));
+      }finally{
+        modalSwap.disabled = false;
+        updateToggleButton();
       }
     });
   }
