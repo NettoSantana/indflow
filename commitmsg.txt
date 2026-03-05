@@ -1,5 +1,5 @@
-﻿fix(front): restaurar botao Abrir no card OP e remover chips sem deletar blocos grandes
+﻿revert(front): voltar fluxo simples no card OP (sem chips, com botao Abrir)
 
-- Remove bloco HTML dos chips da fila no card OP
-- Restaura botao Abrir (btn-op-manage) no card OP
-- Mantem CSS/JS existentes (alteracao minima, sem corte de linhas)
+- Remove fila em chips do card OP
+- Restaura botao Abrir (btn-op-manage) para abrir o modal
+- Remove chamadas automaticas de carregarOpFila/setInterval
