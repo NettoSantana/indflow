@@ -1,6 +1,6 @@
-# PATH: C:\Users\vlula\OneDrive\Area de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 02:51 America/Bahia
-# MOTIVO: Permitir editar OP completa (cadastro + fechamento) no modal do Historico, incluindo adicionar/remover bobinas via /op/salvar.
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
+# LAST_RECODE: 2026-03-05 03:44 America/Bahia
+# MOTIVO: Adicionar endpoints de ativar/encerrar OP por op_id e corrigir salvamento/edicao (bobinas sem limite) para o novo modal do Historico
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -960,6 +960,12 @@ def _close_op_row(op_id: int, ended_at: str):
 
 
 def _update_op_row(op_id: int, payload: dict):
+    """Atualiza campos simples da OP.
+
+    Observacao:
+    - Permitimos atualizar tanto OP em FILA quanto ATIVA, pois agora a edicao pode acontecer pelo Historico.
+    - Se quiser restringir por regra de negocio, isso deve ser feito no frontend (roles) ou em rotas especificas.
+    """
     conn = _get_conn()
     cur = conn.cursor()
 
@@ -973,7 +979,7 @@ def _update_op_row(op_id: int, payload: dict):
             gr_fio = ?,
             observacoes = ?
         WHERE id = ?
-          AND status = ?
+          AND status IN (?, ?)
         """,
         (
             payload.get("os"),
@@ -984,6 +990,7 @@ def _update_op_row(op_id: int, payload: dict):
             payload.get("observacoes"),
             int(op_id),
             "ATIVA",
+            "FILA",
         ),
     )
 
@@ -2493,6 +2500,12 @@ def op_get():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
+    def _int(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
     # Detalhes de fechamento por bobina (se existir)
     bobinas_detail = []
     try:
@@ -2640,6 +2653,156 @@ def op_excluir():
         pass
 
     return jsonify({"status": "ok", "op_id": int(op_id), "machine_id": op_mid, "deleted": int(deleted)})
+
+
+
+# =====================================================
+# OP - ATIVAR (JSON)
+# POST /producao/op/ativar
+# Body: { "op_id": 123 }
+# - Marca uma OP da FILA como ATIVA e ancora baseline_pcs no contador atual.
+# - Nao permite duas OPs ATIVAS na mesma maquina.
+# =====================================================
+@producao_bp.route("/op/ativar", methods=["POST"])
+@login_required
+def op_ativar():
+    data = request.get_json(silent=True) or {}
+    try:
+        op_id = int(data.get("op_id", 0) or 0)
+    except Exception:
+        op_id = 0
+
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, machine_id, status FROM ordens_producao WHERE id = ?",
+            (op_id,),
+        )
+        row = cur.fetchone()
+
+        if not row:
+            return jsonify({"error": "OP nao encontrada"}), 404
+
+        machine_id = _sanitize_mid(_as_str(row[1]))
+        status = _as_str(row[2])
+
+        if not machine_id:
+            return jsonify({"error": "machine_id invalido"}), 400
+
+        if status not in ("FILA", "ATIVA"):
+            return jsonify({"error": "OP nao pode ser ativada neste status", "status": status}), 409
+
+        # Se ja existe outra OP ATIVA no banco, bloqueia
+        cur.execute(
+            "SELECT id FROM ordens_producao WHERE machine_id = ? AND status = ? AND id <> ? LIMIT 1",
+            (machine_id, "ATIVA", op_id),
+        )
+        other = cur.fetchone()
+        if other:
+            return jsonify({"error": "Ja existe uma OP ATIVA para esta maquina", "op_id_ativa": int(other[0] or 0)}), 409
+
+        # Anchor baseline no contador atual
+        esp_atual = _get_current_esp_abs(conn, machine_id)
+        baseline_pcs = int(esp_atual or 0)
+
+        now_iso = _now_iso()
+
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET status = ?,
+                baseline_pcs = ?,
+                started_at = ?
+            WHERE id = ?
+            """,
+            ("ATIVA", baseline_pcs, now_iso, op_id),
+        )
+        conn.commit()
+
+    # Atualiza cache/memoria (op_active)
+    with _op_lock:
+        op_active[machine_id] = {
+            "op_id": op_id,
+            "machine_id": machine_id,
+            "baseline": {"pcs": baseline_pcs},
+        }
+
+    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "baseline_pcs": baseline_pcs})
+
+
+# =====================================================
+# OP - ENCERRAR POR ID (JSON)
+# POST /producao/op/encerrar-by-id
+# Body: { "op_id": 123 }
+# - Permite encerrar via Historico, sem depender do cache op_active.
+# =====================================================
+@producao_bp.route("/op/encerrar-by-id", methods=["POST"])
+@login_required
+def op_encerrar_by_id():
+    data = request.get_json(silent=True) or {}
+    try:
+        op_id = int(data.get("op_id", 0) or 0)
+    except Exception:
+        op_id = 0
+
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    with _get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, machine_id, status, baseline_pcs, bobina FROM ordens_producao WHERE id = ?",
+            (op_id,),
+        )
+        row = cur.fetchone()
+
+        if not row:
+            return jsonify({"error": "OP nao encontrada"}), 404
+
+        machine_id = _sanitize_mid(_as_str(row[1]))
+        status = _as_str(row[2])
+        baseline_pcs = int(row[3] or 0)
+        bobina_csv = _as_str(row[4])
+
+        if status != "ATIVA":
+            return jsonify({"error": "Somente OP ATIVA pode ser encerrada", "status": status}), 409
+
+        esp_atual = _get_current_esp_abs(conn, machine_id)
+        op_pcs = max(0, int(esp_atual or 0) - int(baseline_pcs))
+
+        bobinas_m = _parse_bobinas_csv(bobina_csv)
+        op_metros = 0
+        for b in bobinas_m:
+            try:
+                op_metros += int(b or 0)
+            except Exception:
+                pass
+
+        ended_at = _now_iso()
+
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET ended_at = ?,
+                status = ?,
+                op_metros = ?,
+                op_pcs = ?
+            WHERE id = ?
+            """,
+            (ended_at, "ENCERRADA", int(op_metros or 0), int(op_pcs or 0), op_id),
+        )
+        conn.commit()
+
+    # Limpa cache, se for a op ativa
+    with _op_lock:
+        cur_active = op_active.get(machine_id)
+        if cur_active and int(cur_active.get("op_id") or 0) == op_id:
+            op_active.pop(machine_id, None)
+
+    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "ended_at": ended_at, "op_pcs": op_pcs, "op_metros": op_metros})
 
 
 @producao_bp.route("/op/encerrar", methods=["POST"])
@@ -2837,13 +3000,6 @@ def op_salvar():
         )
         return True
 
-    def _int(v):
-        try:
-            return int(v)
-        except Exception:
-            return 0
-
-    observacoes = (data.get("observacoes") or "").strip()
 
     # Novo formato: salvar por bobina
     bobinas_payload = data.get("bobinas")

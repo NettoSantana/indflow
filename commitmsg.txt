@@ -1,5 +1,5 @@
-﻿feat(op): permitir editar OP completa no Historico, incluindo bobinas
+﻿fix(front): trocar Fechar por Ativar/Encerrar no modal de OP e abrir OP só via Editar
 
-- /producao/op/get retorna bobinas_detail (fechamento por idx)
-- /producao/op/salvar aceita cadastro (os/lote/operador/gr_fio/obs), fechamento e bobinas_m (add/remove)
-- Ao reduzir bobinas, remove linhas antigas de ordens_producao_bobinas fora do range
+- Botão do modal vira Ativar OP/Encerrar conforme status
+- Modal fecha apenas fora ou no X
+- Remove abertura do modal ao clicar na linha da OP (somente Editar abre)
