@@ -1,5 +1,6 @@
-﻿revert(front): voltar fluxo simples no card OP (sem chips, com botao Abrir)
+﻿fix(config_maquina): remover chips da OP e restaurar botao Abrir
 
-- Remove fila em chips do card OP
-- Restaura botao Abrir (btn-op-manage) para abrir o modal
-- Remove chamadas automaticas de carregarOpFila/setInterval
+- Header (PATH/LAST_RECODE/MOTIVO) em comentario HTML para nao renderizar
+- Card OP volta ao fluxo simples com botao Abrir (btn-op-manage)
+- Removida renderizacao de fila/chips no card OP
+- Removidas chamadas JS de carregarOpFila() e interval de fila
