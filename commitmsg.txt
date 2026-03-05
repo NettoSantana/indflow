@@ -1,6 +1,4 @@
-﻿fix(front): manter botoes dos outros cards e exibir chips no card OP
+﻿style(front): remover exibicao de OP ATIVA no topo da config da maquina
 
-- Remove somente o botao Abrir do card OP
-- Mantem Abrir do Historico/Chamados/Configuracao/etc
-- Chips da fila no card OP maiores (3+2) sem aumentar card
-- Remove restos da barra de OP do topo
+- Remove a tarja/box de OP ATIVA do topo
+- OPs ficam visiveis somente dentro do card OP (fila)

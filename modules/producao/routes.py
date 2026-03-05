@@ -2227,9 +2227,9 @@ def op_iniciar():
     unidade_2 = _as_str(data.get("unidade_2"))
 
     # Slot escolhido:
-    # - posicao 1: cria OP ATIVA (se nao houver ativa)
-    # - posicao 2..5: cria OP na FILA (mesmo que ja exista ativa)
-    is_active = (posicao == 1)
+    # - Todas as posicoes criam OP como FILA
+    # - A ativacao sera feita manualmente posteriormente
+    is_active = False  # alterado: OP sempre inicia como FILA
 
     # Baseline:
     # - ATIVA: ancora no valor absoluto atual do ESP (op inicia em 0 = esp_atual - baseline)
@@ -2237,11 +2237,7 @@ def op_iniciar():
     baseline_pcs = 0
     baseline_u1 = 0.0
     baseline_u2 = 0.0
-    if is_active:
-        with _get_conn() as conn:
-            esp_atual = _get_current_esp_abs(conn, machine_id)
-        baseline_pcs = int(esp_atual)
-        baseline_u1 = float(esp_atual)
+    # baseline sera definido apenas quando OP for ativada
 
     started_at = _now_iso()
 
