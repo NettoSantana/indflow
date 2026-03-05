@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 03:44 America/Bahia
-# MOTIVO: Adicionar endpoints de ativar/encerrar OP por op_id e corrigir salvamento/edicao (bobinas sem limite) para o novo modal do Historico
+# LAST_RECODE: 2026-03-05 04:47 America/Bahia
+# MOTIVO: Impedir OP duplicada por maquina (machine_id + os) no banco e nos endpoints /op/iniciar e /op/editar
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -664,6 +664,16 @@ def init_op_db():
         except Exception:
             pass
 
+
+    # -------------------------------------------------
+    # REGRA: nao permitir OS duplicada por maquina (machine_id + os)
+    # Observacao: se ja existir duplicidade historica no banco, o CREATE UNIQUE INDEX pode falhar.
+    # Neste caso, mantemos a validacao no endpoint para bloquear novas duplicidades.
+    # -------------------------------------------------
+    try:
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_ordens_producao_machine_os ON ordens_producao(machine_id, os)")
+    except Exception:
+        pass
     # -------------------------------------------------
     # TABELA: FECHAMENTO POR BOBINA (1 OP pode ter N bobinas)
     # -------------------------------------------------
@@ -763,6 +773,32 @@ except Exception:
     pass
 
 
+
+def _op_os_exists(conn, machine_id, os_num, exclude_op_id=0):
+    """
+    Retorna True se ja existir alguma OP com a mesma OS (numero) para a mesma maquina.
+    Regra (escopo escolhido): machine_id + os.
+    """
+    mid = _sanitize_mid(_as_str(machine_id))
+    os_ = _as_str(os_num)
+    try:
+        ex_id = int(exclude_op_id or 0)
+    except Exception:
+        ex_id = 0
+    if not mid or not os_:
+        return False
+    cur = conn.cursor()
+    if ex_id > 0:
+        cur.execute(
+            "SELECT 1 FROM ordens_producao WHERE machine_id = ? AND os = ? AND id <> ? LIMIT 1",
+            (mid, os_, ex_id),
+        )
+    else:
+        cur.execute(
+            "SELECT 1 FROM ordens_producao WHERE machine_id = ? AND os = ? LIMIT 1",
+            (mid, os_),
+        )
+    return cur.fetchone() is not None
 def _now_iso():
     tz = _get_tz()
     if tz is None:
@@ -2209,6 +2245,10 @@ def op_iniciar():
             )
             ocupadas = {int(r[0]) for r in cur.fetchall() if r[0] is not None}
 
+            # Regra: nao permitir OP com a mesma OS na mesma maquina
+            if _op_os_exists(conn, machine_id, os_):
+                return jsonify({"error": "Ja existe uma OP com essa OS nesta maquina"}), 409
+
         if posicao is None:
             posicao = (max(ocupadas) + 1) if ocupadas else 1
 
@@ -2394,6 +2434,14 @@ def op_editar():
         except Exception:
             pass
 
+        # Regra: nao permitir trocar para uma OS que ja exista em outra OP da mesma maquina
+        try:
+            with _get_conn() as conn_chk:
+                if _op_os_exists(conn_chk, machine_id, os_, exclude_op_id=op_id):
+                    return jsonify({"error": "Ja existe uma OP com essa OS nesta maquina"}), 409
+        except Exception:
+            pass
+
         # Atualiza no banco e em memoria
         try:
             _update_op_row(
@@ -2447,6 +2495,14 @@ def op_editar():
 
     if machine_id and op_mid and machine_id != op_mid:
         return jsonify({"error": "machine_id nao confere com a OP"}), 400
+
+    # Regra: nao permitir trocar para uma OS que ja exista em outra OP da mesma maquina
+    try:
+        with _get_conn() as conn_chk:
+            if _op_os_exists(conn_chk, op_mid, os_, exclude_op_id=op_id_payload):
+                return jsonify({"error": "Ja existe uma OP com essa OS nesta maquina"}), 409
+    except Exception:
+        pass
 
     # atualiza no banco
     try:

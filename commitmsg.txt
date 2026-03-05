@@ -1,5 +1,5 @@
-﻿fix(frontend): corrige sintaxe JS no config_maquina e mantém somente Nova OP
+﻿chore(ui-op): renomeia labels no modal/print da OP
 
-- Corrige chaves soltas/blocos duplicados e restos de try/catch
-- Mantém removido o box OP ativa no topo
-- Mantém removido o encerrar OP; modal só inicia nova OP (/producao/op/iniciar)
+- HS-inicial -> ABERTURA OP
+- HS-término -> FINAL OP
+- Qtd. saco ou caixa -> Retrabalho
