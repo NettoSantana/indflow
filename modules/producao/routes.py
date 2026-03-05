@@ -2610,7 +2610,7 @@ def op_excluir():
     return jsonify({"status": "ok", "op_id": int(op_id), "machine_id": op_mid, "deleted": int(deleted)})
 
 
-cao_bp.route("/op/encerrar", methods=["POST"])
+@producao_bp.route("/op/encerrar", methods=["POST"])
 @login_required
 def op_encerrar():
     data = request.get_json(silent=True) or {}
