@@ -1,6 +1,5 @@
-﻿fix(producao/op): encerrar calcula esp_atual final com prioridade e persiste op_metros float
+﻿fix(front-historico): usar bobinas_detail persistido no modal (evita zerar ao encerrar)
 
-- /producao/op/encerrar e /producao/op/encerrar-by-id: esp_atual = JSON > snapshot DB > safe fallback
-- op_pcs = esp_atual - baseline_pcs
-- op_metros = op_pcs * conv (float) e _close_op_row_v2 não trunca para int
-- fechamento do evento de bobina usa esp_atual final correto
+- Modal passa a priorizar op.bobinas_detail (pcs_total/metro_consumido persistidos)
+- Normaliza op.bobinas quando vier como array de numeros (ex.: [6000])
+- Evita mostrar producao 0 ao encerrar por esp_atual null
