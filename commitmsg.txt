@@ -1,4 +1,5 @@
-﻿style(front): remover exibicao de OP ATIVA no topo da config da maquina
+﻿fix(op): OP sempre inicia como FILA
 
-- Remove a tarja/box de OP ATIVA do topo
-- OPs ficam visiveis somente dentro do card OP (fila)
+- Remove regra que tornava slot 1 automaticamente ATIVO
+- Agora todas as OPs (1..5) nascem como FILA
+- Ativacao passa a ser manual
