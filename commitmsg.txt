@@ -1,5 +1,5 @@
-﻿fix(historico): botao Editar redireciona para config_maquina (modal OP correto)
+﻿fix(historico): botao Editar abre modal grande do Historico por op_id
 
-- Editar no Historico nao abre mais o modal de detalhes do Historico
-- Editar agora redireciona para /producao/config/<machine_id>?edit_op_id=<op_id>
-- Clique na linha da OP continua abrindo o modal de detalhes do Historico
+- Editar agora chama GET /producao/op/get?op_id=... e abre o modal grande do Historico preenchido
+- Remove redirecionamento para /producao/config e evita editar o modal errado
+- Mantem Salvar no modal usando /producao/op/salvar com op_id
