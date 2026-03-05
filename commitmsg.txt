@@ -1,5 +1,4 @@
-﻿fix(op): fila sem limite e posicao automatica no /producao/op/iniciar
+﻿fix(historico): usar America/Bahia para calcular 'hoje' no historico
 
-- Remove limite 1..5 e erro de fila cheia
-- Trata posicao=0 como nao informado (front manda 0 quando vazio)
-- Auto-atribui posicao como (max ocupadas + 1), mantendo unicidade
+- Evita aparecer o dia seguinte na tela /producao/historico por causa do UTC do servidor (virada ~21:00)
+- Ajusta _hoje_iso e _last_n_days_iso para usar ZoneInfo('America/Bahia')

@@ -1,8 +1,9 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-03 23:20 America/Bahia
-MOTIVO: Preferir segmentos de estado vindos do backend (machine_state_event) no modal detalhe-dia, evitando depender de localStorage ou visita previa para desenhar barras RUN STOP NP.
+LAST_RECODE: 2026-03-04 22:40
+MOTIVO: Ajustar visual das linhas de OP no Histórico (indentação, separador mais escuro, ações Editar/Excluir) sem mexer em backend.
 -->
+
 <!--
 Caminho: indflow/modules/producao/templates/historico.html
 Último recode: 2026-02-23 22:14
@@ -592,11 +593,12 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
           <th class="r">Produção Total</th>
           <th class="r">Peças Boas</th>
           <th class="r">Refugo</th>
+            <th class="r">Ações</th>
         </tr>
       </thead>
 
       <tbody id="historico-body">
-        <tr class="loading"><td colspan="4">Carregando histórico...</td></tr>
+        <tr class="loading"><td colspan="5">Carregando histórico...</td></tr>
       </tbody>
     </table>
 
@@ -1986,7 +1988,7 @@ tdD.appendChild(wrap);
     tbody.innerHTML = "";
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.className = "text-center";
     td.textContent = msg;
     tr.appendChild(td);
@@ -2003,7 +2005,7 @@ tdD.appendChild(wrap);
       trOp.className = "op-row";
 
       const tdOp = document.createElement("td");
-      tdOp.colSpan = 4;
+      tdOp.className = "op-cell";
 
       const pill = document.createElement("span");
       pill.className = "op-pill " + statusClass(op && op.status);
@@ -2015,22 +2017,86 @@ tdD.appendChild(wrap);
       tdOp.appendChild(pill);
       tdOp.appendChild(label);
 
+      const tdBlank1 = document.createElement("td");
+      const tdBlank2 = document.createElement("td");
+      const tdBlank3 = document.createElement("td");
+
+      const tdActions = document.createElement("td");
+      tdActions.className = "op-actions";
+
+      const btnEdit = document.createElement("button");
+      btnEdit.type = "button";
+      btnEdit.className = "op-action-btn";
+      btnEdit.textContent = "Editar";
+
+      const btnDel = document.createElement("button");
+      btnDel.type = "button";
+      btnDel.className = "op-action-btn op-action-btn-danger";
+      btnDel.textContent = "Excluir";
+
+      tdActions.appendChild(btnEdit);
+      tdActions.appendChild(btnDel);
+
       trOp.appendChild(tdOp);
+      trOp.appendChild(tdBlank1);
+      trOp.appendChild(tdBlank2);
+      trOp.appendChild(tdBlank3);
+      trOp.appendChild(tdActions);
+
       tbody.appendChild(trOp);
 
-      trOp.addEventListener("click", function(e){
+      function _openEdit(e){
         if(e){
           e.preventDefault();
           e.stopPropagation();
         }
-        // Se por algum motivo o modal do dia estiver aberto, fecha antes de abrir OP
         if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
           closeDayModal();
         }
-
         const op2 = Object.assign({}, op || {});
         op2.__dia_ref = getRowDateISO(r);
         openModal(op2);
+      }
+
+      trOp.addEventListener("click", _openEdit);
+      btnEdit.addEventListener("click", _openEdit);
+
+      btnDel.addEventListener("click", async function(e){
+        if(e){
+          e.preventDefault();
+          e.stopPropagation();
+        }
+
+        const opId = (op && (op.id || op.op_id || op.opId || op.opid)) || 0;
+        const opTxt = (op && (op.op || op.op_code || op.op_num || op.op_id || "")) || "";
+        if(!opId){
+          alert("Nao foi possivel identificar o ID da OP para excluir.");
+          return;
+        }
+        const ok = confirm("Excluir esta OP do historico?\n\nOP: " + opTxt + "\nID: " + opId);
+        if(!ok) return;
+
+        try{
+          const resp = await fetch("/producao/op/excluir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify({ op_id: opId })
+          });
+
+          let payload = null;
+          try{ payload = await resp.json(); }catch(_e){ payload = null; }
+
+          if(!resp.ok){
+            const msg = (payload && (payload.error || payload.message)) || ("HTTP " + resp.status);
+            alert("Falha ao excluir OP: " + msg + "\n\nObs: o endpoint esperado e POST /producao/op/excluir");
+            return;
+          }
+
+          // Recarrega historico para refletir a exclusao
+          await fetchHistorico();
+        }catch(err){
+          alert("Falha ao excluir OP: " + (err && err.message ? err.message : err));
+        }
       });
     });
   }
@@ -2065,10 +2131,15 @@ tdD.appendChild(wrap);
       tdRef.className = "text-right";
       tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
 
+      const tdDayActions = document.createElement("td");
+      tdDayActions.className = "text-right";
+      tdDayActions.textContent = "";
+
       tr.appendChild(tdData);
       tr.appendChild(tdProd);
       tr.appendChild(tdBoas);
       tr.appendChild(tdRef);
+      tr.appendChild(tdDayActions);
 
       tr.addEventListener("click", function(ev){
         // Evita conflitar com clique em linhas de OP (elas sao outras trs)
