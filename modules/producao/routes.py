@@ -1,4 +1,8 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
+# LAST_RECODE: 2026-03-05 16:42:13 (America/Bahia)
+# MOTIVO: Implementar TROCA DE BOBINA (endpoint + pendencia) e funcao helper para iniciar a proxima bobina no primeiro machine/update apos a troca.
+
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
 # LAST_RECODE: 2026-03-05 15:22:41 (America/Bahia)
 # MOTIVO: Encerramento OP: resolver esp_atual (JSON > snapshot DB > safe), calcular op_pcs/op_metros (pcs*conv) e persistir op_metros como float; fechamento do evento de bobina usa esp final.
 
@@ -795,6 +799,43 @@ def init_op_db():
         except Exception:
             pass
 
+
+    # -------------------------------------------------
+    # TABELA: PENDENCIA DE TROCA DE BOBINA
+    #   Quando usuario clica em TROCA DE BOBINA:
+    #     - fecha a bobina atual imediatamente
+    #     - marca pendencia para iniciar a proxima bobina SOMENTE no primeiro machine/update apos a troca
+    #   Isso evita criar bobina 'fantasma' sem pulso novo do ESP.
+    # -------------------------------------------------
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ordens_producao_bobina_pendencia (
+            op_id INTEGER PRIMARY KEY,
+            machine_id TEXT NOT NULL,
+            armed_at TEXT NOT NULL,
+            closed_seq INTEGER NOT NULL DEFAULT 0,
+            closed_abs_pcs INTEGER NOT NULL DEFAULT 0,
+            next_seq INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+
+    # Migracao defensiva
+    for col, ddl in [
+        ("machine_id", "TEXT NOT NULL DEFAULT ''"),
+        ("armed_at", "TEXT NOT NULL DEFAULT ''"),
+        ("closed_seq", "INTEGER NOT NULL DEFAULT 0"),
+        ("closed_abs_pcs", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_seq", "INTEGER NOT NULL DEFAULT 0"),
+        ("created_at", "TEXT"),
+        ("updated_at", "TEXT"),
+    ]:
+        try:
+            cur.execute(f"ALTER TABLE ordens_producao_bobina_pendencia ADD COLUMN {col} {ddl}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -1391,6 +1432,204 @@ def _get_bobina_event_next_seq(op_id: int) -> int:
             return 0
     except Exception:
         return 0
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+def _get_bobina_pendencia(op_id: int) -> dict | None:
+    try:
+        oid = int(op_id or 0)
+    except Exception:
+        return None
+    if oid <= 0:
+        return None
+    conn = None
+    try:
+        conn = _get_conn()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        row = cur.execute(
+            "SELECT op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+            (oid,),
+        ).fetchone()
+        if not row:
+            return None
+        return {
+            "op_id": int(row["op_id"] or 0),
+            "machine_id": _as_str(row["machine_id"] or ""),
+            "armed_at": _as_str(row["armed_at"] or ""),
+            "closed_seq": int(row["closed_seq"] or 0),
+            "closed_abs_pcs": int(row["closed_abs_pcs"] or 0),
+            "next_seq": int(row["next_seq"] or 0),
+        }
+    except Exception:
+        return None
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _set_bobina_pendencia(op_id: int, machine_id: str, closed_seq: int, closed_abs_pcs: int, next_seq: int, armed_at: str):
+    oid = int(op_id or 0)
+    mid = _sanitize_mid(_as_str(machine_id))
+    if oid <= 0 or not mid:
+        raise ValueError("op_id/machine_id invalido")
+    now_iso = _now_iso()
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        # Impede dupla troca rapida: se ja existir, retorna erro
+        cur.execute(
+            "SELECT 1 FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+            (oid,),
+        )
+        if cur.fetchone() is not None:
+            raise RuntimeError("troca_pendente")
+
+        cur.execute(
+            "INSERT INTO ordens_producao_bobina_pendencia (op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (oid, mid, _as_str(armed_at), int(closed_seq or 0), int(closed_abs_pcs or 0), int(next_seq or 0), now_iso, now_iso),
+        )
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _clear_bobina_pendencia(op_id: int):
+    try:
+        oid = int(op_id or 0)
+    except Exception:
+        return
+    if oid <= 0:
+        return
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM ordens_producao_bobina_pendencia WHERE op_id = ?", (oid,))
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _get_open_bobina_event_seq_and_start_abs(conn: sqlite3.Connection, op_id: int):
+    """Retorna (seq, start_abs_pcs, comprimento_m) do ultimo evento aberto (ended_at NULL)."""
+    cur = conn.cursor()
+    row = cur.execute(
+        "SELECT seq, start_abs_pcs, comprimento_m FROM ordens_producao_bobina_eventos "
+        "WHERE op_id = ? AND (ended_at IS NULL OR ended_at = '') ORDER BY seq DESC LIMIT 1",
+        (int(op_id),),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        seq = int(row[0] or 0)
+    except Exception:
+        seq = 0
+    try:
+        start_abs = int(row[1] or 0)
+    except Exception:
+        start_abs = 0
+    try:
+        cm = int(row[2] or 0)
+    except Exception:
+        cm = 0
+    return (seq, start_abs, cm)
+
+
+def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: str) -> dict:
+    """Helper para ser chamado no machine/update.
+
+    Se existir pendencia de troca para a OP ATIVA da maquina:
+      - abre a proxima bobina (novo evento) usando o primeiro pulso apos a troca
+      - limpa a pendencia
+
+    Retorna dict com informacoes do que foi feito (sem exceptions).
+    """
+    out = {"ok": True, "applied": False}
+    mid = _sanitize_mid(_as_str(machine_id))
+    if not mid:
+        return out
+    try:
+        esp_val = int(esp_abs or 0)
+    except Exception:
+        esp_val = 0
+    ts = _as_str(ts_iso) or _now_iso()
+
+    conn = None
+    try:
+        conn = _get_conn()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        row_op = cur.execute(
+            "SELECT id, bobina, status FROM ordens_producao WHERE machine_id = ? AND status = 'ATIVA' ORDER BY started_at DESC LIMIT 1",
+            (mid,),
+        ).fetchone()
+        if not row_op:
+            return out
+        op_id = int(row_op["id"] or 0)
+        if op_id <= 0:
+            return out
+
+        pend = cur.execute(
+            "SELECT op_id, next_seq FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+            (op_id,),
+        ).fetchone()
+        if not pend:
+            return out
+        next_seq = int(pend["next_seq"] or 0)
+
+        # comprimento_m opcional: pega da lista cadastrada na OP se existir
+        bobina_csv = _as_str(row_op["bobina"] or "")
+        bobinas_m = _parse_bobinas_csv(bobina_csv)
+        comprimento_m = 0
+        if bobinas_m and next_seq < len(bobinas_m):
+            try:
+                comprimento_m = int(bobinas_m[next_seq] or 0)
+            except Exception:
+                comprimento_m = 0
+
+        _upsert_bobina_event_start(op_id, next_seq, comprimento_m, ts, esp_val)
+        _clear_bobina_pendencia(op_id)
+        out["applied"] = True
+        out["op_id"] = int(op_id)
+        out["seq"] = int(next_seq)
+        out["started_at"] = ts
+        out["start_abs_pcs"] = int(esp_val)
+        out["comprimento_m"] = int(comprimento_m)
+        return out
+    except Exception:
+        return out
     finally:
         try:
             if conn:
@@ -2980,6 +3219,134 @@ def op_ativar():
 # Body: { "op_id": 123 }
 # - Permite encerrar via Historico, sem depender do cache op_active.
 # =====================================================
+
+
+# =====================================================
+# OP - TROCA DE BOBINA (JSON)
+# POST /producao/op/troca-bobina
+# Body: { "op_id": 123 }
+# Regras:
+# - So permite com OP ATIVA
+# - Nao permite se nao existir bobina cadastrada
+# - Fecha a bobina atual imediatamente
+# - Marca pendencia para iniciar a proxima bobina SOMENTE no primeiro machine/update apos a troca
+# - Bloqueia dupla troca rapida (pendencia ja existente)
+# =====================================================
+@producao_bp.route("/op/troca-bobina", methods=["POST"])
+@login_required
+def op_troca_bobina():
+    data = request.get_json(silent=True) or {}
+    try:
+        op_id = int(data.get("op_id", 0) or 0)
+    except Exception:
+        op_id = 0
+    if op_id <= 0:
+        return jsonify({"error": "op_id invalido"}), 400
+
+    stage = "init"
+    conn = None
+    try:
+        stage = "conn"
+        conn = _get_conn()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        stage = "fetch_op"
+        row = cur.execute(
+            "SELECT id, machine_id, status, bobina FROM ordens_producao WHERE id = ? LIMIT 1",
+            (op_id,),
+        ).fetchone()
+        if not row:
+            return jsonify({"error": "OP nao encontrada"}), 404
+
+        machine_id = _sanitize_mid(_as_str(row["machine_id"] or ""))
+        status = _as_str(row["status"] or "")
+        bobina_csv = _as_str(row["bobina"] or "")
+
+        if not machine_id:
+            return jsonify({"error": "machine_id invalido"}), 400
+
+        if status != "ATIVA":
+            return jsonify({"error": "OP nao esta ativa", "status": status}), 409
+
+        bobinas_list = _parse_bobinas_csv(bobina_csv)
+        if not bobinas_list:
+            return jsonify({"error": "Nao permite trocar sem bobina cadastrada"}), 409
+
+        stage = "check_pending"
+        pend = cur.execute(
+            "SELECT 1 FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+            (op_id,),
+        ).fetchone()
+        if pend is not None:
+            return jsonify({"error": "Troca ja solicitada. Aguardando primeiro machine/update."}), 409
+
+        stage = "open_event"
+        open_info = _get_open_bobina_event_seq_and_start_abs(conn, op_id)
+        if not open_info:
+            return jsonify({"error": "Nenhuma bobina aberta para trocar"}), 409
+        open_seq, open_start_abs, _open_cm = open_info
+
+        stage = "esp_snapshot"
+        esp_abs, esp_ts = _get_current_esp_snapshot(conn, machine_id)
+        if esp_abs is None:
+            # fallback: usa baseline + pcs ja computado da OP (melhor que zero)
+            try:
+                row_bp = cur.execute(
+                    "SELECT baseline_pcs, op_pcs FROM ordens_producao WHERE id = ? LIMIT 1",
+                    (op_id,),
+                ).fetchone()
+                bp = int((row_bp["baseline_pcs"] if row_bp else 0) or 0)
+                pcs = int((row_bp["op_pcs"] if row_bp else 0) or 0)
+                esp_abs = bp + pcs
+            except Exception:
+                esp_abs = int(open_start_abs or 0)
+
+        try:
+            end_abs = int(esp_abs or 0)
+        except Exception:
+            end_abs = int(open_start_abs or 0)
+        if end_abs < int(open_start_abs or 0):
+            end_abs = int(open_start_abs or 0)
+
+        ended_at = _now_iso()
+
+        stage = "close_event"
+        # Fecha a bobina atual imediatamente
+        _close_last_bobina_event(op_id, ended_at, end_abs)
+
+        stage = "arm_pending"
+        next_seq = _get_bobina_event_next_seq(op_id)
+
+        # Se next_seq nao avancou (caso raro), garante proximo
+        if next_seq <= open_seq:
+            next_seq = int(open_seq) + 1
+
+        _set_bobina_pendencia(op_id, machine_id, open_seq, end_abs, next_seq, ended_at)
+
+        return jsonify({
+            "status": "ok",
+            "op_id": int(op_id),
+            "machine_id": machine_id,
+            "closed_seq": int(open_seq),
+            "closed_abs_pcs": int(end_abs),
+            "closed_at": ended_at,
+            "pending": True,
+            "next_seq": int(next_seq),
+        })
+
+    except RuntimeError as e:
+        if str(e) == "troca_pendente":
+            return jsonify({"error": "Troca ja solicitada. Aguardando primeiro machine/update."}), 409
+        return jsonify({"error": "Falha na troca de bobina", "stage": stage}), 500
+    except Exception:
+        return jsonify({"error": "Falha na troca de bobina", "stage": stage}), 500
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 @producao_bp.route("/op/encerrar-by-id", methods=["POST"])
 @login_required
 def op_encerrar_by_id():
