@@ -1,7 +1,15 @@
-﻿recode(producao/op): regras oficiais de OP + eventos de bobina + MAT_BOM
+﻿fix(front-op): ativacao de OP nao atualizava dados do modal
 
-- ATIVAR OP: status=ATIVA, baseline_pcs=esp_atual, started_at=agora e reinicia eventos
-- Durante OP: PCS = esp_atual - baseline_pcs; tempo por started_at/ended_at; comprimento_m apenas registro
-- ENCERRAR OP: ended_at, op_pcs/op_metros e fecha ultimo evento com end_abs_pcs=esp_atual
-- Fechamento manual: COSTURAS/REFUGO/RETRABALHO com validacao e MAT_BOM automatico
-- Compatibilidade: aceita chaves antigas e corrige MAT_BOM no formato legacy
+modal reabria em modo edit após ativar OP
+
+live refresh nao iniciava
+
+PCS/tempo/metros nao atualizavam
+
+Agora:
+
+modal abre em modo view
+
+inicia startOpModalLiveRefresh
+
+contadores atualizam imediatamente
