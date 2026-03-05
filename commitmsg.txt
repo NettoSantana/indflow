@@ -1,5 +1,6 @@
-﻿fix(producao/routes): op_get monta bobinas_detail via eventos + encerrar grava metros por pcs*conv
+﻿fix(producao/op): persistir pcs/metros corretos no encerrar (esp seguro + metros=pcs*conv)
 
-- /producao/op/get agora busca ordens_producao_bobina_eventos e retorna bobinas_detail com started_at/ended_at por bobina
-- Calcula pcs_total/metro_consumido por evento (ao vivo quando OP ATIVA)
-- /op/encerrar-by-id e /op/encerrar passam a gravar op_metros como pcs*conv (nao soma 6000)
+- encerrar e encerrar-by-id: usa esp_atual do request (se vier) + snapshot do banco + fallback safe
+- op_pcs = esp_atual - baseline_pcs
+- op_metros = op_pcs * conv (nao soma comprimento da bobina)
+- _close_op_row_v2 salva op_metros como float (sem truncar)

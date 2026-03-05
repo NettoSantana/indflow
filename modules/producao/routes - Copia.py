@@ -1,6 +1,10 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 10:30 America/Bahia
-# MOTIVO: Ajustar OP/Bobina: hora inicial da bobina vem da ativacao (evento), op_get passa eventos e fallback de bobinas_detail; encerrar OP salva op_metros=pcs*conv para nao zerar no historico.
+# LAST_RECODE: 2026-03-05 12:00 (America/Bahia)
+# MOTIVO: Implementar Opção 1 (eventos de bobina): /op/get devolve bobinas_detail com started_at/ended_at; encerrar grava metros consumidos por pcs*conv e compatibiliza fechamento por replica/cache.
+
+# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
+# LAST_RECODE: 2026-03-05 08:34 America/Bahia
+# MOTIVO: Corrigir /producao/op/ativar para nao sobrescrever abertura da OP e registrar hora_inicial no evento da bobina; adicionar debug stage/detail e busy_timeout
 
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
@@ -2275,6 +2279,20 @@ def op_iniciar():
     except Exception:
         return jsonify({"error": "Falha ao salvar OP no banco"}), 500
 
+    # Registrar evento da primeira bobina (se houver) com timestamp de inicio e baseline absoluto
+    # Regra: a bobina atual continua ate a proxima bobina ser inserida (novo evento).
+    try:
+        if bobinas_list:
+            _upsert_bobina_event_start(
+                op_id=op_id,
+                seq=0,
+                comprimento_m=int(bobinas_list[0] or 0),
+                started_at=started_at,
+                start_abs_pcs=int(baseline_pcs),
+            )
+    except Exception:
+        # Nao bloquear inicio da OP por falha de evento; historico cai em fallback.
+        pass
 
 
     op_mem = {
@@ -2531,6 +2549,33 @@ def op_get():
                 )
     except Exception:
         bobinas_detail = []
+    # Eventos de bobina (fonte de started_at/ended_at por bobina)
+    bobinas_eventos = []
+    try:
+        with _get_conn() as conn_ev:
+            cur_ev = conn_ev.cursor()
+            cur_ev.execute(
+                """
+                SELECT seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs
+                FROM ordens_producao_bobina_eventos
+                WHERE op_id = ?
+                ORDER BY seq ASC
+                """,
+                (op_id,),
+            )
+            for rr in cur_ev.fetchall() or []:
+                bobinas_eventos.append(
+                    {
+                        "seq": int(rr[0] or 0),
+                        "comprimento_m": int(rr[1] or 0),
+                        "started_at": _as_str(rr[2]),
+                        "ended_at": _as_str(rr[3]),
+                        "start_abs_pcs": int(rr[4] or 0),
+                        "end_abs_pcs": int(rr[5] or 0),
+                    }
+                )
+    except Exception:
+        bobinas_eventos = []
 
     with _get_conn() as conn:
         cur = conn.cursor()
@@ -2595,73 +2640,62 @@ def op_get():
         except Exception:
             op_metros_live = 0.0
 
-    # Eventos de bobina (inicio/fim/baselines) para render no modal
-    bobinas_eventos = []
-    try:
-        bobinas_eventos = _fetch_bobina_eventos(op_id)
-    except Exception:
-        bobinas_eventos = []
-
-    # Fallback: se nao existe fechamento por bobina (ordens_producao_bobinas),
-    # monta um "bobinas_detail" minimo baseado nos eventos, incluindo started_at/ended_at.
+    # Se nao houver fechamento em ordens_producao_bobinas, monta bobinas_detail via eventos (com started_at/ended_at)
     if (not bobinas_detail) and bobinas_eventos:
-        tmp = []
-        for e in bobinas_eventos:
-            try:
-                seq = int(e.get("seq") or 0)
-            except Exception:
-                seq = 0
-
-            try:
-                comprimento_m = int(e.get("comprimento_m") or 0)
-            except Exception:
-                comprimento_m = 0
-
-            # Fallback de comprimento: CSV da OP (bobinas) / bobina unica
-            if comprimento_m <= 0:
+        for ev in bobinas_eventos:
+            seq = int(ev.get("seq") or 0)
+            start_abs = int(ev.get("start_abs_pcs") or 0)
+            end_abs_raw = int(ev.get("end_abs_pcs") or 0)
+            end_abs = end_abs_raw
+            if end_abs <= 0 and status == "ATIVA":
                 try:
-                    if seq < len(bobinas_m):
-                        comprimento_m = int(bobinas_m[seq] or 0)
+                    end_abs = int(esp_atual or 0)
                 except Exception:
-                    comprimento_m = 0
-            if comprimento_m <= 0:
-                try:
-                    comprimento_m = int(float(str(bobina_csv).split(",")[0].strip()))
-                except Exception:
-                    comprimento_m = 0
-
-            start_abs = e.get("start_abs_pcs")
-            end_abs = e.get("end_abs_pcs")
-            pcs_total = 0
+                    end_abs = 0
+            pcs_total = max(0, int(end_abs) - int(start_abs))
             try:
-                if end_abs not in (None, "") and start_abs not in (None, ""):
-                    pcs_total = max(0, int(end_abs) - int(start_abs))
-                elif status == "ATIVA" and start_abs not in (None, ""):
-                    pcs_total = max(0, int(esp_atual or 0) - int(start_abs))
-            except Exception:
-                pcs_total = 0
-
-            try:
-                metro_consumido = float(pcs_total) * float(op_conv or 0.0)
+                metro_consumido = round(float(pcs_total) * float(op_conv or 0.0), 3)
             except Exception:
                 metro_consumido = 0.0
-
-            tmp.append(
+            bobinas_detail.append(
                 {
                     "idx": int(seq) + 1,
-                    "comprimento_m": int(comprimento_m or 0),
+                    "comprimento_m": int(ev.get("comprimento_m") or 0),
                     "pcs_total": int(pcs_total or 0),
                     "metro_consumido": float(metro_consumido or 0.0),
+                    "started_at": _as_str(ev.get("started_at") or ""),
+                    "ended_at": _as_str(ev.get("ended_at") or ""),
+                    "start_abs_pcs": int(start_abs or 0),
+                    "end_abs_pcs": int(end_abs_raw or 0),
+                    # campos de fechamento manual (quando nao existem ainda)
                     "qtd_cost_elas": 0,
                     "refugo": 0,
                     "qtd_saco_caixa": 0,
                     "qtd_mat_bom": 0,
-                    "started_at": _as_str(e.get("started_at") or ""),
-                    "ended_at": _as_str(e.get("ended_at") or ""),
                 }
             )
-        bobinas_detail = tmp
-
+    elif bobinas_detail and bobinas_eventos:
+        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas
+        map_ev = {}
+        for ev in bobinas_eventos:
+            try:
+                map_ev[int(ev.get("seq") or 0) + 1] = ev
+            except Exception:
+                continue
+        for it in bobinas_detail:
+            try:
+                idx = int(it.get("idx") or 0)
+            except Exception:
+                idx = 0
+            ev = map_ev.get(idx)
+            if not ev:
+                continue
+            if not it.get("comprimento_m"):
+                it["comprimento_m"] = int(ev.get("comprimento_m") or 0)
+            it["started_at"] = _as_str(ev.get("started_at") or "")
+            it["ended_at"] = _as_str(ev.get("ended_at") or "")
+            it["start_abs_pcs"] = int(ev.get("start_abs_pcs") or 0)
+            it["end_abs_pcs"] = int(ev.get("end_abs_pcs") or 0)
     return jsonify(
         {
             "op_id": int(r[0] or 0),
@@ -2939,7 +2973,12 @@ def op_encerrar_by_id():
         status = _as_str(row[2])
         baseline_pcs = int(row[3] or 0)
         bobina_csv = _as_str(row[4])
-        op_conv = float(row[5] or 0.0)
+        try:
+            conv = float(row[5] or 0.0)
+        except Exception:
+            conv = 0.0
+        if conv <= 0:
+            conv = _get_conv_m_por_pcs(machine_id)
 
         if status != "ATIVA":
             return jsonify({"error": "Somente OP ATIVA pode ser encerrada", "status": status}), 409
@@ -2947,9 +2986,10 @@ def op_encerrar_by_id():
         esp_atual = _get_current_esp_abs(conn, machine_id)
         op_pcs = max(0, int(esp_atual or 0) - int(baseline_pcs))
 
-        # Metragem produzida: PCS produzidas * conversao (m/pcs)
+        bobinas_m = _parse_bobinas_csv(bobina_csv)
+        # Metros consumidos = pcs * conv (nao soma de comprimentos cadastrados)
         try:
-            op_metros = float(op_pcs) * float(op_conv or 0.0)
+            op_metros = round(float(op_pcs) * float(conv or 0.0), 3)
         except Exception:
             op_metros = 0.0
 
@@ -2970,7 +3010,7 @@ def op_encerrar_by_id():
                 op_pcs = ?
             WHERE id = ?
             """,
-            (ended_at, "ENCERRADA", int(op_metros or 0), int(op_pcs or 0), op_id),
+            (ended_at, "ENCERRADA", float(op_metros or 0.0), int(op_pcs or 0), op_id),
         )
         conn.commit()
 
@@ -3002,8 +3042,11 @@ def op_encerrar():
     op_id = int(op.get("op_id") or 0)
 
     # Calculo da OP:
+    # - metros = soma das bobinas informadas (metros)
     # - pcs = diferenca do contador absoluto do ESP (esp_atual - baseline_pcs)
-    # - metros = pcs * conversao (m/pcs)
+    bobinas = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
+    # Metros consumidos = pcs * conv (nao soma de comprimentos cadastrados)
+    op_metros = 0.0
 
     with _get_conn() as conn:
         esp_atual = _get_current_esp_abs(conn, machine_id)
@@ -3026,11 +3069,11 @@ def op_encerrar():
     if conv <= 0:
         conv = _get_conv_m_por_pcs(machine_id)
 
+
     try:
-        op_metros = float(op_pcs) * float(conv or 0.0)
+        op_metros = round(float(op_pcs) * float(conv or 0.0), 3)
     except Exception:
         op_metros = 0.0
-
     try:
         if op_id > 0:
             _close_op_row_v2(op_id, ended_at, op_metros, op_pcs, conv)
