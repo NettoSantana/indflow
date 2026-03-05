@@ -1,4 +1,4 @@
-﻿fix(front-historico): modal renderiza todas as bobinas cadastradas
+﻿fix(op_get): pcs/metros ao vivo apenas na bobina ativa
 
-- Modal agora usa max(bobinas_eventos, bobinas_detail, bobinas/bobinas_m)
-- Mesmo com bobina pendente (sem evento seq=1 ainda), o card aparece no modal
+- /producao/op/get considera ativa somente a maior seq aberta
+- evita bobinas futuras acumularem producao sem troca
