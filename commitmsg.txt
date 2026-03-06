@@ -1,4 +1,5 @@
-﻿style(historico): cursor padrão nas linhas de OP
+﻿fix(machine_routes): zera card da hora na virada quando baseline_hora ja reancorou
 
-- remove cursor de clique nas linhas de OP
-- mantém cursor de clique apenas nos botões
+- adiciona normalizacao defensiva para virada de hora
+- zera _ph_acc, producao_hora e producao_hora_liquida quando houver heranca da hora anterior
+- reaplica a correcao em /machine/update e /machine/status
