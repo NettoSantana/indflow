@@ -1,5 +1,4 @@
-﻿fix(front): troca de bobina com fallback de endpoints
+﻿fix(front): livePcs somente na primeira bobina ao ativar OP
 
-- Troca de bobina agora tenta múltiplos endpoints possíveis (producao/op, machine/op, /op)
-- Ignora resposta HTML (404) e segue tentando até encontrar o endpoint correto
-- Mensagens de erro ficam mais claras com o URL que falhou
+- Evita que o modo ao vivo preencha todas as bobinas quando os itens ainda estao zerados
+- Live overlay passa a aplicar apenas para idx 0
