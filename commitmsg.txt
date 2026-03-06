@@ -1,0 +1,4 @@
+﻿style(historico): cursor padrão nas linhas de OP
+
+- remove cursor de clique nas linhas de OP
+- mantém cursor de clique apenas nos botões

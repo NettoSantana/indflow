@@ -1,6 +1,6 @@
 # Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Ultimo recode: 2026-03-06 01:45:34 -0300
-# Motivo: Fazer o /machine/update consumir e limpar corretamente a pendencia de troca de bobina, evitando travar da segunda para a terceira bobina.
+# Ultimo recode: 2026-03-06 17:20:00 -0300
+# Motivo: Corrigir card do dashboard na virada da hora, zerando acumuladores stale (_ph_acc/producao_hora) quando o baseline_hora ja virou.
 
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
 # LAST_RECODE: 2026-03-05 19:46 America/Bahia
@@ -2341,6 +2341,84 @@ def _sum_prev_hours_produzido(conn, machine_id: str, cliente_id: str, dia_ref: s
         return total
     except Exception:
         return 0
+def _normalizar_virada_hora_card(m: dict) -> None:
+    """
+    Corrige estado inconsistente do card na virada da hora.
+
+    Sintoma observado:
+    - baseline_hora ja reancorado para o ESP atual
+    - mas producao_hora / _ph_acc continuam carregando o valor da hora anterior
+
+    Regras defensivas:
+    1) Se o idx da hora mudou, zera acumuladores da hora e reancora baseline_hora no esp atual.
+    2) Se baseline_hora >= esp_absoluto e ainda houver producao_hora positiva, tambem zera.
+    """
+    try:
+        idx_atual = calcular_ultima_hora_idx(m)
+    except Exception:
+        return
+
+    if idx_atual is None:
+        return
+
+    try:
+        idx_atual = int(idx_atual)
+    except Exception:
+        return
+
+    try:
+        idx_anterior = m.get("_ph_acc_idx")
+        idx_anterior = int(idx_anterior) if idx_anterior is not None else None
+    except Exception:
+        idx_anterior = None
+
+    try:
+        esp_atual = int(m.get("esp_absoluto", 0) or 0)
+    except Exception:
+        esp_atual = 0
+
+    try:
+        baseline_hora = int(m.get("baseline_hora", 0) or 0)
+    except Exception:
+        baseline_hora = 0
+
+    try:
+        prod_hora = int(m.get("producao_hora", 0) or 0)
+    except Exception:
+        prod_hora = 0
+
+    virou_hora = (idx_anterior is not None and idx_anterior != idx_atual)
+    estado_inconsistente = (baseline_hora >= esp_atual and prod_hora > 0)
+
+    if not virou_hora and not estado_inconsistente:
+        return
+
+    m["ultima_hora"] = idx_atual
+    m["_ph_acc_idx"] = idx_atual
+    m["baseline_hora"] = esp_atual
+    m["_ph_acc"] = 0
+    m["producao_hora"] = 0
+    m["producao_hora_liquida"] = 0
+    m["percentual_hora"] = 0
+
+    try:
+        arr = m.get("producao_por_hora")
+        if isinstance(arr, list) and 0 <= idx_atual < len(arr):
+            arr[idx_atual] = 0
+    except Exception:
+        pass
+
+    try:
+        exib = m.get("producao_exibicao_24")
+        horas_turno = m.get("horas_turno") or []
+        if isinstance(exib, list) and isinstance(horas_turno, list) and 0 <= idx_atual < len(horas_turno):
+            faixa = str(horas_turno[idx_atual] or "")
+            h_ini = int(faixa.split("-", 1)[0].strip().split(":", 1)[0])
+            if 0 <= h_ini < len(exib):
+                exib[h_ini] = 0
+    except Exception:
+        pass
+
 def _sync_producao_diaria_absoluta(machine_id: str, cliente_id: str | None, dia_ref: str, produzido_abs: int, meta: int | None = None) -> None:
     """
     Garante que producao_diaria reflita o valor absoluto (producao_turno) e nao um acumulado incremental.
@@ -2690,6 +2768,7 @@ def update_machine():
 
 
     atualizar_producao_hora(m)
+    _normalizar_virada_hora_card(m)
 
     # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
     try:
@@ -3482,6 +3561,7 @@ def machine_status():
     carregar_baseline_diario(m, machine_id)
 
     atualizar_producao_hora(m)
+    _normalizar_virada_hora_card(m)
 
     # Fix: garante que producao_diaria seja valor absoluto do turno (evita Historico dobrar)
     try:
