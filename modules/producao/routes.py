@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-05 15:00:30 (America/Bahia)
-# MOTIVO: Garantir que /producao/op/get aplique pcs/metros ao vivo somente na bobina realmente ativa (maior seq aberta), evitando duplicidade no modal.
+# LAST_RECODE: 2026-03-06 00:00:00 (America/Bahia)
+# MOTIVO: Bloquear troca de bobina quando a OP ja estiver na ultima bobina cadastrada, evitando pendencia invalida e troca infinita.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -3350,6 +3350,13 @@ def op_troca_bobina():
         if not open_info:
             return jsonify({"error": "Nenhuma bobina aberta para trocar"}), 409
         open_seq, open_start_abs, _open_cm = open_info
+
+        stage = "validate_next_bobina"
+        total_bobinas = len(bobinas_list or [])
+        if total_bobinas <= 0:
+            return jsonify({"error": "Nao permite trocar sem bobina cadastrada"}), 409
+        if int(open_seq) >= int(total_bobinas) - 1:
+            return jsonify({"error": "Ultima bobina ja esta em uso. Nao existe proxima bobina para trocar."}), 409
 
         stage = "esp_snapshot"
         esp_abs, esp_ts = _get_current_esp_snapshot(conn, machine_id)
