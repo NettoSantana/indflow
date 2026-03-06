@@ -1,7 +1,3 @@
-# Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Ultimo recode: 2026-03-06 01:45:34 -0300
-# Motivo: Fazer o /machine/update consumir e limpar corretamente a pendencia de troca de bobina, evitando travar da segunda para a terceira bobina.
-
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
 # LAST_RECODE: 2026-03-05 19:46 America/Bahia
 # MOTIVO: Corrigir abertura sequencial de bobinas (N bobinas) no /machine/update; se existir evento seq ja criado mas vazio, preencher started_at/start_abs_pcs em vez de ignorar.
@@ -203,60 +199,21 @@ def _create_bobina_event(conn: sqlite3.Connection, op_id: int, seq: int, comprim
         (int(op_id), int(seq), int(comprimento_m), str(started_at_iso), int(start_abs_pcs), str(created_at), str(created_at)),
     )
 
-
-def _ensure_op_bobina_pendencia_table(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ordens_producao_bobina_pendencia (
-            op_id INTEGER PRIMARY KEY,
-            machine_id TEXT NOT NULL,
-            armed_at TEXT NOT NULL,
-            closed_seq INTEGER NOT NULL DEFAULT 0,
-            closed_abs_pcs INTEGER NOT NULL DEFAULT 0,
-            next_seq INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT,
-            updated_at TEXT
-        )
-        """
-    )
-
-def _load_bobina_pendencia(conn: sqlite3.Connection, op_id: int):
-    _ensure_op_bobina_pendencia_table(conn)
-    row = conn.execute(
-        """
-        SELECT op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq
-        FROM ordens_producao_bobina_pendencia
-        WHERE op_id = ?
-        LIMIT 1
-        """,
-        (int(op_id),),
-    ).fetchone()
-    if not row:
-        return None
-    return {
-        "op_id": int(row[0] or 0),
-        "machine_id": str(row[1] or "").strip(),
-        "armed_at": str(row[2] or "").strip(),
-        "closed_seq": int(row[3] or 0),
-        "closed_abs_pcs": int(row[4] or 0),
-        "next_seq": int(row[5] or 0),
-    }
-
-def _clear_bobina_pendencia_conn(conn: sqlite3.Connection, op_id: int) -> None:
-    _ensure_op_bobina_pendencia_table(conn)
-    conn.execute("DELETE FROM ordens_producao_bobina_pendencia WHERE op_id = ?", (int(op_id),))
-
 def _maybe_open_next_bobina_on_update(conn: sqlite3.Connection, machine_id: str, esp_now: int, ts_iso: str) -> None:
     """
     Regra de bobinas (N bobinas):
     - OP ATIVA possui uma lista de bobinas cadastradas (CSV em op.bobina).
-    - Ao clicar 'troca', a rota de producao fecha a bobina atual e grava uma pendencia.
-    - No PRIMEIRO /machine/update apos a troca, esta funcao deve abrir a proxima seq
-      e consumir/remover a pendencia.
-    - Mantemos o fallback legado por eventos para nao quebrar compatibilidade.
+    - Existe uma timeline por eventos (ordens_producao_bobina_eventos) com seq 0..N-1.
+    - Ao clicar 'troca', o backend fecha o evento atual (set ended_at/end_abs_pcs).
+    - No PRIMEIRO /machine/update que chegar depois disso (esp_now > end_abs_pcs),
+      o sistema deve ABRIR a proxima seq (N+1), preenchendo started_at e start_abs_pcs.
+
+    Bug corrigido:
+    - Em alguns cenarios o registro da seq seguinte pode existir, mas sem started_at/start_abs_pcs (evento 'vazio').
+      Antes o codigo ignorava por existir (event_exists) e a sequencia travava na bobina 2.
+      Agora: se existir e estiver vazio, preenche (UPDATE) e segue normalmente.
     """
     _ensure_op_bobina_eventos_table(conn)
-    _ensure_op_bobina_pendencia_table(conn)
 
     op = _load_op_ativa(conn, machine_id)
     if not op:
@@ -269,40 +226,6 @@ def _maybe_open_next_bobina_on_update(conn: sqlite3.Connection, machine_id: str,
 
     created_at = now_bahia().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Caminho oficial: consumir a pendencia criada em /producao/op/troca-bobina
-    pend = _load_bobina_pendencia(conn, op_id)
-    if pend:
-        try:
-            next_seq = int(pend.get("next_seq") or 0)
-        except Exception:
-            next_seq = 0
-        try:
-            closed_abs_i = int(pend.get("closed_abs_pcs") or 0)
-        except Exception:
-            closed_abs_i = 0
-
-        # Se a pendencia estiver invalida ou alem da quantidade de bobinas, limpa para nao travar a OP
-        if next_seq < 0 or next_seq >= len(bobinas):
-            _clear_bobina_pendencia_conn(conn, op_id)
-            return
-
-        # So abre a proxima bobina quando chegar um update real apos o fechamento
-        if int(esp_now) <= int(closed_abs_i):
-            return
-
-        if _event_exists(conn, op_id, next_seq):
-            row_next = _load_bobina_event_by_seq(conn, op_id, next_seq)
-            if _is_event_sem_start(row_next):
-                _set_event_start(conn, op_id, next_seq, ts_iso, int(esp_now), created_at)
-            # Mesmo que o evento ja exista/preenchido, a pendencia precisa ser consumida
-            _clear_bobina_pendencia_conn(conn, op_id)
-            return
-
-        _create_bobina_event(conn, op_id, next_seq, bobinas[next_seq], ts_iso, int(esp_now), created_at)
-        _clear_bobina_pendencia_conn(conn, op_id)
-        return
-
-    # Fallback legado por eventos: mantido apenas para compatibilidade
     last = _load_last_bobina_event(conn, op_id)
 
     # Se nao existe nenhum evento ainda, garante seq 0 iniciada (defensivo)
@@ -327,14 +250,17 @@ def _maybe_open_next_bobina_on_update(conn: sqlite3.Connection, machine_id: str,
     if next_seq >= len(bobinas):
         return
 
+    # Precisamos de end_abs para validar que houve pulso apos a troca
     try:
         end_abs_i = int(last_end_abs or 0)
     except Exception:
         end_abs_i = 0
 
+    # Somente abre quando chegar esp_now apos o fechamento (primeiro update real)
     if int(esp_now) <= int(end_abs_i):
         return
 
+    # Se o registro ja existe, mas esta vazio, completar e pronto.
     if _event_exists(conn, op_id, next_seq):
         row_next = _load_bobina_event_by_seq(conn, op_id, next_seq)
         if _is_event_sem_start(row_next):
@@ -342,7 +268,6 @@ def _maybe_open_next_bobina_on_update(conn: sqlite3.Connection, machine_id: str,
         return
 
     _create_bobina_event(conn, op_id, next_seq, bobinas[next_seq], ts_iso, int(esp_now), created_at)
-
 def _ensure_machine_op_fila_table(conn: sqlite3.Connection) -> None:
     conn.execute(
         """

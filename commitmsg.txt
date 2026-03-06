@@ -1,4 +1,0 @@
-﻿fix(historico): ancorar 'hoje' pelo MAX(data_ref) da producao_diaria
-
-- Evita aparecer 'amanha' zerado no Historico quando o servidor estiver com timezone/dia diferente do cliente
-- Usa MAX(data_ref) por maquina para definir o range de datas do /api/producao/historico

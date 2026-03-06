@@ -1,29 +1,26 @@
 <!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-26 16:28 America/Bahia
-MOTIVO: Renomear campo "Qtd. saco ou caixa" para "Retrabalho" no modal de bobinas (mantém mesmo backend).
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-06 13:40:00 -0300
+Motivo: Remover barra superior da tabela, ocultar dias sem producao no frontend e encurtar visualmente as linhas de OP.
 -->
 
 <!--
-PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-02-25 05:58 America/Bahia
-MOTIVO: Corrigir hora atual e horas futuras no Historico usando timezone America/Bahia (evita marcar 07:00 quando sao 05:50).
--->
-<!--
-Caminho: indflow/modules/producao/templates/historico.html
-Último recode: 2026-02-23 22:14
-Motivo: Adicionar barra por segmentos (RUN/STOP/NP) no modal do histórico e atualização periódica para refletir produção/parada em tempo real.
--->
-<!--
-PATH: modules/producao/templates/historico.html
-LAST_RECODE: 2026-02-24 19:40 America/Bahia
-MOTIVO: Ajustar Tempo Prod/Parado para ler *_sec do backend e exibir em minutos no layout.
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-06 09:20:00 -0300
+Motivo: Destacar linhas da OP por status; ocultar botao Troca de Bobina na ultima bobina; destacar slot da bobina ativa.
 -->
 
-{#
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-02-21 22:30 America/Bahia
-#}
+<!--
+Path: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Last recode: 2026-03-05 19:35:00 -03:00
+Reason: Troca de Bobina no modal com trava ate primeiro machine/update; evitar zerar metragem/pcs em bobinas fechadas; incluir eventos no detect de producao real
+-->
+<!--
+ARQUIVO: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+ULTIMO RECODE: 2026-03-05 19:00:00 -0300
+MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/comprimento) quando bobinas_detail vier vazio, e manter fallback seguro.
+-->
+
 {% extends "base.html" %}
 {% block title %}Histórico — IndFlow{% endblock %}
 {% block content %}
@@ -55,7 +52,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     border-radius:16px;
     padding:16px;
     box-shadow:0 4px 12px rgba(0,0,0,0.10);
-    border:1px solid #e5e7eb;
+    border:1px solid #e8e8e8;
   }
 
   .filter-bar{
@@ -112,18 +109,22 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     font-size:14px;
   }
 
+  thead{
+    display:none;
+  }
+
   thead th{
     background:#f1f5f9;
     color:#0f172a;
     font-weight:800;
     padding:12px 14px;
     text-align:left;
-    border-bottom:1px solid #e5e7eb;
+    border-bottom:1px solid #e8e8e8;
   }
 
   tbody td{
     padding:10px 14px;
-    border-bottom:1px solid #e5e7eb;
+    border-bottom:1px solid #e8e8e8;
     color:#0f172a;
   }
 
@@ -152,15 +153,104 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     color:#334155;
     font-size:13px;
     font-weight:700;
-    border-bottom:1px solid #e5e7eb;
+    padding-top:4px;
+    padding-bottom:4px;
+    border-bottom:1px solid #94a3b8; /* mais escuro que o dia */
   }
+
+  /* Status visual sem barra lateral */
+  .op-row.op-row-lista td{
+    background:#ffffff;
+  }
+
+  .op-row.op-row-ativa td{ background:#d9f0e1; }
+
+  .op-row.op-row-encerrada td{ background:#eeeeee; }
 
   .op-row{
     cursor:pointer;
   }
 
   .op-row:hover td{
-    background:#eef2ff;
+    filter:brightness(0.98);
+  }
+
+  /* Linha do DIA: cabeçalho industrial */
+  tr.day-row td{
+    padding:0;
+    background:#f3f4f6;
+    border-bottom:1px solid #d1d5db;
+  }
+
+  .day-summary{
+    min-height:50px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding:10px 16px;
+    background:#f3f4f6;
+  }
+
+  .day-date{
+    flex:0 0 auto;
+    font-size:14px;
+    font-weight:900;
+    color:#374151;
+    letter-spacing:0.01em;
+    text-transform:uppercase;
+  }
+
+  .day-metrics{
+    flex:1 1 auto;
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .day-metric{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    color:#4b5563;
+    font-size:13px;
+    font-weight:800;
+    white-space:nowrap;
+  }
+
+  .day-metric-label{
+    color:#6b7280;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+  }
+
+  .day-divider{
+    width:1px;
+    height:18px;
+    background:#d1d5db;
+  }
+
+  /* Linha da OP mais curta visualmente */
+  td.op-cell{
+    padding-left:14px !important;
+    padding-right:0 !important;
+  }
+
+  .op-content{
+    display:inline-flex;
+    align-items:center;
+    max-width:640px;
+    width:100%;
+    min-height:28px;
+  }
+
+  td.op-actions{
+    width:132px;
+    padding-left:8px !important;
   }
 
   .op-pill{
@@ -176,11 +266,11 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   .op-pill-ativa{
     background:#dcfce7;
     color:#166534;
-    border:1px solid #bbf7d0;
+    border:1px solid #d9f0e1;
   }
 
   .op-pill-encerrada{
-    background:#e5e7eb;
+    background:#e8e8e8;
     color:#374151;
     border:1px solid #d1d5db;
   }
@@ -191,6 +281,40 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     border:1px solid #e2e8f0;
   }
 
+  /* Coluna Acoes (botoes a direita) */
+  td.op-actions{
+    text-align:right;
+    white-space:nowrap;
+  }
+
+  .op-action-btn{
+    display:inline-block;
+    border:1px solid #94a3b8;
+    background:#ffffff;
+    color:#0f172a;
+    border-radius:10px;
+    padding:5px 10px;
+    font-weight:800;
+    font-size:12px;
+    cursor:pointer;
+    margin-left:8px;
+  }
+
+  .op-action-btn:hover{
+    background:#f1f5f9;
+  }
+
+  .op-action-btn-danger{
+    border-color:#b91c1c;
+    color:#b91c1c;
+    background:#ffffff;
+  }
+
+  .op-action-btn-danger:hover{
+    background:#fee2e2;
+  }
+
+  /* Botao vermelho existente (reset por data) */
   .actions {
     display: flex;
     gap: 8px;
@@ -212,8 +336,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     opacity: 0.6;
     cursor: not-allowed;
   }
-
-  /* ===============================
+/* ===============================
      Modal OP (respeita layout)
      =============================== */
   .op-modal-backdrop{
@@ -233,7 +356,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     background:#ffffff;
     border-radius:16px;
     box-shadow:0 18px 60px rgba(0,0,0,0.30);
-    border:1px solid #e5e7eb;
+    border:1px solid #e8e8e8;
     overflow:hidden;
 
     /* rolagem no conteudo do modal */
@@ -247,7 +370,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     align-items:center;
     justify-content:space-between;
     padding:14px 16px;
-    border-bottom:1px solid #e5e7eb;
+    border-bottom:1px solid #e8e8e8;
     background:#ffffff;
   }
 
@@ -340,7 +463,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     justify-content:flex-end;
     gap:10px;
     padding:12px 16px;
-    border-top:1px solid #e5e7eb;
+    border-top:1px solid #e8e8e8;
     background:#ffffff;
   }
 
@@ -378,6 +501,43 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   /* ===============================
      Bobinas (fechamento por bobina)
      =============================== */
+
+  .bobinas-m-wrap{
+    margin-top:12px;
+    padding:12px;
+    border:1px solid #e8e8e8;
+    border-radius:14px;
+    background:#ffffff;
+  }
+  .bobinas-m-header{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-bottom:10px;
+  }
+  .bobinas-m-title{
+    font-size:12px;
+    font-weight:900;
+    color:#0f172a;
+    text-transform:uppercase;
+    letter-spacing:0.03em;
+  }
+  .bobinas-m-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+  }
+  .bobinas-m-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .bobinas-m-row input{
+    width:220px;
+    max-width:100%;
+  }
+
   .bobinas-wrap{
     grid-column: span 12;
     display:flex;
@@ -387,10 +547,15 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
   }
 
   .bobina-card{
-    border:1px solid #e5e7eb;
+    border:1px solid #e8e8e8;
     border-radius:14px;
     padding:12px;
     background:#ffffff;
+  }
+
+  .bobina-card.bobina-card-ativa{
+    background:#dcfce7;
+    border-color:#86efac;
   }
 
   .bobina-title{
@@ -436,7 +601,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     overflow:auto;
     background:#ffffff;
     border-radius:16px;
-    border:1px solid #e5e7eb;
+    border:1px solid #e8e8e8;
     box-shadow:0 18px 40px rgba(0,0,0,0.30);
   }
   .day-modal-header{
@@ -445,7 +610,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     justify-content:space-between;
     gap:12px;
     padding:14px 16px;
-    border-bottom:1px solid #e5e7eb;
+    border-bottom:1px solid #e8e8e8;
     background:#f8fafc;
   }
   .day-modal-title{
@@ -515,7 +680,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     width:100%;
     height:12px;
     border-radius:999px;
-    background:#e5e7eb;
+    background:#e8e8e8;
     overflow:hidden;
     display:flex;
     border:1px solid #cbd5e1;
@@ -530,7 +695,7 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     width:100%;
     height:12px;
     border-radius:999px;
-    background:#e5e7eb;
+    background:#e8e8e8;
     overflow:hidden;
     border:1px solid #cbd5e1;
   }
@@ -545,7 +710,8 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
   /* Clique na linha do dia */
   tr.day-row{ cursor:pointer; }
-  tr.day-row:hover td{ background:#f8fafc; }
+  tr.day-row:hover td,
+  tr.day-row:hover .day-summary{ background:#eceff3; }
 
 
   .hwrap{
@@ -598,11 +764,12 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
           <th class="r">Produção Total</th>
           <th class="r">Peças Boas</th>
           <th class="r">Refugo</th>
+            <th class="r">Ações</th>
         </tr>
       </thead>
 
       <tbody id="historico-body">
-        <tr class="loading"><td colspan="4">Carregando histórico...</td></tr>
+        <tr class="loading"><td colspan="5">Carregando histórico...</td></tr>
       </tbody>
     </table>
 
@@ -663,12 +830,24 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 
         <!-- Linha 3 (read-only / azul) -->
         <div class="op-field op-ro col-6">
-          <label>HS-inicial</label>
+          <label>ABERTURA OP</label>
           <input id="opv_started" type="text" readonly>
         </div>
         <div class="op-field op-ro col-6">
-          <label>HS-término</label>
+          <label>FINAL OP</label>
           <input id="opv_ended" type="text" readonly>
+        </div>
+
+
+        <!-- Bobinas (metros) - editavel no modo edicao -->
+        <div class="bobinas-m-wrap" id="bobinas-m-wrap" style="display:none;">
+          <div class="bobinas-m-header">
+            <div class="bobinas-m-title">Bobinas (metros)</div>
+            <button type="button" class="btn-secondary" id="bobinas-m-add">Adicionar bobina</button>
+          </div>
+          <div class="bobinas-m-list" id="bobinas-m-list">
+            <!-- preenchido via JS -->
+          </div>
         </div>
 
         <!-- Bobinas (fechamento por bobina) -->
@@ -686,7 +865,8 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     </div>
 
     <div class="op-modal-footer">
-      <button type="button" id="op-modal-cancel" class="btn-secondary">Fechar</button>
+      <button type="button" id="op-modal-toggle" class="btn-secondary">Ativar OP</button>
+      <button type="button" id="op-modal-swap" class="btn-secondary">Troca de Bobina</button>
       <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
       <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
@@ -726,6 +906,36 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
 <script>
 (function(){
   "use strict";
+
+  // Helpers: datas da OP
+  // ABERTURA_OP: nasce ao criar (nao deve ser sobrescrita na ativacao)
+  // ATIVACAO_OP: nasce ao ativar
+  function getOpAberturaIso(op){
+    if(!op) return "";
+    return (
+      op.abertura_op ||
+      op.abertura_at ||
+      op.created_at ||
+      op.createdAt ||
+      op.started_at ||
+      ""
+    );
+  }
+
+  function getOpAtivacaoIso(op){
+    if(!op) return "";
+    return (
+      op.ativada_at ||
+      op.ativacao_at ||
+      op.activated_at ||
+      op.started_at ||
+      ""
+    );
+  }
+
+  // Exporta para debug (evita erro de escopo em handlers)
+  window.getOpAberturaIso = getOpAberturaIso;
+  window.getOpAtivacaoIso = getOpAtivacaoIso;
 
   const IND_TZ = "America/Bahia";
 
@@ -799,6 +1009,91 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return y + "-" + m + "-" + day;
   }
 
+
+
+  function opDiaISO(op){
+    // Usa __dia_ref quando existir (backend)
+    const dr = safeText(op && (op.__dia_ref || op.data_ref || op.data));
+    if(dr) return normalizeDateInput(dr);
+
+    // Fallback: tenta extrair do started_at
+    const st = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const d = normalizeDateInput(st);
+    return d || "";
+  }
+
+  function opIsHoje(op){
+    const d = opDiaISO(op);
+    return (d && d === todayIsoLocal());
+  }
+
+  function espFromStatus(status){
+    const v = Number(status && (
+      status.esp_absoluto ?? status._bd_esp_last ?? status._last_esp_abs_seen ?? status._ph_esp_last_seen ?? status._last_esp_abs
+    ));
+    return Number.isFinite(v) ? v : null;
+  }
+
+  function enrichOpWithLive(op){
+    try{
+      if(!op) return op;
+
+      const statusTxt = safeText(op.status).toUpperCase();
+      const ativa = statusTxt.includes("ATIV");
+      if(!ativa) return op;
+
+      if(!opIsHoje(op)) return op;
+
+      const base = Number(op.baseline_pcs);
+      if(!Number.isFinite(base)) return op;
+
+      const st = lastMachineStatus;
+      if(!st) return op;
+
+      const esp = espFromStatus(st);
+      if(esp === null) return op;
+
+      const delta = Math.max(0, Math.floor(esp - base));
+      const conv = num0(op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? st.conv_m_por_pcs ?? st.conv_m_per_pcs ?? 0);
+
+      // Clona leve (evita mutar cache original)
+      const op2 = Object.assign({}, op);
+      op2.esp_atual = esp;
+      op2.op_pcs = delta;
+      op2.op_metros = round2(delta * conv);
+
+      const itens = Array.isArray(op2.bobinas_itens) ? op2.bobinas_itens.slice() : [];
+      if(itens.length > 0){
+        const now = nowInTzDate(IND_TZ);
+        const nowMs = now.getTime();
+
+        // Atualiza apenas a primeira bobina "aberta" (a regra do backend hoje é 1 bobina ativa por OP)
+        const it0 = Object.assign({}, itens[0]);
+        it0.pcs_total = delta;
+        it0.metro_consumido = round2(delta * conv);
+
+        // Tempo: diferenca entre started_at e agora
+        const startedRaw = safeText(it0.started_at || op2.started_at || "");
+        try{
+          const ds = new Date(startedRaw);
+          if(!isNaN(ds.getTime())){
+            const diffMin = Math.max(0, Math.floor((nowMs - ds.getTime()) / 60000));
+            it0.tempo_consumo_min = diffMin;
+          }
+        }catch(e){}
+
+        // Enquanto ativa, nao fixa hora final
+        it0.ended_at = "";
+
+        itens[0] = it0;
+        op2.bobinas_itens = itens;
+      }
+
+      return op2;
+    }catch(e){
+      return op;
+    }
+  }
 
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
@@ -1043,6 +1338,37 @@ Ultimo recode: 2026-02-21 22:30 America/Bahia
     return new Intl.NumberFormat("pt-BR").format(Math.floor(x));
   }
 
+  function normalizeOsValue(v){
+    const s = safeText(v).trim();
+    return s;
+  }
+
+  function findDuplicateOsInCache(osValue, currentOpId){
+    const osNorm = normalizeOsValue(osValue);
+    if(!osNorm) return null;
+
+    const curId = Number(currentOpId || 0) || 0;
+
+    if(!Array.isArray(cache)) return null;
+
+    for(const r of cache){
+      const ops = r && r.ops;
+      if(!Array.isArray(ops)) continue;
+
+      for(const op of ops){
+        const opId = Number((op && (op.op_id ?? op.id ?? op.opId ?? op.opid)) || 0) || 0;
+        if(curId && opId && opId === curId) continue;
+
+        const opOs = normalizeOsValue(op && (op.os || op.os_num || op.ordem_servico));
+        if(opOs && opOs === osNorm){
+          return { op_id: opId, os: opOs, dia: getRowDateISO(r) };
+        }
+      }
+    }
+
+    return null;
+  }
+
   function fmtInt(n){
     return fmtNum(n);
   }
@@ -1093,6 +1419,67 @@ function safeText(v){
     return "op-pill-unk";
   }
 
+  function opRowClass(status){
+    const s = safeText(status).toUpperCase();
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return "op-row-encerrada";
+    if(s.includes("ATIV") || s.includes("ABERT") || s.includes("EM_ANDAMENTO") || s.includes("PRODU") || s.includes("ANDAMENTO")) return "op-row-ativa";
+    return "op-row-lista";
+  }
+
+  function getBobinasCount(op){
+    if(!op) return 0;
+    const itens = pickOpBobinasItens(op);
+    if(Array.isArray(itens) && itens.length) return itens.length;
+    const arrM = Array.isArray(op.bobinas_m) ? op.bobinas_m : (Array.isArray(op.bobinasM) ? op.bobinasM : []);
+    if(arrM.length) return arrM.length;
+    const arrLegacy = Array.isArray(op.bobinas) ? op.bobinas : [];
+    if(arrLegacy.length) return arrLegacy.length;
+    return 0;
+  }
+
+  function getOpenBobinaSeq(op){
+    if(!op) return -1;
+
+    const eventos = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
+    if(Array.isArray(eventos) && eventos.length){
+      for(let i = eventos.length - 1; i >= 0; i--){
+        const ev = eventos[i];
+        if(!ev || typeof ev !== "object") continue;
+        const endedAt = safeText(ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at).trim();
+        const endedAbs = Number(ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0);
+        if(!endedAt && !(endedAbs > 0)){
+          const seq = Number(ev.seq ?? ev.idx ?? i);
+          if(Number.isFinite(seq) && seq >= 0) return seq;
+        }
+      }
+    }
+
+    const itens = pickOpBobinasItens(op);
+    if(Array.isArray(itens) && itens.length){
+      for(let i = 0; i < itens.length; i++){
+        const it = itens[i];
+        const startedAt = safeText(it && (it.started_at ?? it.inicio ?? it.hs_inicial ?? it.start_at)).trim();
+        const endedAt = safeText(it && (it.ended_at ?? it.fim ?? it.hs_final ?? it.hs_termino ?? it.end_at)).trim();
+        if(startedAt && !endedAt) return i;
+      }
+    }
+
+    const st = safeText(op.status).toUpperCase();
+    if((st.includes("ATIV") || st.includes("PRODU") || st.includes("ANDAMENTO")) && getBobinasCount(op) > 0){
+      return 0;
+    }
+
+    return -1;
+  }
+
+  function hasNextBobinaAvailable(op){
+    const total = getBobinasCount(op);
+    if(total <= 0) return false;
+    const openSeq = getOpenBobinaSeq(op);
+    if(openSeq < 0) return true;
+    return openSeq < (total - 1);
+  }
+
   function anyText(v){
     const s = safeText(v).trim();
     return s ? s : "-";
@@ -1121,7 +1508,8 @@ function safeText(v){
   /* Modal */
   const modalBackdrop = document.getElementById("op-modal-backdrop");
   const modalClose = document.getElementById("op-modal-close");
-  const modalCancel = document.getElementById("op-modal-cancel");
+  const modalToggle = document.getElementById("op-modal-toggle");
+  const modalSwap = document.getElementById("op-modal-swap");
   const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
@@ -1134,6 +1522,10 @@ function safeText(v){
 
   let dayModalTimer = null;
   let dayModalCurrentDay = null;
+  let livePausedByDayModal = false;
+
+  let opModalTimer = null;
+  let opModalRefreshing = false;
 
 
   const opv_machine = document.getElementById("opv_machine");
@@ -1148,9 +1540,42 @@ function safeText(v){
   const opv_ended = document.getElementById("opv_ended");
 
   const bobinasWrap = document.getElementById("bobinas-wrap");
+  const bobinasMWrap = document.getElementById("bobinas-m-wrap");
+  const bobinasMList = document.getElementById("bobinas-m-list");
+  const bobinasMAdd = document.getElementById("bobinas-m-add");
+
   const ope_obs = document.getElementById("ope_obs");
 
   let currentOp = null;
+  let currentOpMode = "view"; // view | edit
+  let currentBobinasM = [];
+  let swapLockActive = false;
+  let swapLockOpId = 0;
+  let swapLockNextSeq = null;
+
+  function resetSwapLock(){
+    swapLockActive = false;
+    swapLockOpId = 0;
+    swapLockNextSeq = null;
+  }
+
+  function opHasStartedSeq(op, seq){
+    if(!op) return false;
+    const arr = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
+    if(!Array.isArray(arr) || !arr.length) return false;
+    for(const ev of arr){
+      if(!ev || typeof ev !== "object") continue;
+      const evSeq = Number(ev.seq ?? ev.idx ?? -1);
+      if(evSeq !== Number(seq)) continue;
+      const sa = String(ev.started_at ?? "").trim();
+      const abs = num0(ev.start_abs_pcs ?? 0);
+      if(sa && sa !== "-" && abs > 0) return true;
+    }
+    return false;
+  }
+
+
+
 
   function num0(v){
     const n = Number(v);
@@ -1174,6 +1599,115 @@ function safeText(v){
     return res;
   }
 
+
+  function setReadonly(el, ro){
+    if(!el) return;
+    if(ro){
+      el.setAttribute("readonly","readonly");
+    }else{
+      el.removeAttribute("readonly");
+    }
+  }
+
+  function showBobinasM(show){
+    if(!bobinasMWrap) return;
+    bobinasMWrap.style.display = show ? "" : "none";
+  }
+
+  function normalizeBobinasM(op){
+    // tentar pegar lista de bobinas em metros
+    const raw =
+      (op && (op.bobinas_m || op.bobinasM || op.bobinas_metros || op.bobinas_m_list)) ||
+      (op && (op.bobinas || op.bobinas_list || op.bobinasItens)) ||
+      [];
+    const arr = Array.isArray(raw) ? raw : [];
+    const out = [];
+    arr.forEach((x) => {
+      if(typeof x === "number" || typeof x === "string"){
+        const n = num0(x);
+        out.push(Math.floor(n));
+        return;
+      }
+      if(x && typeof x === "object"){
+        const n = num0(x.comprimento_m ?? x.metros ?? x.bobina_m ?? x.valor ?? 0);
+        out.push(Math.floor(n));
+      }
+    });
+    return out;
+  }
+
+  function renderBobinasM(){
+    if(!bobinasMList) return;
+    bobinasMList.innerHTML = "";
+
+    const list = Array.isArray(currentBobinasM) ? currentBobinasM : [];
+    list.forEach((m, idx) => {
+      const row = document.createElement("div");
+      row.className = "bobinas-m-row";
+      row.setAttribute("data-bm-idx", String(idx));
+
+      const w = document.createElement("div");
+      w.className = "op-field op-edit col-6";
+      w.style.margin = "0";
+
+      const l = document.createElement("label");
+      l.textContent = "Comprimento da bobina (m)";
+
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.inputMode = "numeric";
+      inp.min = "0";
+      inp.step = "1";
+      inp.value = String(Math.floor(num0(m)));
+      inp.addEventListener("input", function(){
+        const i = Number(row.getAttribute("data-bm-idx") || "0");
+        currentBobinasM[i] = Math.floor(num0(inp.value));
+      });
+
+      w.appendChild(l);
+      w.appendChild(inp);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-secondary";
+      btn.textContent = "Remover";
+      btn.addEventListener("click", function(e){
+        if(e){ e.preventDefault(); e.stopPropagation(); }
+        const i = Number(row.getAttribute("data-bm-idx") || "0");
+        currentBobinasM.splice(i, 1);
+        renderBobinasM();
+      });
+
+      row.appendChild(w);
+      row.appendChild(btn);
+      bobinasMList.appendChild(row);
+    });
+
+    // atualizar resumo
+    if(opv_bobinas_resumo){
+      opv_bobinas_resumo.value = bobinasResumo(list);
+    }
+
+    if(list.length === 0){
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Nenhuma bobina adicionada.";
+      bobinasMList.appendChild(empty);
+    }
+  }
+
+  function collectBobinasMFromUI(){
+    if(!bobinasMList) return [];
+    const out = [];
+    const rows = bobinasMList.querySelectorAll("[data-bm-idx]");
+    rows.forEach((row) => {
+      const inp = row.querySelector("input");
+      if(!inp) return;
+      out.push(Math.floor(num0(inp.value)));
+    });
+    return out;
+  }
+
   function clearBobinasUI(){
     if(!bobinasWrap) return;
     bobinasWrap.innerHTML = "";
@@ -1188,8 +1722,82 @@ function safeText(v){
     return String(bobinasItens.length) + " bobina(s) | " + String(Math.floor(totalM)) + " m";
   }
 
+
+  function pickOpBobinasItens(op){
+    if(!op) return [];
+    const cand = [
+      op.bobinas_detail,
+      op.bobinasDetail,
+      op.bobinas_itens,
+      op.bobinas_items,
+      op.bobinasItens,
+      op.bobinasItems,
+      op.bobinas
+    ];
+    for(let k=0;k<cand.length;k++){
+      const arr = cand[k];
+      if(Array.isArray(arr) && arr.length){
+        // Se vier array de numeros (ex.: [6000]), normaliza para objetos minimos
+        if(typeof arr[0] === "number"){
+          return arr.map((v) => ({ comprimento_m: num0(v) }));
+        }
+        return arr;
+      }
+    }
+    return [];
+  }
+
+
   function createBobinaCard(item, idx, convMporPcs, opts){
-    const comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
+    opts = opts || {};
+    const opCtx = opts.op || null;
+
+    function pickEvento(op, i){
+      if(!op) return null;
+      const arr = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
+      if(!arr || !arr.length) return null;
+      const ev = arr[i] ?? arr[0] ?? null;
+      return (ev && typeof ev === "object") ? ev : null;
+    }
+
+    function pickBobinaMFromOp(op, i){
+      if(!op) return 0;
+
+
+      // 0) eventos (quando backend devolve bobinas_eventos)
+      const ev0 = pickEvento(op, i);
+      if(ev0){
+        const vEv = num0(ev0.comprimento_m ?? ev0.comprimentoM ?? ev0.bobina_m ?? 0);
+        if(vEv > 0) return vEv;
+      }
+
+      // 1) op.bobina (legacy / principal)
+      const b1 = num0(op.bobina ?? op.bobina_m ?? op.bobina_metros ?? 0);
+      if(b1 > 0) return b1;
+
+      // 2) op.bobinas[0] (legacy list)
+      const arrLegacy = Array.isArray(op.bobinas) ? op.bobinas : (Array.isArray(op.bobinas_list) ? op.bobinas_list : []);
+      if(arrLegacy && arrLegacy.length){
+        const v = num0(arrLegacy[i] ?? arrLegacy[0] ?? 0);
+        if(v > 0) return v;
+      }
+
+      // 3) op.bobinas_m[0] (new format list)
+      const arrM = Array.isArray(op.bobinas_m) ? op.bobinas_m : (Array.isArray(op.bobinasM) ? op.bobinasM : []);
+      if(arrM && arrM.length){
+        const v = num0(arrM[i] ?? arrM[0] ?? 0);
+        if(v > 0) return v;
+      }
+
+      return 0;
+    }
+
+    // Comprimento da bobina: primeiro tenta no item; se vier 0/vazio, faz fallback usando dados da OP
+    let comprimentoM = num0(item && (item.comprimento_m ?? item.metros ?? item.bobina_m ?? 0));
+    if(!(comprimentoM > 0)){
+      comprimentoM = pickBobinaMFromOp(opCtx, idx);
+    }
+
     const pcsTotal = Math.floor(num0(item && (item.pcs_total ?? item.total_pcs ?? 0)));
     const metroConsumido = num0(item && (item.metro_consumido ?? item.metro_linear_consumido ?? 0));
 
@@ -1200,6 +1808,11 @@ function safeText(v){
     const card = document.createElement("div");
     card.className = "bobina-card";
     card.setAttribute("data-bobina-idx", String(idx));
+
+    const activeSeq = getOpenBobinaSeq(opCtx);
+    if(activeSeq === idx){
+      card.classList.add("bobina-card-ativa");
+    }
 
     const title = document.createElement("div");
     title.className = "bobina-title";
@@ -1251,7 +1864,6 @@ function safeText(v){
     }
 
     const conv = num0(convMporPcs);
-    opts = opts || {};
     const forceZeroLive = !!opts.forceZeroLive;
 
     // Opcao 1: nao estimar pcs/metragem por comprimento/conv.
@@ -1260,8 +1872,18 @@ function safeText(v){
     let derivedMetroConsumido = metroConsumido;
 
     // Read-only context
-    const startedRaw = item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ?? "");
-    let endedRaw = item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ?? "");
+    const ev = pickEvento(opCtx, idx);
+    const startedRaw = (
+      (item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at)) ||
+      (ev && (ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at)) ||
+      (opCtx && (opCtx.started_at ?? opCtx.hs_inicial ?? opCtx.inicio)) ||
+      ""
+    );
+    let endedRaw = (
+      (item && (item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at)) ||
+      (ev && (ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at)) ||
+      ""
+    );
     const startedStr = fmtIsoDateTimeLocal(startedRaw);
     let endedStr = fmtIsoDateTimeLocal(endedRaw);
 
@@ -1290,17 +1912,39 @@ function safeText(v){
 
     // Forcar inicio zerado/vazio no modal para OP ativa do dia (evita valores fantasmas antes do primeiro update)
     // Nao depender de ended_at da bobina, porque o backend pode popular ended_at prematuramente.
-    if(forceZeroLive){
+    if(forceZeroLive && bobinaAberta){
       derivedPcs = 0;
       derivedMetroConsumido = 0;
       tempoMin = 0;
       endedStr = "";
     }
 
-    grid.appendChild(fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3"));
-    grid.appendChild(fieldRO("Total pcs (bobina)", derivedPcs, "col-3"));
-    grid.appendChild(fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3"));
-    grid.appendChild(fieldRO("Tempo de consumo (min)", tempoMin, "col-3"));
+
+    // Atualizacao ao vivo: quando a OP esta ATIVA no dia atual e o backend envia esp_atual/baseline_pcs,
+    // calcular pcs/metragem/tempo mesmo que o item ainda esteja zerado.
+    if((!forceZeroLive) && opts && opts.isLiveHoje && (idx === 0) && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
+      derivedPcs = Math.floor(num0(opts.livePcs));
+      derivedMetroConsumido = num0(opts.liveMetros);
+      if(num0(opts.liveTempoMin) > 0) tempoMin = Math.floor(num0(opts.liveTempoMin));
+      // em modo live, nao mostrar hora final
+      endedStr = "";
+    }
+
+    const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
+    const fPcs = fieldRO("Total pcs (bobina)", derivedPcs, "col-3");
+    const fMetro = fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3");
+    const fTempo = fieldRO("Tempo de consumo (min)", tempoMin, "col-3");
+
+    // marca campos para leitura/validacao
+    try{
+      const pcsInp = fPcs && fPcs.querySelector("input");
+      if(pcsInp) pcsInp.setAttribute("data-field", "pcs_total");
+    }catch(e){}
+
+    grid.appendChild(fLen);
+    grid.appendChild(fPcs);
+    grid.appendChild(fMetro);
+    grid.appendChild(fTempo);
 
     grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
     grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
@@ -1339,8 +1983,133 @@ function safeText(v){
     return card;
   }
 
-  function openModal(op){
-    currentOp = op || null;
+
+  async function fetchOpGet(opId){
+    const qs = "?op_id=" + encodeURIComponent(String(opId));
+    const urls = ["/producao/op/get" + qs, "/op/get" + qs];
+    let lastErr = null;
+
+    for(const u of urls){
+      try{
+        const r = await fetch(u, { method: "GET" });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => null);
+        if(!data) return null;
+
+        // aceitar formatos: {ok:true, op:{...}} ou direto {...}
+        const op = (data.op || data.data || data) || null;
+        return op;
+      }catch(e){
+        lastErr = e;
+      }
+    }
+
+    throw lastErr || new Error("Falha ao carregar OP.");
+  }
+
+  async function postOpSwapBobina(opId){
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+    const urls = ["/producao/op/troca-bobina", "/op/troca-bobina"];
+    let lastErr = null;
+
+    for(const u of urls){
+      try{
+        const r = await fetch(u, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+
+        const data = await r.json().catch(() => ({}));
+
+        // Backend pode responder {status:"ok", ...} OU {ok:true, ...} OU {error:"..."}
+        if(data && (data.error || data.err)){
+          lastErr = new Error(data.error || data.err);
+          continue;
+        }
+
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+
+        if(data && data.status && String(data.status).toLowerCase() !== "ok"){
+          lastErr = new Error(data.error || ("Falha: " + String(data.status)));
+          continue;
+        }
+
+        return data || {};
+      }catch(e){
+        lastErr = e;
+      }
+    }
+
+    throw lastErr || new Error("Falha ao executar troca de bobina.");
+  }
+
+  async function openOpEdit(opId){
+    const id = Number(opId || 0);
+    if(!id){
+      alert("OP invalida.");
+      return;
+    }
+
+    try{
+      // Carregar a OP completa via /op/get
+      const op = await fetchOpGet(id);
+      if(!op){
+        alert("Nao foi possivel carregar a OP.");
+        return;
+      }
+      openModal(op, "edit");
+    }catch(err){
+      alert("Falha ao carregar OP: " + (err.message || err));
+    }
+  }
+
+  function openModal(op, mode, opts){
+    currentOp = enrichOpWithLive(op || null);
+    // Controle de trava de troca: se abriu outra OP, limpa trava.
+    const openedId = Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)) || 0;
+    if(swapLockActive && swapLockOpId && openedId && swapLockOpId !== openedId){
+      resetSwapLock();
+    }
+
+    // Se ja chegou o primeiro update que abriu a proxima bobina, libera a troca novamente.
+    if(swapLockActive && openedId && swapLockOpId === openedId && swapLockNextSeq != null){
+      if(opHasStartedSeq(currentOp, swapLockNextSeq)){
+        resetSwapLock();
+      }
+    }
+    currentOpMode = (mode === "edit") ? "edit" : "view";
+
+    // no modo edicao, liberar campos principais (exceto maquina/status)
+    const isEdit = (currentOpMode === "edit");
+    setReadonly(opv_operador, !isEdit);
+    setReadonly(opv_lote, !isEdit);
+    setReadonly(opv_os, !isEdit);
+    setReadonly(opv_gr_fio, !isEdit);
+    setReadonly(opv_conv, !isEdit);
+    setReadonly(opv_started, !isEdit);
+    setReadonly(opv_ended, !isEdit);
+    showBobinasM(isEdit);
+
+    if(isEdit){
+      currentBobinasM = normalizeBobinasM(op);
+      renderBobinasM();
+    }else{
+      currentBobinasM = [];
+    }
+
+
 
     if(modalTitle){
       const osNum = safeText(op && (op.os || op.os_num || op.ordem_servico)).trim();
@@ -1362,19 +2131,26 @@ function safeText(v){
     if(opv_lote) opv_lote.value = anyText(op && op.lote);
     if(opv_status) opv_status.value = anyText(op && op.status);
 
-    if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
+    
+
+    updateToggleButton();
+if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico));
     if(opv_gr_fio) opv_gr_fio.value = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
     if(opv_conv) opv_conv.value = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
 
     const opStatus = safeText(op && op.status).toUpperCase();
     const opEncerrada = (opStatus.includes("ENCERR") || opStatus.includes("FECH") || opStatus.includes("FINAL"));
-    const diaRef = safeText(op && op.__dia_ref);
+    const diaRefBruta = safeText(op && (op.__dia_ref || op.data_ref || op.data));
+    const startedIso = safeText(op && (op.started_at || op.hs_inicial || op.inicio));
+    const diaRefDerivada = (startedIso && startedIso.length >= 10) ? startedIso.slice(0,10) : "";
+    const diaRef = diaRefBruta || diaRefDerivada;
     const isHoje = (diaRef && diaRef === todayIsoLocal());
     // Regra: na OP ativa do dia atual, iniciar zerado apenas enquanto nao houver producao real no payload.
     // Assim evitamos valores "fantasma" na abertura e liberamos a atualizacao normal quando os dados reais chegarem.
     let temProducaoReal = false;
     try {
-      const itensCheck = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+      const itensCheck = pickOpBobinasItens(op);
+      const evCheck = (op && (Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : [])))) || [];
       let accPcs = 0;
       let accMetro = 0;
       let accMatBom = 0;
@@ -1387,9 +2163,15 @@ function safeText(v){
           accTempo += num0(it && (it.tempo_consumo_min ?? it.tempo_min ?? 0));
         });
       }
+      if(Array.isArray(evCheck)){
+        evCheck.forEach((ev) => {
+          accPcs += num0(ev && (ev.pcs_total ?? ev.total_pcs ?? 0));
+          accMetro += num0(ev && (ev.metro_consumido ?? ev.metro_linear_consumido ?? 0));
+        });
+      }
       const opPcs = num0(op && (op.op_pcs ?? op.total_pcs ?? op.produzido ?? 0));
       const opMetros = num0(op && (op.op_metros ?? op.total_m ?? 0));
-      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0);
+      temProducaoReal = (opPcs > 0) || (opMetros > 0) || (accPcs > 0) || (accMetro > 0) || (accMatBom > 0) || (accTempo > 0) || (Math.max(0, (num0(op && op.esp_atual) - num0(op && op.baseline_pcs))) > 0);
     } catch(e) { temProducaoReal = false; }
 
     const isLiveHoje = (!opEncerrada) && isHoje;
@@ -1407,18 +2189,55 @@ function safeText(v){
 
     const convMporPcs = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
+    const baselinePcs = num0(op && op.baseline_pcs);
+    const espAtual = num0(op && op.esp_atual);
+    const livePcs = (isLiveHoje && espAtual > 0 && baselinePcs > 0) ? Math.max(0, (espAtual - baselinePcs)) : 0;
+    const liveMetros = (livePcs > 0) ? (livePcs * convMporPcs) : 0;
+    let liveTempoMin = 0;
+    if(isLiveHoje && startedIso){
+      const t0 = new Date(startedIso).getTime();
+      if(!isNaN(t0)){
+        liveTempoMin = Math.max(0, Math.floor((Date.now() - t0) / 60000));
+      }
+    }
+
+
     clearBobinasUI();
 
-    const itens = (op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) || [];
+    const itens = pickOpBobinasItens(op);
     if(Array.isArray(itens) && itens.length > 0){
       if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(itens);
       itens.forEach((b, i) => {
-        const card = createBobinaCard(b, i, convMporPcs, {forceZeroLive: forceZeroLive});
+        const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
         if(bobinasWrap) bobinasWrap.appendChild(card);
       });
     }else{
-      if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
-      // Fallback legacy: cria uma bobina virtual com base no total da OP
+      // Se backend trouxe eventos de bobina, usa eles para montar os cards mesmo quando bobinas_itens/bobinas_detail vier vazio
+      const evArr = (op && (Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : [])))) || [];
+      if(evArr && evArr.length){
+        const pseudoItens = evArr.map((ev, i) => {
+          const startAbs = num0(ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? 0));
+          const endAbs = num0(ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0));
+          const pcsEvt = (endAbs > 0 && startAbs >= 0 && endAbs >= startAbs) ? (endAbs - startAbs) : 0;
+
+          return {
+            comprimento_m: num0(ev && (ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? 0)),
+            started_at: safeText(ev && (ev.started_at ?? ev.start_at ?? ev.inicio ?? "")),
+            ended_at: safeText(ev && (ev.ended_at ?? ev.end_at ?? ev.fim ?? "")),
+            baseline_pcs: startAbs,
+            esp_last: endAbs,
+            pcs_total: pcsEvt
+          };
+        });
+
+        if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(pseudoItens);
+        pseudoItens.forEach((b, i) => {
+          const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
+          if(bobinasWrap) bobinasWrap.appendChild(card);
+        });
+      }else{
+        if(opv_bobinas_resumo) opv_bobinas_resumo.value = "-";
+        // Fallback legacy: cria uma bobina virtual com base no total da OP
       const totalPcs = Math.floor(num0(op && (op.total_pcs ?? op.op_pcs ?? op.produzido ?? 0)));
       const comprimentoM = num0(op && (op.bobina ?? 0));
       const metroConsumido = (totalPcs > 0 && convMporPcs > 0) ? (totalPcs * convMporPcs) : 0;
@@ -1432,24 +2251,56 @@ function safeText(v){
         qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
       };
 
-      const card = createBobinaCard(legacy, 0, convMporPcs, {forceZeroLive: forceZeroLive});
+      const card = createBobinaCard(legacy, 0, convMporPcs, {op: op, forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
+      }
     }
 
     if(modalBackdrop){
       modalBackdrop.style.display = "flex";
       modalBackdrop.setAttribute("aria-hidden", "false");
     }
+    // live refresh enquanto estiver em view e OP ativa
+    try{
+      const _opts = opts || {};
+      if(!_opts.skipLiveStart){
+        startOpModalLiveRefresh();
+      }
+    }catch(e){}
+
   }
 
   function closeModal(){
     currentOp = null;
+
+    if(opModalTimer){
+      clearInterval(opModalTimer);
+      opModalTimer = null;
+    }
+    opModalRefreshing = false;
+
     if(modalBackdrop){
       modalBackdrop.style.display = "none";
       modalBackdrop.setAttribute("aria-hidden", "true");
     }
   }
 
+
+  function pauseLiveRefreshForDayModal(){
+    if(liveTimer){
+      clearInterval(liveTimer);
+      liveTimer = null;
+    }
+    livePausedByDayModal = true;
+  }
+
+  function resumeLiveRefreshAfterDayModal(){
+    if(!livePausedByDayModal) return;
+    livePausedByDayModal = false;
+    if(!liveTimer){
+      liveTimer = setInterval(refreshLive, 5000);
+    }
+  }
 
   function closeDayModal(){
     if(dayModalBackdrop){
@@ -1463,6 +2314,7 @@ function safeText(v){
       dayModalTimer = null;
     }
     dayModalCurrentDay = null;
+    resumeLiveRefreshAfterDayModal();
   }
 
   function parseTs(v){
@@ -1601,6 +2453,56 @@ function safeText(v){
   }
 
 
+  function buildMetricsBar(isoDay, hourIdx, row){
+    const bar = document.createElement("div");
+    bar.className = "tbar";
+
+    const meta = Number(row && (row.meta ?? row.meta_hora ?? 0)) || 0;
+    const prod = Number(row && (row.produzido ?? row.producao ?? row.prod ?? 0)) || 0;
+    const tProdSec = Number(row && (row.tempo_produzindo_sec ?? row.tempo_produzindo_seg ?? row.tempo_produzindo_s ?? 0)) || 0;
+    const tStopSec = Number(row && (row.tempo_parado_sec ?? row.tempo_parado_seg ?? row.tempo_parado_s ?? 0)) || 0;
+    const tProdMinRaw = Number(row && (row.tempo_produzindo_min ?? row.tempo_produzindo_minutos ?? row.tempo_produzindo ?? 0)) || 0;
+    const tStopMinRaw = Number(row && (row.tempo_parado_min ?? row.tempo_parado_minutos ?? row.tempo_parado ?? 0)) || 0;
+
+    const tProdMin = tProdSec > 0 ? Math.round(tProdSec / 60) : tProdMinRaw;
+    const tStopMin = tStopSec > 0 ? Math.round(tStopSec / 60) : tStopMinRaw;
+
+    function seg(cls, widthPct){
+      const div = document.createElement("div");
+      div.className = "tseg " + cls;
+      div.style.width = Math.max(0, widthPct).toFixed(3) + "%";
+      bar.appendChild(div);
+    }
+
+    if(isFutureHour(isoDay, hourIdx)){
+      seg("np", 100);
+      return bar;
+    }
+
+    if((tProdMin + tStopMin) > 0){
+      const prodPct = Math.min(100, (tProdMin / 60) * 100);
+      const stopPct = Math.min(100 - prodPct, (tStopMin / 60) * 100);
+      const npPct = Math.max(0, 100 - prodPct - stopPct);
+
+      if(prodPct > 0) seg("run", prodPct);
+      if(stopPct > 0) seg("stop", stopPct);
+      if(npPct > 0) seg("np", npPct);
+      return bar;
+    }
+
+    if(prod > 0){
+      if(meta > 0 && prod < meta){
+        seg("stop", 100);
+      }else{
+        seg("run", 100);
+      }
+      return bar;
+    }
+
+    seg("np", 100);
+    return bar;
+  }
+
   async function fetchDayDetail(isoDay){
     if(!machineId) throw new Error("machine_id vazio");
 
@@ -1638,10 +2540,8 @@ function safeText(v){
 
   function renderDayDetail(payload){
     const isoDay = payload && payload.date ? String(payload.date) : "";
-    const effectiveId = payload && payload.effective_machine_id ? String(payload.effective_machine_id) : "";
-    const machineId = payload && payload.machine_id ? String(payload.machine_id) : "";
 
-    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay) + (effectiveId && effectiveId !== machineId ? (" (id efetivo: " + effectiveId + ")") : "");
+    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay);
 
     const hours = (payload && Array.isArray(payload.hours)) ? payload.hours : [];
     dayHourTbody.innerHTML = "";
@@ -1684,13 +2584,18 @@ function safeText(v){
         '<span class="pill">Paradas ' + (qtdParadas === null ? '-' : fmtInt(qtdParadas)) + '</span>';
       wrap.appendChild(pills);
 
-const label = document.createElement("div");
-      label.className = "hour-top";
-      const st = buildTrailBar(isoDay, hourIdx);
-      wrap.appendChild(st.bar);
+      const segments =
+        (Array.isArray(h && h.segments) ? h.segments :
+         (Array.isArray(h && h.timeline) ? h.timeline :
+          (Array.isArray(h && h.barra) ? h.barra : null)));
 
+      if(segments && segments.length){
+        wrap.appendChild(buildHourBar(isoDay, hourIdx, segments));
+      }else{
+        wrap.appendChild(buildMetricsBar(isoDay, hourIdx, h));
+      }
 
-      tdD.appendChild(wrap);
+tdD.appendChild(wrap);
       tr.appendChild(tdD);
 
       dayHourTbody.appendChild(tr);
@@ -1720,17 +2625,26 @@ const label = document.createElement("div");
     dayModalCurrentDay = String(dateIso || "");
     if(!dayModalCurrentDay) return;
 
+    pauseLiveRefreshForDayModal();
+
     dayModalBackdrop.classList.add("open");
     dayModalBackdrop.style.display = "";
     dayModalBackdrop.setAttribute("aria-hidden", "false");
-
-    await refreshDayModal(false);
 
     if(dayModalTimer){
       clearInterval(dayModalTimer);
       dayModalTimer = null;
     }
-    dayModalTimer = setInterval(()=>{ refreshDayModal(true); }, 5000);
+
+    dayHourTbody.innerHTML = '<tr><td colspan="2">Carregando...</td></tr>';
+
+    try{
+      const payload = await fetchDayDetail(dayModalCurrentDay);
+      renderDayDetail(payload);
+    }catch(err){
+      console.error(err);
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
+    }
   }
 
   function escapeHtml(s){
@@ -1746,7 +2660,7 @@ const label = document.createElement("div");
     const title = (op && op.lote) ? ("OP - Lote " + escapeHtml(op.lote)) : "OP";
     const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
 
-    const bobinas = Array.isArray(op && (op.bobinas_itens || op.bobinas_items || op.bobinas)) ? (op.bobinas_itens || op.bobinas_items || op.bobinas) : [];
+    const bobinas = pickOpBobinasItens(op);
 
     function row2(label, value){
       return `<tr><td class="k">${escapeHtml(label)}</td><td class="v">${escapeHtml(value)}</td></tr>`;
@@ -1760,8 +2674,8 @@ const label = document.createElement("div");
     infoRows += row2("OS", anyText(op && (op.os || op.os_num || op.ordem_servico)));
     infoRows += row2("GR e/ou fio", anyText(op && (op.gr_fio || op.gr_e_ou_fio)));
     infoRows += row2("Conversao m/pcs", anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs)));
-    infoRows += row2("HS-inicial", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
-    infoRows += row2("HS-termino", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
+    infoRows += row2("ABERTURA OP", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
+    infoRows += row2("FINAL OP", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
 
     let bobinasHtml = "";
     if(bobinas.length === 0){
@@ -1803,6 +2717,12 @@ const label = document.createElement("div");
     const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
 
     return `<!doctype html>
+
+<!--
+C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-03-05 00:31:39 -03:00
+MOTIVO: Substituir botão Fechar por Ativar/Encerrar OP no modal grande e remover abertura do modal ao clicar na linha da OP (acesso somente via Editar).
+-->
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -1811,9 +2731,9 @@ const label = document.createElement("div");
   body{ font-family: Arial, sans-serif; color:#0f172a; margin:24px; }
   h1{ font-size:18px; margin:0 0 12px 0; }
   table{ width:100%; border-collapse:collapse; font-size:12px; }
-  td, th{ border:1px solid #e5e7eb; padding:8px; vertical-align:top; }
+  td, th{ border:1px solid #e8e8e8; padding:8px; vertical-align:top; }
   th{ background:#f1f5f9; text-align:left; }
-  .meta td{ border:1px solid #e5e7eb; }
+  .meta td{ border:1px solid #e8e8e8; }
   .k{ width:180px; font-weight:700; background:#f8fafc; }
   .v{ }
   .r{ text-align:right; }
@@ -1823,7 +2743,7 @@ const label = document.createElement("div");
   .sub td{ background:#fafafa; border-top:none; }
   .empty{ text-align:center; color:#64748b; }
   .section{ margin-top:16px; }
-  .obs{ white-space:pre-wrap; border:1px solid #e5e7eb; padding:10px; border-radius:8px; }
+  .obs{ white-space:pre-wrap; border:1px solid #e8e8e8; padding:10px; border-radius:8px; }
   @media print{
     body{ margin:0; }
   }
@@ -1886,9 +2806,7 @@ const label = document.createElement("div");
 
 
   if(modalClose) modalClose.addEventListener("click", closeModal);
-  if(modalCancel) modalCancel.addEventListener("click", closeModal);
-
-  if(modalBackdrop){
+if(modalBackdrop){
     modalBackdrop.addEventListener("click", function(e){
       if(e && e.target === modalBackdrop){
         closeModal();
@@ -1909,11 +2827,230 @@ const label = document.createElement("div");
     }
   });
 
-  if(modalSave){
+  
+  function isOpAtiva(statusStr){
+    const s = safeText(statusStr).toUpperCase();
+    if(!s) return false;
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return false;
+    if(s.includes("ATIV") || s.includes("ATIVA") || s.includes("PRODU") || s.includes("ANDAMENTO") || s.includes("EM PRODU")) return true;
+    // por padrao, FILA nao é ativa
+    return false;
+  }
+
+  function updateToggleButton(){
+    if(modalToggle){
+      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+      modalToggle.textContent = isOpAtiva(st) ? "Encerrar" : "Ativar OP";
+    }
+
+    if(modalSwap){
+      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+      const ativa = isOpAtiva(st);
+
+      // swap so faz sentido com OP ativa, com bobinas cadastradas e com proxima bobina disponivel
+      const hasBobinas = getBobinasCount(currentOp) > 0;
+      const hasNextBobina = hasNextBobinaAvailable(currentOp);
+
+      modalSwap.style.display = (ativa && hasBobinas && hasNextBobina) ? "" : "none";
+      modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
+
+      if(!hasBobinas){
+        modalSwap.title = "Sem bobina cadastrada.";
+      }else if(!hasNextBobina){
+        modalSwap.title = "Ultima bobina ja esta em uso.";
+      }else if(modalSwap.disabled && swapLockActive){
+        modalSwap.title = "Aguardando primeiro machine/update apos a troca.";
+      }else{
+        modalSwap.title = "";
+      }
+    }
+  }
+
+  async function postOpAction(opId, action){
+    const qs = "";
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+
+    const urls = [];
+    if(action === "ativar"){
+      urls.push("/producao/op/tivar", "/op/tivar", "/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
+    }else{
+      urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
+    }
+
+    let lastErr = null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u + qs, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
+        const data = await r.json().catch(() => ({}));
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+        return true;
+      }catch(e){
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error("Falha ao executar ação.");
+  }
+
+  function stopOpModalLiveRefresh(){
+    if(opModalTimer){
+      clearInterval(opModalTimer);
+      opModalTimer = null;
+    }
+    opModalRefreshing = false;
+  }
+
+  function startOpModalLiveRefresh(){
+    stopOpModalLiveRefresh();
+
+    if(!modalBackdrop) return;
+    if(modalBackdrop.style.display !== "flex") return;
+
+    if(!currentOp) return;
+    if(currentOpMode !== "view") return; // evita sobrescrever campos durante edicao
+
+    const opId = Number(currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId ?? currentOp.opid) || 0) || 0;
+    if(!opId) return;
+
+    // so atualiza ao vivo enquanto estiver ativa e for hoje
+    if(!currentOp.ativa) return;
+    if(!opIsHoje(currentOp)) return;
+
+    opModalTimer = setInterval(async ()=>{
+      if(opModalRefreshing) return;
+      if(!modalBackdrop || modalBackdrop.style.display !== "flex") return;
+
+      const stillId = Number(currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId ?? currentOp.opid) || 0) || 0;
+      if(stillId !== opId) return;
+
+      opModalRefreshing = true;
+      try{
+        const fresh = await fetchOpGet(opId);
+        if(fresh){
+          // re-render em view mantendo o timer
+          openModal(enrichOpWithLive(fresh), "view", { skipLiveStart: true });
+        }
+      }catch(e){
+        // ignora falha pontual
+      }finally{
+        opModalRefreshing = false;
+      }
+    }, 5000);
+  }
+
+
+
+  if(modalToggle){
+    modalToggle.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+      const ativa = isOpAtiva(currentOp && currentOp.status);
+      const action = ativa ? "encerrar" : "ativar";
+
+      try{
+        modalToggle.disabled = true;
+        await postOpAction(opId, action);
+        // Recarregar OP para refletir o novo status
+        const op = await fetchOpGet(opId);
+        if(op){
+          openModal(op, "edit");
+        }else{
+          // fallback: atualizar apenas status local
+          currentOp.status = (action === "ativar") ? "ATIVA" : "ENCERRADA";
+          updateToggleButton();
+        }
+        // Recarregar tabela do histórico para refletir status
+        await fetchHistorico();
+      }catch(err){
+        alert("Falha ao " + (action === "ativar" ? "ativar" : "encerrar") + ": " + (err.message || err));
+      }finally{
+        modalToggle.disabled = false;
+      }
+    });
+  }
+
+
+  if(modalSwap){
+    modalSwap.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+      const ativa = isOpAtiva(currentOp && currentOp.status);
+      if(!ativa){
+        alert("A OP precisa estar ATIVA para trocar bobina.");
+        return;
+      }
+
+      if(swapLockActive && swapLockOpId === opId){
+        alert("Troca ja solicitada. Aguardando primeiro machine/update.");
+        return;
+      }
+
+      const ok = confirm("Confirmar troca de bobina?");
+      if(!ok) return;
+
+      try{
+        modalSwap.disabled = true;
+        const resp = await postOpSwapBobina(opId);
+
+        // Travar nova troca ate chegar o primeiro machine/update e abrir a proxima bobina (seq next_seq)
+        const nextSeq = (resp && (resp.next_seq ?? resp.nextSeq ?? resp.next)) ?? null;
+        swapLockActive = true;
+        swapLockOpId = opId;
+        swapLockNextSeq = (nextSeq != null) ? Number(nextSeq) : null;
+
+        // Recarregar OP (pode ainda nao ter a proxima bobina aberta - depende do primeiro update)
+        try{
+          const op = await fetchOpGet(opId);
+          if(op){
+            openModal(op, "edit");
+          }
+        }catch(e){
+          // ignora
+        }
+
+        alert("Troca registrada. Aguardando primeiro machine/update para iniciar a proxima bobina.");
+      }catch(err){
+        alert("Falha ao trocar bobina: " + (err.message || err));
+      }finally{
+        modalSwap.disabled = false;
+        updateToggleButton();
+      }
+    });
+  }
+
+if(modalSave){
     modalSave.addEventListener("click", async function(){
       const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
       if(!opId){
         alert("OP invalida.");
+        return;
+      }
+
+
+      // valida duplicidade de OS (no escopo cliente + maquina) usando cache local do historico
+      const osInput = document.getElementById("op-os");
+      const osValue = osInput ? osInput.value : "";
+      const dup = findDuplicateOsInCache(osValue, opId);
+      if(dup){
+        alert("Ja existe uma OP com esse numero (OS): " + safeText(osValue));
         return;
       }
 
@@ -1943,6 +3080,41 @@ const label = document.createElement("div");
         observacoes: (ope_obs && ope_obs.value) ? ope_obs.value : "",
         bobinas: bobinasPayload
       };
+
+      if(currentOpMode === "edit"){
+        payload.os = (opv_os && opv_os.value) ? opv_os.value : "";
+        payload.lote = (opv_lote && opv_lote.value) ? opv_lote.value : "";
+        payload.operador = (opv_operador && opv_operador.value) ? opv_operador.value : "";
+        payload.gr_fio = (opv_gr_fio && opv_gr_fio.value) ? opv_gr_fio.value : "";
+        payload.conv = (opv_conv && opv_conv.value) ? opv_conv.value : "";
+        payload.started_at = (opv_started && opv_started.value) ? opv_started.value : "";
+        payload.ended_at = (opv_ended && opv_ended.value) ? opv_ended.value : "";
+
+        // bobinas em metros (add/remove no modo edicao)
+        payload.bobinas_m = collectBobinasMFromUI();
+      }
+
+
+      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (bobina)
+      if(bobinasWrap){
+        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
+        for(const card of cards){
+          const idxBob = Number(card.getAttribute("data-bobina-idx") || 0);
+          const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
+          const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
+
+          const cost = Number((card.querySelector("input[data-field='qtd_costuras']") || {}).value || 0) || 0;
+          const refugo = Number((card.querySelector("input[data-field='qtd_refugo']") || {}).value || 0) || 0;
+          const retrabalho = Number((card.querySelector("input[data-field='qtd_retrabalho']") || {}).value || 0) || 0;
+
+          const soma = cost + refugo + retrabalho;
+
+          if(pcsTotal > 0 && soma > pcsTotal){
+            alert("Bobina " + (idxBob + 1) + ": costuras + refugo + retrabalho nao pode ser maior que Total pcs.");
+            return;
+          }
+        }
+      }
 
       modalSave.disabled = true;
 
@@ -1981,12 +3153,22 @@ const label = document.createElement("div");
   }
 
 
+
+  if(bobinasMAdd){
+    bobinasMAdd.addEventListener("click", function(e){
+      if(e){ e.preventDefault(); e.stopPropagation(); }
+      if(currentOpMode !== "edit") return;
+      currentBobinasM.push(0);
+      renderBobinasM();
+    });
+  }
+
   function renderMsgRow(msg){
     if(!tbody) return;
     tbody.innerHTML = "";
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.className = "text-center";
     td.textContent = msg;
     tr.appendChild(td);
@@ -2000,10 +3182,10 @@ const label = document.createElement("div");
 
     ops.forEach((op) => {
       const trOp = document.createElement("tr");
-      trOp.className = "op-row";
+      trOp.className = "op-row " + opRowClass(op && op.status);
 
       const tdOp = document.createElement("td");
-      tdOp.colSpan = 4;
+      tdOp.className = "op-cell";
 
       const pill = document.createElement("span");
       pill.className = "op-pill " + statusClass(op && op.status);
@@ -2012,25 +3194,114 @@ const label = document.createElement("div");
       const label = document.createElement("span");
       label.textContent = " " + buildOpLabel(op);
 
-      tdOp.appendChild(pill);
-      tdOp.appendChild(label);
+      const content = document.createElement("div");
+      content.className = "op-content";
+      content.appendChild(pill);
+      content.appendChild(label);
+      tdOp.appendChild(content);
+
+      const tdBlank1 = document.createElement("td");
+      const tdBlank2 = document.createElement("td");
+      const tdBlank3 = document.createElement("td");
+
+      const tdActions = document.createElement("td");
+      tdActions.className = "op-actions";
+
+      const btnEdit = document.createElement("button");
+      btnEdit.type = "button";
+      btnEdit.className = "op-action-btn";
+      btnEdit.textContent = "Editar";
+
+      const btnDel = document.createElement("button");
+      btnDel.type = "button";
+      btnDel.className = "op-action-btn op-action-btn-danger";
+      btnDel.textContent = "Excluir";
+
+      tdActions.appendChild(btnEdit);
+      tdActions.appendChild(btnDel);
 
       trOp.appendChild(tdOp);
+      trOp.appendChild(tdBlank1);
+      trOp.appendChild(tdBlank2);
+      trOp.appendChild(tdBlank3);
+      trOp.appendChild(tdActions);
+
       tbody.appendChild(trOp);
 
-      trOp.addEventListener("click", function(e){
+      function _openDetails(e){
+        if(e){
+          // Se o clique foi em Editar/Excluir (acoes), nao abrir o modal grande
+          try{
+            const t = e.target;
+            if(t && (t.closest && (t.closest('button') || t.closest('.op-actions')))){
+              return;
+            }
+          }catch(_e){}
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
+          closeDayModal();
+        }
+        const op2 = Object.assign({}, op || {});
+        op2.__dia_ref = getRowDateISO(r);
+        openModal(op2);
+      }
+
+      async function _goEdit(e){
         if(e){
           e.preventDefault();
           e.stopPropagation();
         }
-        // Se por algum motivo o modal do dia estiver aberto, fecha antes de abrir OP
-        if(dayModalBackdrop && dayModalBackdrop.classList.contains("open")){
-          closeDayModal();
+        const opId = Number((op && (op.op_id ?? op.id ?? op.opId ?? op.opid)) || 0);
+        if(!opId){
+          alert("Nao foi possivel identificar o ID da OP para editar.");
+          return;
+        }
+        // Editar: abrir modal grande aqui no Historico em modo edicao
+        await openOpEdit(opId);
+      }
+btnEdit.addEventListener("click", _goEdit);
+      btnEdit.addEventListener("mousedown", function(e){ if(e){ e.stopPropagation(); } });
+
+      btnDel.addEventListener("mousedown", function(e){ if(e){ e.stopPropagation(); } });
+
+      btnDel.addEventListener("click", async function(e){
+        if(e){
+          e.preventDefault();
+          e.stopPropagation();
         }
 
-        const op2 = Object.assign({}, op || {});
-        op2.__dia_ref = getRowDateISO(r);
-        openModal(op2);
+        const opId = (op && (op.id || op.op_id || op.opId || op.opid)) || 0;
+        const opTxt = (op && (op.op || op.op_code || op.op_num || op.op_id || "")) || "";
+        if(!opId){
+          alert("Nao foi possivel identificar o ID da OP para excluir.");
+          return;
+        }
+        const ok = confirm("Excluir esta OP do historico?\n\nOP: " + opTxt + "\nID: " + opId);
+        if(!ok) return;
+
+        try{
+          const resp = await fetch("/producao/op/excluir", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Accept": "application/json" },
+            body: JSON.stringify({ op_id: opId })
+          });
+
+          let payload = null;
+          try{ payload = await resp.json(); }catch(_e){ payload = null; }
+
+          if(!resp.ok){
+            const msg = (payload && (payload.error || payload.message)) || ("HTTP " + resp.status);
+            alert("Falha ao excluir OP: " + msg + "\n\nObs: o endpoint esperado e POST /producao/op/excluir");
+            return;
+          }
+
+          // Recarrega historico para refletir a exclusao
+          await fetchHistorico();
+        }catch(err){
+          alert("Falha ao excluir OP: " + (err && err.message ? err.message : err));
+        }
       });
     });
   }
@@ -2039,36 +3310,68 @@ const label = document.createElement("div");
     if(!tbody) return;
     tbody.innerHTML = "";
 
-    if(!Array.isArray(rows) || rows.length === 0){
+    const visibleRows = (Array.isArray(rows) ? rows : []).filter((r) => {
+      const produzido = Number(r && r.produzido);
+      const pecasBoas = Number(r && r.pecas_boas);
+      const refugo = Number(r && (r.refugo_total ?? r.refugo ?? 0));
+      const ops = Array.isArray(r && r.ops) ? r.ops : [];
+      return (produzido > 0) || (pecasBoas > 0) || (refugo > 0) || (ops.length > 0);
+    });
+
+    if(!visibleRows.length){
       renderMsgRow("Nenhum dado encontrado.");
       return;
     }
 
-    rows.forEach((r) => {
+    visibleRows.forEach((r) => {
       const tr = document.createElement("tr");
 
       tr.className = "day-row";
       tr.dataset.dayIso = getRowDateISO(r);
 
-      const tdData = document.createElement("td");
-      tdData.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
+      const tdDay = document.createElement("td");
+      tdDay.colSpan = 5;
 
-      const tdProd = document.createElement("td");
-      tdProd.className = "text-right";
-      tdProd.textContent = fmtNum(r.produzido);
+      const summary = document.createElement("div");
+      summary.className = "day-summary";
 
-      const tdBoas = document.createElement("td");
-      tdBoas.className = "text-right";
-      tdBoas.textContent = fmtNum(r.pecas_boas);
+      const dateEl = document.createElement("div");
+      dateEl.className = "day-date";
+      dateEl.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
 
-      const tdRef = document.createElement("td");
-      tdRef.className = "text-right";
-      tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
+      const metrics = document.createElement("div");
+      metrics.className = "day-metrics";
 
-      tr.appendChild(tdData);
-      tr.appendChild(tdProd);
-      tr.appendChild(tdBoas);
-      tr.appendChild(tdRef);
+      function createMetric(label, value, addDivider){
+        const wrap = document.createElement("div");
+        wrap.className = "day-metric";
+
+        const lab = document.createElement("span");
+        lab.className = "day-metric-label";
+        lab.textContent = label;
+
+        const val = document.createElement("span");
+        val.textContent = value;
+
+        wrap.appendChild(lab);
+        wrap.appendChild(val);
+        metrics.appendChild(wrap);
+
+        if(addDivider){
+          const divider = document.createElement("div");
+          divider.className = "day-divider";
+          metrics.appendChild(divider);
+        }
+      }
+
+      createMetric("Total", fmtNum(r.produzido), true);
+      createMetric("Boas", fmtNum(r.pecas_boas), true);
+      createMetric("Refugo", fmtNum((r && (r.refugo_total ?? r.refugo ?? 0))), false);
+
+      summary.appendChild(dateEl);
+      summary.appendChild(metrics);
+      tdDay.appendChild(summary);
+      tr.appendChild(tdDay);
 
       tr.addEventListener("click", function(ev){
         // Evita conflitar com clique em linhas de OP (elas sao outras trs)
@@ -2158,6 +3461,8 @@ if(dayModalClose){
     if(!machineId) return;
     try{
       const status = await fetchStatus();
+      
+      lastMachineStatus = status;
       const runVal = (status && (status.run === 1 || status.run === true)) ? 1 : ((status && (status.run === 0 || status.run === false)) ? 0 : null);
       if(runVal !== null){
         appendTrailState(runVal === 1 ? "RUN" : "STOP", Date.now());
@@ -2272,3 +3577,4 @@ if(dayModalClose){
 </script>
 
 {% endblock %}
+

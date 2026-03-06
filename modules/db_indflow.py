@@ -1,3 +1,7 @@
+# Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\db_indflow.py
+# Ultimo recode: 2026-03-06 01:07:20 -0300
+# Motivo: Criar estrutura SQLite para bobinas (eventos e pendencia) no init_db, suportando N bobinas por OP e evitando travamento na troca 2->3.
+
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\db_indflow.py
 # LAST_RECODE: 2026-02-24 21:35 America/Bahia
 # MOTIVO: Garantir persistência da configuração V2 adicionando coluna machine_config.config_json no SQLite (migração defensiva), evitando perda após deploy.
@@ -266,6 +270,78 @@ def init_db():
         CREATE INDEX IF NOT EXISTS ix_machine_state_event_machine_day_ts
         ON machine_state_event(machine_id, data_ref, ts_ms)
     """)
+
+    
+    # -----------------------------
+    # Estrutura para bobinas por OP
+    # -----------------------------
+
+    # Eventos por bobina (N bobinas por OP)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ordens_producao_bobina_eventos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            op_id INTEGER NOT NULL,
+            seq INTEGER NOT NULL DEFAULT 0,
+
+            comprimento_m INTEGER NOT NULL DEFAULT 0,
+
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+
+            start_abs_pcs INTEGER NOT NULL DEFAULT 0,
+            end_abs_pcs INTEGER,
+
+            created_at TEXT,
+            updated_at TEXT,
+
+            UNIQUE(op_id, seq)
+        )
+        """
+    )
+
+    # Garantir colunas (compatibilidade/migracao leve)
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "op_id", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "seq", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "comprimento_m", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "started_at", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "ended_at", "TEXT")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "start_abs_pcs", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "end_abs_pcs", "INTEGER")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "created_at", "TEXT")
+    _add_column_if_missing(conn, "ordens_producao_bobina_eventos", "updated_at", "TEXT")
+
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_op_bobina_eventos_opid ON ordens_producao_bobina_eventos(op_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_op_bobina_eventos_opid_seq ON ordens_producao_bobina_eventos(op_id, seq)")
+
+    # Pendencia de troca: impede clique duplo e sincroniza inicio da proxima bobina no primeiro machine/update
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ordens_producao_bobina_pendencia (
+            op_id INTEGER PRIMARY KEY,
+            machine_id TEXT NOT NULL,
+            armed_at TEXT NOT NULL,
+
+            closed_seq INTEGER NOT NULL DEFAULT 0,
+            closed_abs_pcs INTEGER NOT NULL DEFAULT 0,
+            next_seq INTEGER NOT NULL DEFAULT 0,
+
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "machine_id", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "armed_at", "TEXT NOT NULL DEFAULT ''")
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "closed_seq", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "closed_abs_pcs", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "next_seq", "INTEGER NOT NULL DEFAULT 0")
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "created_at", "TEXT")
+    _add_column_if_missing(conn, "ordens_producao_bobina_pendencia", "updated_at", "TEXT")
+
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_op_bobina_pend_opid ON ordens_producao_bobina_pendencia(op_id)")
+
 
     conn.commit()
     conn.close()

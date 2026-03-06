@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# LAST_RECODE: 2026-02-27 00:16 America/Bahia
-# MOTIVO: impedir exibicao de dia futuro/zerado no historico (ancorar em ultimo dia com producao real)
+# ULTIMO_RECODE: 2026-03-04 21:30:00
+# MOTIVO: Detalhe-dia: hours[].produzido deve vir de SUM(delta) em producao_evento por janela local (America/Bahia), evitando sobrescrita por machine_state.
 
 
 from __future__ import annotations
@@ -149,6 +149,41 @@ def _count_pulses_producao_evento(
     if c == 0 and machine_id and machine_id != effective_machine_id:
         c = _count(machine_id)
     return int(c) if c and c > 0 else 0
+
+
+def _sum_delta_producao_evento(
+    conn: sqlite3.Connection,
+    machine_id: str,
+    effective_machine_id: str,
+    start_ms: int,
+    end_ms: int,
+) -> int:
+    """Soma delta em producao_evento no intervalo [start_ms, end_ms).
+
+    Usa effective_machine_id primeiro e faz fallback para machine_id original quando necessario.
+    Retorna 0 quando nao houver eventos no intervalo.
+    """
+    if start_ms <= 0 or end_ms <= 0 or end_ms <= start_ms:
+        return 0
+    if not _table_exists(conn, "producao_evento"):
+        return 0
+
+    sql = "SELECT COALESCE(SUM(delta), 0) AS s FROM producao_evento WHERE machine_id = ? AND ts_ms >= ? AND ts_ms < ?"
+
+    def _sum(mid: str) -> int:
+        try:
+            row = conn.execute(sql, (mid, int(start_ms), int(end_ms))).fetchone()
+            if not row:
+                return 0
+            return _safe_int(row[0] if not isinstance(row, sqlite3.Row) else row["s"], 0)
+        except Exception:
+            return 0
+
+    s = _sum(effective_machine_id) if effective_machine_id else 0
+    if s == 0 and machine_id and machine_id != effective_machine_id:
+        s = _sum(machine_id)
+    return int(s) if s and s > 0 else 0
+
 
 def _extract_esp_counter(machine_state: dict | None) -> int | None:
     """Extrai o contador absoluto do ESP a partir do estado da maquina (best-effort)."""
@@ -671,6 +706,248 @@ def _build_segments_for_hour(
 
 
 
+
+def _merge_state_segments(segs: list[tuple[datetime, datetime, str]]) -> list[tuple[datetime, datetime, str]]:
+    if not segs:
+        return []
+    segs = sorted(segs, key=lambda x: x[0])
+    out: list[tuple[datetime, datetime, str]] = []
+    cur_s, cur_e, cur_st = segs[0]
+    for s, e, st in segs[1:]:
+        if e <= s:
+            continue
+        if st == cur_st and s <= cur_e:
+            if e > cur_e:
+                cur_e = e
+            continue
+        if s <= cur_e:
+            # sobreposicao com estado diferente: corta o anterior
+            if s > cur_s:
+                out.append((cur_s, s, cur_st))
+            cur_s, cur_e, cur_st = s, e, st
+            continue
+        out.append((cur_s, cur_e, cur_st))
+        cur_s, cur_e, cur_st = s, e, st
+    out.append((cur_s, cur_e, cur_st))
+    return out
+
+
+def _fetch_state_segments_from_state_events(
+    conn: sqlite3.Connection,
+    effective_machine_id: str,
+    data_ref: date,
+) -> list[tuple[datetime, datetime, str]]:
+    """
+    Monta segmentos de estado (RUN/STOP/IDLE/NP) para o dia, baseados EXCLUSIVAMENTE em machine_state_event.
+
+    Regra:
+    - Mantem o ultimo estado ate surgir um novo evento.
+    - Se nao houver evento anterior para definir o estado inicial do dia, inicia como IDLE.
+    - Segmentos sao retornados como datetime naive (TZ_BAHIA assumido) no intervalo [day_start, hard_end].
+
+    Observacoes:
+    - Implementacao defensiva: detecta nomes de colunas (id, data, ts, state) para suportar schemas antigos.
+    - Para o dia atual, hard_end = agora (nao preenche futuro).
+    """
+    try:
+        if not _table_exists(conn, "machine_state_event"):
+            return []
+    except Exception:
+        return []
+
+    cols = _get_columns(conn, "machine_state_event")
+
+    id_col = None
+    if "effective_machine_id" in cols:
+        id_col = "effective_machine_id"
+    elif "machine_id" in cols:
+        id_col = "machine_id"
+    else:
+        return []
+
+    date_col = None
+    if "data_ref" in cols:
+        date_col = "data_ref"
+    else:
+        try:
+            date_col = _resolve_data_col(conn, "machine_state_event")
+        except Exception:
+            date_col = None
+    if not date_col:
+        return []
+
+    ts_col = None
+    for c in ("ts_ms", "ts", "timestamp_ms"):
+        if c in cols:
+            ts_col = c
+            break
+    if not ts_col:
+        return []
+
+    state_col = None
+    for c in ("state", "status"):
+        if c in cols:
+            state_col = c
+            break
+    if not state_col:
+        return []
+
+    day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0)
+    day_end = day_start + timedelta(days=1)
+
+    now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
+    if day_start.date() == now_dt.date():
+        hard_end = min(day_end, now_dt)
+    else:
+        hard_end = day_end
+
+    if hard_end <= day_start:
+        return []
+
+    day_start_ms = int(day_start.replace(tzinfo=TZ_BAHIA).timestamp() * 1000)
+
+    allowed = ("RUN", "STOP", "IDLE", "NP")
+
+    # estado inicial: ultimo evento antes de 00:00
+    state0 = None
+    try:
+        sql0 = (
+            "SELECT {state_col}, {ts_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {ts_col} < ? "
+            "ORDER BY {ts_col} DESC LIMIT 1"
+        ).format(state_col=state_col, ts_col=ts_col, id_col=id_col)
+        r0 = conn.execute(sql0, (effective_machine_id, day_start_ms)).fetchone()
+        if r0:
+            try:
+                r0_state = str(r0[0] or "").upper()
+                r0_ts_ms = int(r0[1]) if r0[1] is not None else None
+            except Exception:
+                r0_state = ""
+                r0_ts_ms = None
+
+            # tolerancia anti-heranca "muito antiga"
+            stale_ms = 6 * 60 * 60 * 1000
+            if (
+                r0_state in allowed
+                and r0_ts_ms is not None
+                and (day_start_ms - r0_ts_ms) <= stale_ms
+            ):
+                state0 = r0_state
+    except Exception:
+        state0 = None
+
+    # eventos do dia
+    evs: list[tuple[datetime, str]] = []
+    try:
+        sql = (
+            "SELECT {ts_col}, {state_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {date_col}=? "
+            "ORDER BY {ts_col} ASC"
+        ).format(ts_col=ts_col, state_col=state_col, id_col=id_col, date_col=date_col)
+        rows = conn.execute(sql, (effective_machine_id, data_ref.isoformat())).fetchall()
+        for r in rows:
+            try:
+                ts_ms = int(r[0])
+            except Exception:
+                continue
+            st = str(r[1] or "").upper()
+            if st not in allowed:
+                continue
+            try:
+                t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
+            except Exception:
+                continue
+            if t < day_start:
+                continue
+            if t > hard_end:
+                break
+            evs.append((t, st))
+    except Exception:
+        evs = []
+
+    cur_state = state0 if state0 in allowed else "IDLE"
+    cur_t = day_start
+
+    segs: list[tuple[datetime, datetime, str]] = []
+
+    for t, st in evs:
+        if t <= cur_t:
+            cur_state = st
+            cur_t = t
+            continue
+        segs.append((cur_t, t, cur_state))
+        cur_state = st
+        cur_t = t
+
+    if hard_end > cur_t:
+        segs.append((cur_t, hard_end, cur_state))
+
+    # merge adjacentes do mesmo estado
+    return _merge_state_segments(segs)
+
+
+def _build_segments_for_hour_from_day_segments(
+    hour_start: datetime,
+    hour_end: datetime,
+    is_np: bool,
+    day_segments: list[tuple[datetime, datetime, str]],
+) -> list[dict]:
+    if is_np:
+        return [
+            {
+                "start": hour_start.strftime("%H:%M:%S"),
+                "end": hour_end.strftime("%H:%M:%S"),
+                "state": "NP",
+            }
+        ]
+
+    if hour_end <= hour_start:
+        return [
+            {
+                "start": hour_start.strftime("%H:%M:%S"),
+                "end": hour_start.strftime("%H:%M:%S"),
+                "state": "IDLE",
+            }
+        ]
+
+    segs: list[dict] = []
+
+    cursor = hour_start
+    last_state = None
+
+    for ds, de, st in day_segments or []:
+        inter = _intersect(hour_start, hour_end, ds, de)
+        if not inter:
+            continue
+        a, b = inter
+
+        if a > cursor:
+            # buraco: mantem o ultimo estado conhecido; se nao houver, IDLE
+            fill_state = last_state if last_state in ("RUN", "STOP", "IDLE", "NP") else "IDLE"
+            segs.append({"start": cursor.strftime("%H:%M:%S"), "end": a.strftime("%H:%M:%S"), "state": fill_state})
+            cursor = a
+
+        segs.append({"start": a.strftime("%H:%M:%S"), "end": b.strftime("%H:%M:%S"), "state": st})
+        last_state = st
+        cursor = b
+
+    if cursor < hour_end:
+        fill_state = last_state if last_state in ("RUN", "STOP", "IDLE", "NP") else "IDLE"
+        segs.append({"start": cursor.strftime("%H:%M:%S"), "end": hour_end.strftime("%H:%M:%S"), "state": fill_state})
+
+    # merge adjacentes iguais
+    merged: list[dict] = []
+    for s in segs:
+        if not merged:
+            merged.append(s)
+            continue
+        if merged[-1]["state"] == s["state"] and merged[-1]["end"] == s["start"]:
+            merged[-1]["end"] = s["end"]
+        else:
+            merged.append(s)
+
+    return merged
+
 def _fetch_run_intervals_from_state_events(
     conn: sqlite3.Connection,
     effective_machine_id: str,
@@ -679,9 +956,14 @@ def _fetch_run_intervals_from_state_events(
     """
     Converte machine_state_event (transicoes RUN/STOP/NP) em intervalos RUN para o dia.
 
-    - Usa o ultimo estado antes de 00:00 para definir estado inicial do dia.
+    Regra da barra: somente RUN/STOP/NP vindos de machine_state_event.
+    Nao deduz RUN por producao, meta, ritmo ou qualquer heuristica.
+
+    Observacoes:
+    - Implementacao defensiva: detecta nomes de colunas (id, data, ts, state) para suportar schemas antigos.
+    - Usa datetimes naive (sem tzinfo) internamente, para nao misturar naive vs aware.
     - Para dia atual, corta intervalo aberto em "agora" para nao preencher futuro.
-    - Se a tabela nao existir, retorna [].
+    - Se a tabela nao existir ou nao tiver colunas minimas, retorna [].
     """
     try:
         if not _table_exists(conn, "machine_state_event"):
@@ -689,12 +971,51 @@ def _fetch_run_intervals_from_state_events(
     except Exception:
         return []
 
+    cols = _get_columns(conn, "machine_state_event")
+
+    # coluna de id da maquina (preferencia: effective_machine_id, fallback: machine_id)
+    id_col = None
+    if "effective_machine_id" in cols:
+        id_col = "effective_machine_id"
+    elif "machine_id" in cols:
+        id_col = "machine_id"
+    else:
+        return []
+
+    # coluna de data do evento (preferencia: data_ref, fallback: resolver como nas demais tabelas)
+    date_col = None
+    if "data_ref" in cols:
+        date_col = "data_ref"
+    else:
+        try:
+            date_col = _resolve_data_col(conn, "machine_state_event")
+        except Exception:
+            date_col = None
+    if not date_col:
+        return []
+
+    # coluna do timestamp em ms
+    ts_col = None
+    for c in ("ts_ms", "ts", "timestamp_ms"):
+        if c in cols:
+            ts_col = c
+            break
+    if not ts_col:
+        return []
+
+    # coluna do estado
+    state_col = None
+    for c in ("state", "status"):
+        if c in cols:
+            state_col = c
+            break
+    if not state_col:
+        return []
+
     # IMPORTANTE: o restante do Historico usa datetimes naive (sem tzinfo).
-    # Para evitar erro de comparacao naive vs aware, aqui tambem usamos naive.
     day_start = datetime(data_ref.year, data_ref.month, data_ref.day, 0, 0, 0)
     day_end = day_start + timedelta(days=1)
 
-    # "agora" somente se for o dia atual, para nao inventar futuro
     now_dt = datetime.now(TZ_BAHIA).replace(tzinfo=None)
     if day_start.date() == now_dt.date():
         hard_end = min(day_end, now_dt)
@@ -707,26 +1028,42 @@ def _fetch_run_intervals_from_state_events(
     # Estado inicial: ultimo evento antes do dia
     state0 = None
     try:
-        r0 = conn.execute(
-            "SELECT state, ts_ms FROM machine_state_event "
-            "WHERE effective_machine_id=? AND ts_ms < ? "
-            "ORDER BY ts_ms DESC LIMIT 1",
-            (effective_machine_id, day_start_ms),
-        ).fetchone()
+        sql0 = (
+            "SELECT {state_col}, {ts_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {ts_col} < ? "
+            "ORDER BY {ts_col} DESC LIMIT 1"
+        ).format(state_col=state_col, ts_col=ts_col, id_col=id_col)
+        r0 = conn.execute(sql0, (effective_machine_id, day_start_ms)).fetchone()
         if r0:
-            state0 = str(r0[0] or "").upper()
+            try:
+                r0_state = str(r0[0] or "").upper()
+                r0_ts_ms = int(r0[1]) if r0[1] is not None else None
+            except Exception:
+                r0_state = ""
+                r0_ts_ms = None
+
+            # tolerancia: se o ultimo evento for mais antigo que 6h antes de 00:00, ignora.
+            stale_ms = 6 * 60 * 60 * 1000
+            if (
+                r0_state in ("RUN", "STOP", "NP")
+                and r0_ts_ms is not None
+                and (day_start_ms - r0_ts_ms) <= stale_ms
+            ):
+                state0 = r0_state
+            else:
+                state0 = None
     except Exception:
         state0 = None
 
     # Eventos do dia
     evs: list[tuple[int, str]] = []
     try:
-        for r in conn.execute(
-            "SELECT ts_ms, state FROM machine_state_event "
-            "WHERE effective_machine_id=? AND data_ref=? "
-            "ORDER BY ts_ms ASC",
-            (effective_machine_id, data_ref.isoformat()),
-        ).fetchall():
+        sql = (
+            "SELECT {ts_col}, {state_col} FROM machine_state_event "
+            "WHERE {id_col}=? AND {date_col}=? "
+            "ORDER BY {ts_col} ASC"
+        ).format(ts_col=ts_col, state_col=state_col, id_col=id_col, date_col=date_col)
+        for r in conn.execute(sql, (effective_machine_id, data_ref.isoformat())).fetchall():
             try:
                 ts_ms = int(r[0])
             except Exception:
@@ -746,7 +1083,6 @@ def _fetch_run_intervals_from_state_events(
     def _push_run(a: datetime, b: datetime) -> None:
         if b <= a:
             return
-        # corta em hard_end
         aa = max(a, day_start)
         bb = min(b, hard_end)
         if bb > aa:
@@ -774,21 +1110,7 @@ def _fetch_run_intervals_from_state_events(
     return _merge_intervals(intervals)
 
 
-def _fetch_run_intervals_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref: date) -> list[tuple[datetime, datetime]]:
-    """Busca intervals RUN/STOP tentando múltiplos IDs (scoped/unscoped)."""
-    tried: set[str] = set()
-    for mid in machine_ids:
-        mid = (mid or "").strip()
-        if not mid or mid in tried:
-            continue
-        tried.add(mid)
-        try:
-            itv = _fetch_run_intervals_from_state_events(conn, mid, data_ref)
-            if itv:
-                return itv
-        except Exception:
-            continue
-    return []
+
 
 def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) -> dict[int, dict]:
     out: dict[int, dict] = {h: {"meta": 0, "produzido": 0, "refugo": 0, "baseline_esp": 0, "esp_last": 0} for h in range(24)}
@@ -891,107 +1213,6 @@ def _fetch_horaria(conn: sqlite3.Connection, machine_id: str, data_ref: date) ->
                 pass
 
     return out
-
-def _horaria_has_rows(conn: sqlite3.Connection, machine_id: str, data_ref) -> bool:
-    """Retorna True se houver ao menos 1 linha persistida na producao_horaria/refugo_horaria para (machine_id, data_ref).
-    Importante: nao usa 'meta' porque a meta pode ser injetada por config e nao indica persistencia."""
-    try:
-        d = data_ref.isoformat() if hasattr(data_ref, 'isoformat') else str(data_ref)
-    except Exception:
-        d = str(data_ref)
-
-    try:
-        if _table_exists(conn, 'producao_horaria'):
-            col = _resolve_data_col(conn, 'producao_horaria')
-            try:
-                cnt = _safe_int(_fetch_scalar(conn, f"SELECT COUNT(1) FROM producao_horaria WHERE machine_id=? AND {col}=?", (machine_id, d), default=0), 0)
-            except Exception:
-                cnt = 0
-            if cnt > 0:
-                return True
-    except Exception:
-        pass
-
-    try:
-        if _table_exists(conn, 'refugo_horaria'):
-            col = _resolve_data_col(conn, 'refugo_horaria')
-            try:
-                cnt = _safe_int(_fetch_scalar(conn, f"SELECT COUNT(1) FROM refugo_horaria WHERE machine_id=? AND {col}=?", (machine_id, d), default=0), 0)
-            except Exception:
-                cnt = 0
-            if cnt > 0:
-                return True
-    except Exception:
-        pass
-
-    return False
-
-def _parse_hora_hhmm(value: str):
-    try:
-        s = (value or '').strip()
-        if not s:
-            return None
-        h = int(s.split(':', 1)[0])
-        if 0 <= h <= 23:
-            return h
-    except Exception:
-        return None
-    return None
-
-def _remap_horaria_turno_idx_para_abs(hor: dict[int, dict], machine_state: dict, cfg: dict) -> dict[int, dict]:
-    """Se a tabela producao_horaria usa hora_idx do turno (0..len(horas_turno)-1),
-    remapeia para hora absoluta do dia (0..23) usando turno_inicio/active_shift.start."""
-    try:
-        shift_slots = machine_state.get('horas_turno') if isinstance(machine_state, dict) else None
-        shift_len = len(shift_slots) if isinstance(shift_slots, list) else None
-    except Exception:
-        shift_len = None
-
-    if not shift_len or shift_len < 1 or shift_len > 24:
-        return hor
-
-    turno_inicio = None
-    try:
-        turno_inicio = machine_state.get('turno_inicio')
-    except Exception:
-        turno_inicio = None
-    if not turno_inicio:
-        try:
-            turno_inicio = (cfg or {}).get('active_shift', {}).get('start')
-        except Exception:
-            turno_inicio = None
-
-    h0 = _parse_hora_hhmm(str(turno_inicio)) if turno_inicio else None
-    if h0 is None or h0 == 0:
-        return hor
-
-    # Detecta padrao: dados so aparecem em 0..shift_len-1 (idx de turno)
-    nz = []
-    try:
-        for hh, v in (hor or {}).items():
-            if not isinstance(v, dict):
-                continue
-            if _safe_int(v.get('produzido'), 0) != 0 or _safe_int(v.get('refugo'), 0) != 0 or _safe_int(v.get('baseline_esp'), 0) != 0 or _safe_int(v.get('esp_last'), 0) != 0:
-                nz.append(int(hh))
-    except Exception:
-        nz = []
-
-    if not nz:
-        return hor
-
-    if max(nz) >= shift_len:
-        return hor
-
-    # Remapeia idx do turno para hora absoluta
-    base = {h: {'meta': 0, 'produzido': 0, 'refugo': 0, 'baseline_esp': 0, 'esp_last': 0} for h in range(24)}
-    for idx in range(shift_len):
-        abs_h = (h0 + idx) % 24
-        try:
-            base[abs_h] = hor.get(idx) or base[abs_h]
-        except Exception:
-            pass
-
-    return base
 
 def _refugo_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> int:
     col = _resolve_data_col(conn, "refugo_horaria")
@@ -1189,65 +1410,6 @@ if callable(init_db):
     except Exception:
         pass
 
-def _ultimo_dia_com_producao_real(conn: sqlite3.Connection, machine_id: str) -> date | None:
-    """Retorna o ultimo dia (data_ref) com produzido > 0 para a maquina.
-
-    Isso evita exibir "amanha" zerado quando o servidor roda em timezone diferente
-    ou quando ainda nao houve producao no dia corrente.
-    """
-    try:
-        col = _resolve_data_col(conn, "producao_diaria")
-    except Exception:
-        col = "data_ref"
-
-    mid_raw = (machine_id or "").strip()
-    mid_uns = mid_raw.split("::", 1)[1] if "::" in mid_raw else mid_raw
-
-    # Mesma estrategia do _diaria_do_dia: considera id efetivo e variacoes.
-    mids = set()
-    if mid_raw:
-        mids.add(str(mid_raw))
-
-    like_scoped = None
-    like_legacy = None
-    if "::" not in mid_raw and mid_uns:
-        like_scoped = f"%::{mid_uns.lower()}"
-        like_legacy = f"%:{mid_uns.lower()}"
-
-    where = [f"{col} IS NOT NULL", "COALESCE(produzido,0) > 0"]
-    params: list = []
-
-    if mids:
-        where.append("machine_id IN ({})".format(",".join(["?"] * len(mids))))
-        params.extend(list(mids))
-
-    if like_scoped:
-        where.append("machine_id LIKE ?")
-        params.append(like_scoped)
-    if like_legacy:
-        where.append("machine_id LIKE ?")
-        params.append(like_legacy)
-
-    sql = (
-        f"SELECT MAX({col}) AS max_data_ref "
-        "FROM producao_diaria "
-        "WHERE " + " AND ".join(where)
-    )
-
-    row = conn.execute(sql, tuple(params)).fetchone()
-    if not row:
-        return None
-    val = row["max_data_ref"] if isinstance(row, dict) else row[0]
-    if not val:
-        return None
-    try:
-        return datetime.fromisoformat(str(val)).date()
-    except Exception:
-        try:
-            return date.fromisoformat(str(val))
-        except Exception:
-            return None
-
 @historico_bp.route("/api/producao/historico", methods=["GET"])
 def api_producao_historico():
     machine_id = (request.args.get("machine_id") or "").strip()
@@ -1258,20 +1420,6 @@ def api_producao_historico():
         return jsonify({"ok": False, "error": "machine_id obrigatorio"}), 400
 
     hoje = datetime.now(TZ_BAHIA).date()
-    
-    # Evita exibir dia futuro/zerado no historico: ancora no ultimo dia com producao real.
-    conn_probe = _get_conn()
-    try:
-        ultimo_real = _ultimo_dia_com_producao_real(conn_probe, machine_id)
-    finally:
-        if not callable(get_db):
-            try:
-                conn_probe.close()
-            except Exception:
-                pass
-    if ultimo_real and ultimo_real < hoje:
-        hoje = ultimo_real
-
     inicio = hoje - timedelta(days=days - 1)
 
     conn = _get_conn()
@@ -1346,9 +1494,19 @@ def api_producao_detalhe_dia():
 
             machine_state = None
             stop_start_naive = None
+            run_now_flag = None
             if now_naive is not None and callable(get_machine):
                 try:
-                    machine_state = get_machine(eff_mid) or get_machine(machine_id)
+                    # Tentativa 1: effective_machine_id (pode ser device_id::machine_id)
+                    machine_state = get_machine(eff_mid)
+                    # Tentativa 2: cliente_id::machine_id (chave padrao do estado)
+                    if (not isinstance(machine_state, dict)) and isinstance(cfg, dict):
+                        cfg_cliente_id = cfg.get("cliente_id")
+                        if cfg_cliente_id:
+                            machine_state = get_machine(f"{cfg_cliente_id}::{machine_id}")
+                    # Tentativa 3: fallback antigo (caso get_machine aceite apenas machine_id)
+                    if not isinstance(machine_state, dict):
+                        machine_state = get_machine(machine_id)
                     if isinstance(machine_state, dict):
                         stopped_ms = machine_state.get("stopped_since_ms") or machine_state.get("stopped_since")
                         status_ui = str(machine_state.get("status_ui") or "").strip().upper()
@@ -1362,6 +1520,13 @@ def api_producao_detalhe_dia():
                                     is_stopped = True
                             except Exception:
                                 is_stopped = False
+
+                        # Flag unico para hora atual (True=RUN, False=STOP)
+                        try:
+                            run_now_flag = (not is_stopped)
+                        except Exception:
+                            run_now_flag = None
+
                         if is_stopped and stopped_ms is not None:
                             try:
                                 stop_start_naive = _ms_to_naive_bahia(int(stopped_ms))
@@ -1371,20 +1536,35 @@ def api_producao_detalhe_dia():
                     stop_start_naive = None
 
 
+            # Mapa hora(0-23) -> producao_por_hora (alinhada a horas_turno) para usar no historico
+            prod_turno_by_hour = None
+            if isinstance(machine_state, dict):
+                try:
+                    horas_turno = machine_state.get("horas_turno")
+                    prod_turno = machine_state.get("producao_por_hora")
+                    if isinstance(horas_turno, list) and isinstance(prod_turno, list) and len(horas_turno) == len(prod_turno):
+                        m = {}
+                        for i_slot, slot in enumerate(horas_turno):
+                            try:
+                                s = str(slot)
+                                # Ex.: "13:00 - 14:00" -> hour=13
+                                start = s.split("-", 1)[0].strip()
+                                hh = int(start.split(":", 1)[0].strip())
+                                val = prod_turno[i_slot]
+                                if val is None:
+                                    continue
+                                m[hh] = _safe_int(val, 0)
+                            except Exception:
+                                continue
+                        prod_turno_by_hour = m if m else None
+                except Exception:
+                    prod_turno_by_hour = None
+
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
-            # Tenta IDs alternativos para resolver divergência scoped/unscoped
-            cand_ids = [eff_mid, machine_id]
-            if "::" in (machine_id or ""):
-                try:
-                    cand_ids.append((machine_id.split("::", 1)[1] or "").strip())
-                except Exception:
-                    pass
-
-            run_intervals = _fetch_run_intervals_multi(conn, cand_ids, data_ref)
+            day_state_segments = _fetch_state_segments_from_state_events(conn, eff_mid, data_ref)
             # Tabela horaria (meta/produzido/refugo)
-            hor = _fetch_horaria_multi(conn, cand_ids, data_ref)
-            hor = _remap_horaria_turno_idx_para_abs(hor, machine_state, cfg)
+            hor = _fetch_horaria(conn, eff_mid, data_ref)
 
             # ============================================================
             # ============================================================
@@ -1404,117 +1584,14 @@ def api_producao_detalhe_dia():
                         hor[hh]["meta"] = _safe_int(meta24[hh], 0)
             except Exception:
                 pass
-
-
-
             # ============================================================
-            # Normalizacao (dia atual): evitar valores acumulados em producao_horaria
-            #
-            # Caso producao_horaria tenha armazenado ESP acumulado em 'produzido',
-            # usamos esp_last/baseline_esp (se existirem) para converter em delta por hora.
-            # Para a hora corrente, alinhamos com o card (ESP_atual - baseline_da_hora).
+            # Produzido por hora (fonte da verdade): SUM(delta) em producao_evento por janela local (America/Bahia)
+            # - Evita problemas de timezone e sobrescritas por estado/turno
+            # - producao_horaria vira apenas fallback (quando nao houver eventos)
             # ============================================================
-            now_hour = None
-            esp_now = None
-            try:
-                if now_naive is not None:
-                    now_hour = int(now_naive.hour)
-                    esp_now = _extract_esp_counter(machine_state)
-
-                    # Baseline por hora: preferir baseline_esp do banco; se faltar, usar esp_last da hora anterior
-                    last_esp = 0
-                    for hh in range(24):
-                        try:
-                            last_esp = max(_safe_int(hor.get(hh, {}).get("esp_last", 0), 0), last_esp)
-                        except Exception:
-                            pass
-
-                    prev_esp = 0
-                    for hh in range(24):
-                        base = _safe_int(hor.get(hh, {}).get("baseline_esp", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if base <= 0 and hh > 0:
-                            prev_esp_val = _safe_int(hor.get(hh - 1, {}).get("esp_last", 0), 0)
-                            if prev_esp_val > 0:
-                                base = prev_esp_val
-                        if base <= 0:
-                            base = prev_esp
-
-                        # Atualiza prev_esp para permitir fallback mesmo sem esp_last
-                        if esp_h > 0:
-                            prev_esp = esp_h
-
-                        hor[hh]["_baseline_calc"] = base
-
-                    # Ajusta produzido por hora usando esp_last/baseline quando disponivel
-                    for hh in range(24):
-                        if hh > now_hour:
-                            # Futuro no dia atual: zera para nao herdar acumulado
-                            hor[hh]["produzido"] = 0
-                            continue
-
-                        base = _safe_int(hor.get(hh, {}).get("_baseline_calc", 0), 0)
-                        esp_h = _safe_int(hor.get(hh, {}).get("esp_last", 0), 0)
-                        if hh == now_hour and esp_now is not None:
-                            # Hora corrente: usa o contador atual do ESP
-                            delta = _safe_int(esp_now, 0) - base
-                        else:
-                            # Horas passadas: se houver esp_last, calcula delta
-                            if esp_h > 0:
-                                delta = esp_h - base
-                            else:
-                                delta = None
-
-                        if delta is None:
-                            continue
-                        if delta < 0:
-                            delta = 0
-                        hor[hh]["produzido"] = int(delta)
-            except Exception:
-                pass
 
             # Monta resposta hora a hora
 
-            # ============================================================
-            # Override de produzido/refugo (dia atual)
-            # Fonte: machine_state (/status) -> producao_exibicao_24 e refugo_por_hora
-            #
-            # Observação:
-            # - Em alguns cenários, producao_exibicao_24 pode vir acumulado (turno ou dia).
-            #   Para evitar "herdar" na virada da hora, convertemos para delta por hora.
-            # - Meta (meta24) é usada para reancorar em horas NP/break (meta==0).
-            # ============================================================
-            produced_override_current = None
-            refugo_override_current = None
-            if now_naive is not None and isinstance(machine_state, dict):
-                # IMPORTANTE: arrays do /status sao volateis e podem zerar em restart/deploy.
-                # Para garantir persistencia no historico, usamos override APENAS para a HORA CORRENTE,
-                # e somente quando nao foi possivel calcular pelo contador absoluto (esp_now).
-                try:
-                    if now_hour is None:
-                        now_hour = int(now_naive.hour)
-                except Exception:
-                    now_hour = None
-
-                # Produzido: somente se nao temos esp_now
-                if now_hour is not None and esp_now is None:
-                    v24 = machine_state.get("producao_exibicao_24")
-                    if isinstance(v24, list) and len(v24) == 24:
-                        meta_ref = [_safe_int(hor.get(hh, {}).get("meta", 0), 0) for hh in range(24)]
-                        v24_delta = _deltaize_exibicao_24(v24, meta_ref)
-                        try:
-                            produced_override_current = _safe_int(v24_delta[now_hour], 0)
-                        except Exception:
-                            produced_override_current = None
-
-                # Refugo: pode usar o valor da hora corrente quando disponivel
-                if now_hour is not None:
-                    r24 = machine_state.get("refugo_por_hora")
-                    if isinstance(r24, list) and len(r24) == 24:
-                        try:
-                            refugo_override_current = _safe_int(r24[now_hour], 0)
-                        except Exception:
-                            refugo_override_current = None
             horas = []
             for h in range(24):
                 hs = datetime(data_ref.year, data_ref.month, data_ref.day, h, 0, 0)
@@ -1532,14 +1609,20 @@ def api_producao_detalhe_dia():
                 meta = _safe_int(hor.get(h, {}).get("meta", 0), 0)
                 produzido = _safe_int(hor.get(h, {}).get("produzido", 0), 0)
                 refugo = _safe_int(hor.get(h, {}).get("refugo", 0), 0)
-                # Override do dia atual (APENAS HORA CORRENTE):
-                # - evita depender de arrays volateis do /status para horas fechadas (persistencia).
-                # - produzido so usa override se nao temos esp_now.
-                if now_naive is not None and now_hour is not None and h == now_hour:
-                    if esp_now is None and produced_override_current is not None:
-                        produzido = _safe_int(produced_override_current, 0)
-                    if refugo_override_current is not None:
-                        refugo = _safe_int(refugo_override_current, 0)
+
+
+                # Produzido por hora via eventos (ts_ms em UTC, janela calculada em hora local)
+                try:
+                    start_ms = _naive_bahia_to_ms(hs)
+                    end_ms = _naive_bahia_to_ms(he_calc)
+                    if end_ms > start_ms:
+                        prod_evt = _sum_delta_producao_evento(conn, machine_id, eff_mid, start_ms, end_ms)
+                        if prod_evt is not None:
+                            produzido = _safe_int(prod_evt, 0)
+                except Exception:
+                    pass
+
+
 
                 is_np = meta <= 0
 
@@ -1569,24 +1652,11 @@ def api_producao_detalhe_dia():
 
 
                 # Fallback: se nao houver rastro em machine_state_event para o dia,
-                # nao marque a hora inteira como STOP quando houve producao.
-                # Regra simples: dentro de hora ativa (meta>0), se produzido>0 => RUN a hora inteira; senao => STOP.
-                if (not is_np) and (not run_intervals):
-                    if produzido > 0:
-                        segs = [{
-                            "start": hs.strftime("%H:%M:%S"),
-                            "end": he_calc.strftime("%H:%M:%S"),
-                            "state": "RUN",
-                        }]
-                    else:
-                        segs = [{
-                            "start": hs.strftime("%H:%M:%S"),
-                            "end": he_calc.strftime("%H:%M:%S"),
-                            "state": "STOP",
-                        }]
-                else:
-                    segs = _build_segments_for_hour(hs, he_calc, is_np, run_intervals)
-
+                # NAO invente STOP pela ausencia de eventos (isso deixa tudo vermelho).
+                # Regra:
+                # - Hora atual (do dia atual): usa o status atual (run) para marcar RUN/STOP.
+                # - Demais horas sem eventos: marca como IDLE (vira cinza no front).
+                segs = _build_segments_for_hour_from_day_segments(hs, he_calc, is_np, day_state_segments)
                 if (not is_np) and now_naive is not None and stop_start_naive is not None:
                     try:
                         if hs <= now_naive < he and stop_start_naive <= he_calc:
@@ -1609,6 +1679,8 @@ def api_producao_detalhe_dia():
                         "qtd_paradas": qtd_paradas,
                     }
                 )
+
+
 
             return jsonify(
                 {
@@ -1635,43 +1707,6 @@ def api_producao_detalhe_dia():
                 pass
 
 
-
-
-
-def _deltaize_exibicao_24(values_24, meta24=None):
-    """Converte um array 24h possivelmente acumulado em valores por-hora (delta).
-
-    Regra:
-    - Se values_24 já for por-hora, o delta ainda funciona (mantém o mesmo na maior parte dos casos).
-    - Quando meta24[hh] == 0 (NP/break), zera e reancora para não "herdar" na hora seguinte.
-    """
-    out = [0] * 24
-    prev = None
-    for hh in range(24):
-        try:
-            cur = values_24[hh]
-        except Exception:
-            cur = None
-
-        cur_i = _safe_int(cur, 0) if cur is not None else 0
-
-        # Hora não programada / break: zera e reancora no valor atual
-        if isinstance(meta24, list) and len(meta24) == 24:
-            try:
-                if _safe_int(meta24[hh], 0) <= 0:
-                    out[hh] = 0
-                    prev = cur_i
-                    continue
-            except Exception:
-                pass
-
-        if prev is None:
-            out[hh] = cur_i if cur_i > 0 else 0
-        else:
-            d = cur_i - prev
-            out[hh] = d if d > 0 else 0
-        prev = cur_i
-    return out
 
 def _distribute_int_total(total: int, weights: list[int] | None = None, n: int = 24) -> list[int]:
     if n <= 0:
@@ -1715,27 +1750,6 @@ def _distribute_int_total(total: int, weights: list[int] | None = None, n: int =
                 k += 1
     return out
 
-
-def _fetch_horaria_multi(conn: sqlite3.Connection, machine_ids: list[str], data_ref) -> dict[int, dict]:
-    """Tenta carregar producao_horaria para múltiplos machine_id.
-    Retorna o primeiro conjunto não-vazio. Isso resolve casos onde:
-    - producao_horaria foi gravada com machine_id unscoped (maquina005)
-    - a UI chama o endpoint com scoped (<cliente>::maquina005) ou vice-versa
-    """
-    tried: set[str] = set()
-    for mid in machine_ids:
-        mid = (mid or "").strip()
-        if not mid or mid in tried:
-            continue
-        tried.add(mid)
-        try:
-            if _horaria_has_rows(conn, mid, data_ref):
-                hor = _fetch_horaria(conn, mid, data_ref)
-                if isinstance(hor, dict) and len(hor) > 0:
-                    return hor
-        except Exception:
-            continue
-    return {}
 
 def _backfill_horaria_for_day(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> dict:
     """
@@ -1981,4 +1995,3 @@ def api_producao_backfill_horaria():
 @historico_bp.route("/historico", methods=["GET"])
 def historico_page():
     return render_template("historico.html")
-###

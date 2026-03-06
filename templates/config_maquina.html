@@ -1,14 +1,7 @@
 <!--
-Caminho: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
-Ultimo recode: 2026-02-21 17:47 (America/Bahia)
-Motivo: Adicionar cards "Paradas" e "Graficos" no HUB da maquina (links /producao/paradas e /producao/graficos).
--->
-
-<!--
-Arquivo: templates/base.html
-Alterado em: 2026-02-01 18:55 (America/Bahia)
-Por: ChatGPT
-Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas iguais ao PC.
+PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\templates\config_maquina.html
+LAST_RECODE: 2026-03-05 01:16 (America/Bahia)
+MOTIVO: Corrigir erros de sintaxe JavaScript apos recode; manter apenas fluxo de Nova OP (sem box OP ativa e sem encerrar OP).
 -->
 
 <!DOCTYPE html>
@@ -91,32 +84,6 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       align-items:center;
       gap:12px;
       flex-wrap:wrap;
-    }
-
-    .op-ativo-box{
-      cursor:pointer;
-      user-select:none;
-      border:1px solid #e5e7eb;
-      border-radius:14px;
-      padding:8px 10px;
-      background:#f8fafc;
-      min-width:220px;
-    }
-    .op-ativo-title{
-      font-size:12px;
-      font-weight:900;
-      color:#334155;
-      text-transform:uppercase;
-      letter-spacing:0.03em;
-      margin-bottom:2px;
-    }
-    .op-ativo-info{
-      font-size:13px;
-      font-weight:900;
-      color:#0f172a;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
     }
 
     .cards-grid{
@@ -215,7 +182,169 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
       margin-top:6px;
       line-height:1.3;
     }
+
+    /* ===== FILA DE OP (SLOTS FIXOS) ===== */
+    .op-fila-top{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex:1;
+      min-width:420px;
+      padding:8px 10px;
+      border:1px solid #e5e7eb;
+      border-radius:14px;
+      background:#ffffff;
+      overflow-x:auto;
+    }
+
+    .op-fila-top-label{
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      text-transform:uppercase;
+      letter-spacing:0.03em;
+      white-space:nowrap;
+    }
+
+    .op-fila-top-slots{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      flex-wrap:nowrap;
+      white-space:nowrap;
+    }
+
+    .op-chip{
+      flex:0 0 auto;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      padding:7px 10px;
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      background:#f8fafc;
+    }
+
+    .op-chip-pos{
+      font-size:12px;
+      font-weight:900;
+      color:#0f172a;
+      min-width:12px;
+      text-align:center;
+    }
+
+    .op-chip-op{
+      font-size:12px;
+      font-weight:900;
+      color:#0f172a;
+      max-width:160px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+
+    .op-chip-status{
+      display:inline-block;
+      padding:4px 8px;
+      border-radius:999px;
+      font-size:10px;
+      font-weight:900;
+      color:#fff;
+      text-transform:uppercase;
+      letter-spacing:0.02em;
+      white-space:nowrap;
+    }
+
+    .op-st-ativa{ background:#16a34a; }
+    .op-st-fila{ background:#64748b; }
+    .op-st-encerrada{ background:#0f172a; }
+    .op-st-vazio{ background:#94a3b8; }
+
+    .op-fila-top-actions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-left:auto;
+      white-space:nowrap;
+    }
+
+    
+
+    /* ===== FILA DE OP DENTRO DO CARD OP (5 SLOTS) ===== */
+    .op-card-fila-wrap{
+      margin-top:10px;
+      margin-bottom:12px;
+    }
+    .op-card-fila-label{
+      font-size:12px;
+      font-weight:900;
+      color:#334155;
+      text-transform:uppercase;
+      letter-spacing:0.03em;
+      margin-bottom:8px;
+    }
+    .op-card-fila-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+    }
+    .op-card-fila-help{
+      font-size:12px;
+      font-weight:700;
+      color:#64748b;
+      margin-top:8px;
+      line-height:1.25;
+    }
+
+    /* Chips maximizados para caber no card sem aumentar tamanho */
+    .op-card-fila-chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+    }
+
+    /* 5 chips em 2 linhas: 3 em cima, 2 embaixo (responsivo dentro do card) */
+    .op-chip{
+      flex: 1 1 calc(33.333% - 10px);
+      min-width: 150px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      padding:10px 12px;
+      border-radius:14px;
+    }
+
+    .op-chip-pos{
+      font-size:12px;
+      min-width:12px;
+    }
+
+    .op-chip-op{
+      max-width:120px;
+      font-size:12px;
+    }
+
+    .op-chip-status{
+      padding:4px 10px;
+      font-size:10px;
+      min-width:54px;
+      text-align:center;
+    }
+
+    /* Em telas mais estreitas, cai para 2 por linha */
+    @media (max-width: 1240px){
+      .op-chip{
+        flex: 1 1 calc(50% - 10px);
+      }
+    }
+.op-fila-top-updated{
+      font-size:12px;
+      font-weight:800;
+      color:#64748b;
+    }
   </style>
+
 
 </head>
 
@@ -243,9 +372,7 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
         <h1 class="section-title" id="titulo-maquina">MAQUINA</h1>
 
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-          <div id="op-ativo-box" class="op-ativo-box" style="display:none;">
-            <div class="op-ativo-title">OP ativa</div>
-            <div id="op-ativo-info" class="op-ativo-info">-</div>
+<div id="op-ativo-info" class="op-ativo-info">-</div>
           </div>
         </div>
       </div>
@@ -254,13 +381,13 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
 
         <div class="machine-card">
           <div class="machine-card-title">OP</div>
-          <p class="machine-card-desc">Abrir, editar ou encerrar Ordem de Produção da máquina.</p>
+          <p class="machine-card-desc">Abrir, editar ou encerrar Ordem de Producao da maquina.</p>
           <div class="machine-card-actions">
-            <button id="btn-op-manage" type="button" class="btn btn-primary">Abrir</button>
+            <a href="#" id="btn-op-manage" class="btn btn-primary">Abrir</a>
           </div>
         </div>
 
-        <div class="machine-card">
+<div class="machine-card">
           <div class="machine-card-title">Historico</div>
           <p class="machine-card-desc">Consultar histórico de produção e desempenho por período.</p>
           <div class="machine-card-actions">
@@ -322,17 +449,17 @@ Motivo: Forcar layout desktop em celular/tablet (viewport width fixo) para telas
               <div id="op_bobinas_list" style="display:flex; flex-direction:column; gap:10px; margin-top:10px;"></div>
               <button id="btnAddBobina" type="button" class="btn btn-secondary" style="margin-top:10px;">Adicionar bobina</button>
               <input type="hidden" id="op_bobina" value="">
+              <input type="hidden" id="op_posicao" value="">
 
               <label class="mt-20">GR / Fio (opcional):</label><input type="text" id="op_gr_fio" class="input">
               <label class="mt-20">Observacoes (opcional):</label><textarea id="op_obs" class="input" rows="3" style="resize:vertical;"></textarea>
 
               <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px; flex-wrap:wrap;">
                 <button type="button" class="btn btn-secondary" id="btnCancelOp">Cancelar</button>
-                <button type="button" class="btn" id="btnEndOpInside" style="background:#0f172a;color:#fff; display:none;">Encerrar OP</button>
-                <button type="submit" class="btn btn-primary" id="btnSaveOp">Salvar</button>
+<button type="submit" class="btn btn-primary" id="btnSaveOp">Salvar</button>
               </div>
             </form>
-            <div class="help-text" style="margin-top:10px;">Inicio e fim da OP sao automaticos (ao iniciar e encerrar).</div>
+            <div class="help-text" style="margin-top:10px;">Inicio da OP e automatico (ao iniciar).</div>
           </div>
         </div>
       </div>
@@ -354,6 +481,9 @@ document.getElementById("link-graficos").href = `/producao/graficos?machine_id=$
 
 let opAtiva = null;
 let opModalMode = "new";
+
+let opFilaByPos = {};
+let opSlotSelecionado = null;
 
 function _createBobinaRow(value){
   const row = document.createElement("div");
@@ -427,18 +557,6 @@ function _fillOpFormFromData(d){
   _syncHiddenBobinaFirst();
 }
 
-function _setOpTopBox(info){
-  const box = document.getElementById("op-ativo-box");
-  const i = document.getElementById("op-ativo-info");
-  if(!box || !i) return;
-  if(info){
-    box.style.display = "block";
-    i.textContent = info;
-  }else{
-    box.style.display = "none";
-    i.textContent = "-";
-  }
-}
 
 async function _getJson(url){
   try{
@@ -457,56 +575,148 @@ function _normalizeMachineStatusPayload(payload){
   return { machine: payload, op: null };
 }
 
-async function carregarOpStatus(){
-  const payload = await _getJson(`/machine/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(payload){
-    const norm = _normalizeMachineStatusPayload(payload);
-    if(norm.op && norm.op.active){
-      opAtiva = norm.op;
-      const info = `OS ${String(opAtiva.os||"")} | Lote ${String(opAtiva.lote||"")} | Operador ${String(opAtiva.operador||"")}`;
-      _setOpTopBox(info);
-      return;
+
+
+
+function _formatNowHHMM(){
+  try{
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2,"0");
+    const mm = String(d.getMinutes()).padStart(2,"0");
+    return `${hh}:${mm}`;
+  }catch(e){
+    return "";
+  }
+}
+
+function _normalizeOpFilaPayload(payload){
+  if(!payload) return [];
+  if(Array.isArray(payload)) return payload;
+  if(Array.isArray(payload.fila)) return payload.fila;
+  if(Array.isArray(payload.rows)) return payload.rows;
+  if(Array.isArray(payload.data)) return payload.data;
+  return [];
+}
+
+function _badgeFromStatus(st){
+  const s = String(st || "").toLowerCase();
+  if(s === "ativa") return {cls:"op-st-ativa", label:"ATIVA"};
+  if(s === "fila") return {cls:"op-st-fila", label:"FILA"};
+  if(s === "encerrada") return {cls:"op-st-encerrada", label:"ENCERRADA"};
+  if(s === "vazio" || s === "" || s === "null" || s === "none") return {cls:"op-st-vazio", label:"VAZIO"};
+  return {cls:"op-st-fila", label:String(st || "FILA").toUpperCase()};
+}
+
+function _setHiddenPosicao(pos){
+  const h = document.getElementById("op_posicao");
+  if(h) h.value = pos ? String(pos) : "";
+}
+
+function _firstEmptyPos(){
+  for(let p=1; p<=5; p++){
+    const r = opFilaByPos[p] || null;
+    const op = r ? (r.op || r.op_id || r.op_code || r.op_num || "") : "";
+    const st = r ? String(r.status || "").toLowerCase() : "vazio";
+    if(!op && (st === "vazio" || st === "" || st === "null" || st === "none")){
+      return p;
     }
   }
+  for(let p=1; p<=5; p++){
+    const r = opFilaByPos[p] || null;
+    const op = r ? (r.op || r.op_id || r.op_code || r.op_num || "") : "";
+    if(!op) return p;
+  }
+  return null;
+}
 
-  const d = await _getJson(`/producao/op/status?machine_id=${encodeURIComponent(machine_id)}`);
-  if(d && d.active){
-    opAtiva = d;
-    const info = `OS ${String(d.os||"")} | Lote ${String(d.lote||"")} | Operador ${String(d.operador||"")}`;
-    _setOpTopBox(info);
-  }else{
-    opAtiva = null;
-    _setOpTopBox(null);
+function openOpModalNew(pos){
+  opSlotSelecionado = pos || null;
+  _setModalMode("new");
+  document.getElementById("op-form").reset();
+  _setBobinasToUI([]);
+  _syncHiddenBobinaFirst();
+  _setHiddenPosicao(opSlotSelecionado);
+
+  const bd = document.getElementById("opModalBackdrop");
+  if(bd) bd.style.display = "flex";
+}
+
+function abrirOpSlot(pos){
+  const p = Number(pos || 0);
+  if(p < 1 || p > 5){
+    alert("Posicao invalida.");
+    return;
+  }
+
+  // Se slot estiver ocupado, por enquanto nao abrimos edicao via slot (proximo passo)
+  const r = opFilaByPos[p] || null;
+  const op = r ? (r.op || r.op_id || r.op_code || r.op_num || "") : "";
+  if(op){
+    alert("Este slot ja tem OP. Por enquanto, use o box OP ATIVA para editar/encerrar, ou escolha um slot vazio.");
+    return;
+  }
+
+  openOpModalNew(p);
+}
+
+
+function _renderOpFilaTop(rows){
+  const slots = document.getElementById("op-fila-opcard");
+  if(!slots) return;
+
+  opFilaByPos = {};
+  (rows || []).forEach((r) => {
+    const pos = Number(r.posicao || r.pos || 0);
+    if(pos >= 1 && pos <= 5){
+      opFilaByPos[pos] = r;
+    }
+  });
+
+  const out = [];
+  for(let p=1; p<=5; p++){
+    const r = opFilaByPos[p] || null;
+    const op = r ? (r.op || r.op_id || r.op_code || r.op_num || "") : "";
+    const st = r ? (r.status || "") : "vazio";
+    const b = _badgeFromStatus(st);
+    const opTxt = op ? String(op) : "—";
+
+    out.push(
+      `<div class="op-chip" onclick="abrirOpSlot(${p})" style="cursor:pointer" title="POS ${p}">` +
+        `<div class="op-chip-pos">${p}</div>` +
+        `<div class="op-chip-op" title="${opTxt}">${opTxt}</div>` +
+        `<span class="op-chip-status ${b.cls}">${b.label}</span>` +
+      `</div>`
+    );
+  }
+
+  slots.innerHTML = out.join("");
+}
+
+async function carregarOpFila(){
+  try{
+    const payload = await _getJson(`/machine/op/fila?machine_id=${encodeURIComponent(machine_id)}`);
+    const rows = _normalizeOpFilaPayload(payload);
+    _renderOpFilaTop(rows);
+  }catch(err){
+    console.error("Falha ao carregar fila de OP", err);
   }
 }
 
 function _setModalMode(mode){
-  opModalMode = (mode === "edit") ? "edit" : "new";
+  opModalMode = "new";
   const t = document.getElementById("opModalTitle");
   const btnSave = document.getElementById("btnSaveOp");
-  const btnEnd = document.getElementById("btnEndOpInside");
-
-  if(opModalMode === "edit"){
-    if(t) t.textContent = "Editar Ordem de Producao (OP)";
-    if(btnSave) btnSave.textContent = "Salvar Alteracoes";
-    if(btnEnd) btnEnd.style.display = "inline-block";
-  }else{
-    if(t) t.textContent = "Nova Ordem de Producao (OP)";
-    if(btnSave) btnSave.textContent = "Iniciar OP";
-    if(btnEnd) btnEnd.style.display = "none";
-  }
+  if(t) t.textContent = "Nova Ordem de Producao (OP)";
+  if(btnSave) btnSave.textContent = "Iniciar OP";
 }
 
 function openOpModal(){
-  if(opAtiva && opAtiva.active){
-    _setModalMode("edit");
-    _fillOpFormFromData(opAtiva);
-  }else{
-    _setModalMode("new");
-    document.getElementById("op-form").reset();
-    _setBobinasToUI([]);
-    _syncHiddenBobinaFirst();
-  }
+  _setModalMode("new");
+  document.getElementById("op-form").reset();
+  _setBobinasToUI([]);
+  _syncHiddenBobinaFirst();
+  opSlotSelecionado = null;
+  _setHiddenPosicao("");
 
   const bd = document.getElementById("opModalBackdrop");
   if(bd) bd.style.display = "flex";
@@ -515,6 +725,8 @@ function openOpModal(){
 function closeOpModal(){
   const bd = document.getElementById("opModalBackdrop");
   if(bd) bd.style.display = "none";
+  opSlotSelecionado = null;
+  _setHiddenPosicao("");
 }
 
 async function _postJson(url,p){
@@ -526,11 +738,9 @@ async function _postJson(url,p){
 }
 
 function initOpUI(){
-  const btnManage = document.getElementById("btn-op-manage");
-  const box = document.getElementById("op-ativo-box");
+  const btn = document.getElementById("btn-op-manage");
+  if(btn) btn.addEventListener("click", (e) => { if(e) e.preventDefault(); openOpModal(); });
 
-  if(btnManage) btnManage.addEventListener("click", openOpModal);
-  if(box) box.addEventListener("click", openOpModal);
 
   const bd = document.getElementById("opModalBackdrop");
   const bc = document.getElementById("btnCloseOpModal");
@@ -553,23 +763,6 @@ function initOpUI(){
     list.addEventListener("change", () => { _syncHiddenBobinaFirst(); });
   }
 
-  const btnEnd = document.getElementById("btnEndOpInside");
-  if(btnEnd) btnEnd.addEventListener("click", async () => {
-    if(!opAtiva || !opAtiva.active){
-      alert("Nao ha OP ativa para encerrar.");
-      return;
-    }
-    if(!confirm("Confirmar encerramento da OP ativa?")) return;
-
-    try{
-      await _postJson("/producao/op/encerrar", {machine_id: machine_id});
-      closeOpModal();
-      await carregarOpStatus();
-    }catch(err){
-      alert(String(err && err.message ? err.message : err));
-    }
-  });
-
   const f = document.getElementById("op-form");
   if(f) f.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -589,30 +782,23 @@ function initOpUI(){
       operador: oper,
       bobina: String(document.getElementById("op_bobina").value || "").trim(),
       gr_fio: String(document.getElementById("op_gr_fio").value || "").trim(),
-      observacoes: String(document.getElementById("op_obs").value || "").trim()
+      observacoes: String(document.getElementById("op_obs").value || "").trim(),
+      posicao: Number(String(document.getElementById("op_posicao").value || "").trim() || "0")
     };
 
     try{
       const bobinas = _getBobinasFromUI();
       payload.bobinas = bobinas;
       payload.bobina = bobinas.length ? bobinas[0] : payload.bobina;
-
-      if(opModalMode === "edit"){
-        await _postJson("/producao/op/editar", payload);
-      }else{
-        await _postJson("/producao/op/iniciar", payload);
-      }
-
-      closeOpModal();
-      await carregarOpStatus();
-    }catch(err){
+      await _postJson("/producao/op/iniciar", payload);
+closeOpModal();
+}catch(err){
       alert(String(err && err.message ? err.message : err));
     }
   });
 }
 
 initOpUI();
-carregarOpStatus();
 </script>
 
 </body>
