@@ -1,8 +1,3 @@
-<!--
-C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-06 20:35:00 -03:00
-MOTIVO: Corrigir impressao/PDF para calcular corretamente o tempo de consumo da bobina e eliminar erro JS que quebrava o botao Gerar PDF.
--->
 
 
 
@@ -1568,6 +1563,12 @@ function safeText(v){
     return Number.isFinite(n) ? n : 0;
   }
 
+  function round2(v){
+    const n = Number(v);
+    if(!Number.isFinite(n)) return 0;
+    return Math.round(n * 100) / 100;
+  }
+
   function fmtMeters2Floor(v){
     const n = Number(v);
     if(!Number.isFinite(n)) return "0.00";
@@ -1731,6 +1732,79 @@ function safeText(v){
       }
     }
     return [];
+  }
+
+  function pickOpBobinaEvento(op, idx){
+    if(!op) return null;
+    const eventos = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
+    if(!Array.isArray(eventos) || !eventos.length) return null;
+    const ev = eventos[idx] ?? null;
+    return (ev && typeof ev === "object") ? ev : null;
+  }
+
+  function buildBobinaSavePayload(op, idx, manual){
+    const itens = pickOpBobinasItens(op);
+    const item = (Array.isArray(itens) && itens[idx] && typeof itens[idx] === "object") ? itens[idx] : {};
+    const ev = pickOpBobinaEvento(op, idx) || {};
+
+    const comprimento = Math.floor(num0(
+      item.comprimento_m ?? item.metros ?? item.bobina_m ??
+      ev.comprimento_m ?? ev.comprimentoM ?? ev.bobina_m ?? 0
+    ));
+
+    const startAbs = Math.floor(num0(
+      item.start_abs_pcs ?? item.start_abs ?? item.baseline_pcs ?? item.esp_inicio ??
+      ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? ev.esp_inicio ?? 0
+    ));
+
+    const endAbs = Math.floor(num0(
+      item.end_abs_pcs ?? item.end_abs ?? item.esp_final ?? item.esp_last ??
+      ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? ev.esp_final ?? 0
+    ));
+
+    const startedAt = safeText(
+      item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ??
+      ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at ?? ""
+    ).trim();
+
+    const endedAt = safeText(
+      item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ??
+      ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at ?? ""
+    ).trim();
+
+    let pcsTotal = Math.floor(num0(item.pcs_total ?? item.total_pcs ?? 0));
+    if(!(pcsTotal > 0) && endAbs >= startAbs && endAbs > 0){
+      pcsTotal = Math.max(0, endAbs - startAbs);
+    }
+
+    let metroConsumido = num0(item.metro_consumido ?? item.metro_linear_consumido ?? 0);
+    if(!(metroConsumido > 0) && pcsTotal > 0){
+      const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
+      if(conv > 0){
+        metroConsumido = pcsTotal * conv;
+      }
+    }
+
+    const qtdCost = Math.floor(num0(manual && manual.qtd_cost_elas));
+    const refugo = Math.floor(num0(manual && manual.refugo));
+    const qtdSaco = Math.floor(num0(manual && manual.qtd_saco_caixa));
+    const qtdMatBom = calcMatBom(pcsTotal, qtdCost, refugo, qtdSaco);
+
+    return {
+      idx: Math.floor(num0(item.idx ?? ev.idx ?? idx + 1)),
+      seq: Math.floor(num0(ev.seq ?? idx)),
+      comprimento_m: comprimento,
+      start_abs_pcs: startAbs,
+      end_abs_pcs: endAbs,
+      started_at: startedAt,
+      ended_at: endedAt,
+      pcs_total: pcsTotal,
+      metro_consumido: round2(metroConsumido),
+      qtd_cost_elas: qtdCost,
+      qtd_mat_bom: qtdMatBom,
+      qtd_saco_caixa: qtdSaco,
+      refugo: refugo
+    };
   }
 
 
@@ -2647,25 +2721,6 @@ tdD.appendChild(wrap);
     const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
     const bobinas = pickOpBobinasItens(op);
 
-    function calcTempoBobinaPrint(b){
-      const tempoDireto = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? b.tempo_min ?? b.tempo ?? 0)));
-      if(tempoDireto > 0) return tempoDireto;
-
-      const startedRaw = safeText(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? "")).trim();
-      const endedRaw = safeText(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? "")).trim();
-      if(!startedRaw || !endedRaw) return 0;
-
-      try{
-        const ds = new Date(startedRaw);
-        const de = new Date(endedRaw);
-        if(isNaN(ds.getTime()) || isNaN(de.getTime())) return 0;
-        const diffMin = Math.floor((de.getTime() - ds.getTime()) / 60000);
-        return diffMin > 0 ? diffMin : 0;
-      }catch(e){
-        return 0;
-      }
-    }
-
     const machine = anyText(op && (op.machine_id || machineId));
     const operador = anyText(op && op.operador);
     const lote = anyText(op && op.lote);
@@ -2685,7 +2740,7 @@ tdD.appendChild(wrap);
           const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
           const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
           const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
-          const tempo = calcTempoBobinaPrint(b);
+          const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
           const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
           const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
           const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
@@ -2715,7 +2770,7 @@ tdD.appendChild(wrap);
                   <td>${comprimento}</td>
                   <td>${pcs}</td>
                   <td>${escapeHtml(metro)}</td>
-                  <td>${tempo}</td>
+                  <td>${tempomMin}</td>
                 </tr>
               </table>
 
@@ -3169,8 +3224,7 @@ if(modalSave){
 
 
       // valida duplicidade de OS (no escopo cliente + maquina) usando cache local do historico
-      const osInput = document.getElementById("op-os");
-      const osValue = osInput ? osInput.value : "";
+      const osValue = (opv_os && opv_os.value) ? opv_os.value : "";
       const dup = findDuplicateOsInCache(osValue, opId);
       if(dup){
         alert("Ja existe uma OP com esse numero (OS): " + safeText(osValue));
@@ -3189,19 +3243,19 @@ if(modalSave){
             return num0(el.value);
           };
 
-          bobinasPayload.push({
-            idx: idx,
+          bobinasPayload.push(buildBobinaSavePayload(currentOp, idx, {
             qtd_cost_elas: Math.floor(getField("qtd_cost_elas")),
             refugo: Math.floor(getField("refugo")),
             qtd_saco_caixa: Math.floor(getField("qtd_saco_caixa"))
-          });
+          }));
         });
       }
 
       const payload = {
         op_id: opId,
         observacoes: (ope_obs && ope_obs.value) ? ope_obs.value : "",
-        bobinas: bobinasPayload
+        bobinas: bobinasPayload,
+        bobinas_detail: bobinasPayload
       };
 
       if(currentOpMode === "edit"){
@@ -3226,9 +3280,9 @@ if(modalSave){
           const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
           const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
 
-          const cost = Number((card.querySelector("input[data-field='qtd_costuras']") || {}).value || 0) || 0;
-          const refugo = Number((card.querySelector("input[data-field='qtd_refugo']") || {}).value || 0) || 0;
-          const retrabalho = Number((card.querySelector("input[data-field='qtd_retrabalho']") || {}).value || 0) || 0;
+          const cost = Number((card.querySelector("input[data-field='qtd_cost_elas']") || {}).value || 0) || 0;
+          const refugo = Number((card.querySelector("input[data-field='refugo']") || {}).value || 0) || 0;
+          const retrabalho = Number((card.querySelector("input[data-field='qtd_saco_caixa']") || {}).value || 0) || 0;
 
           const soma = cost + refugo + retrabalho;
 
