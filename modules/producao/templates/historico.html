@@ -2564,13 +2564,12 @@ tdD.appendChild(wrap);
     dayModalBackdrop.style.display = "";
     dayModalBackdrop.setAttribute("aria-hidden", "false");
 
-    await refreshDayModal(false);
-
     if(dayModalTimer){
       clearInterval(dayModalTimer);
       dayModalTimer = null;
     }
-    dayModalTimer = setInterval(()=>{ refreshDayModal(true); }, 5000);
+
+    await refreshDayModal(false);
   }
 
   function escapeHtml(s){
