@@ -2540,10 +2540,8 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
   function renderDayDetail(payload){
     const isoDay = payload && payload.date ? String(payload.date) : "";
-    const effectiveId = payload && payload.effective_machine_id ? String(payload.effective_machine_id) : "";
-    const machineId = payload && payload.machine_id ? String(payload.machine_id) : "";
 
-    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay) + (effectiveId && effectiveId !== machineId ? (" (id efetivo: " + effectiveId + ")") : "");
+    dayModalTitle.textContent = "Detalhe do dia " + isoToBr(isoDay);
 
     const hours = (payload && Array.isArray(payload.hours)) ? payload.hours : [];
     dayHourTbody.innerHTML = "";
