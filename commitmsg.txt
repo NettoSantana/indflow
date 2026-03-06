@@ -1,6 +1,5 @@
-﻿fix(machine_routes): consumir e limpar pendencia de troca de bobina no machine/update
+﻿style(historico): melhora contraste da op em fila
 
-- adiciona leitura da tabela ordens_producao_bobina_pendencia
-- abre a proxima bobina apenas no primeiro update real apos a troca
-- limpa a pendencia apos criar/completar o evento da proxima bobina
-- mantem fallback legado por eventos para compatibilidade
+- ajusta background da classe op-row-lista
+- define azul claro mais visivel para OP em fila
+- mantem verde para ativa e cinza para encerrada
