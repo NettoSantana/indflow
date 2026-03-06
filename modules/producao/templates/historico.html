@@ -1,5 +1,11 @@
 <!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-06 13:05:00 -0300
+Motivo: Reorganizar linha de produção do dia em cabeçalho industrial, aumentar altura do cabeçalho e compactar linhas das OPs.
+-->
+
+<!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Ultimo recode: 2026-03-06 09:20:00 -0300
 Motivo: Destacar linhas da OP por status; ocultar botao Troca de Bobina na ultima bobina; destacar slot da bobina ativa.
 -->
@@ -143,6 +149,8 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     color:#334155;
     font-size:13px;
     font-weight:700;
+    padding-top:6px;
+    padding-bottom:6px;
     border-bottom:1px solid #94a3b8; /* mais escuro que o dia */
   }
 
@@ -164,11 +172,6 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     border-left:6px solid #9ca3af;
   }
 
-  /* Linha do DIA fica mais clara */
-  tr.day-row td{
-    border-bottom:1px solid #e8e8e8;
-  }
-
   .op-row{
     cursor:pointer;
   }
@@ -177,9 +180,68 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     filter:brightness(0.98);
   }
 
+  /* Linha do DIA: cabeçalho industrial */
+  tr.day-row td{
+    padding:0;
+    background:#f3f4f6;
+    border-bottom:1px solid #d1d5db;
+  }
+
+  .day-summary{
+    min-height:50px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    padding:10px 16px;
+    background:#f3f4f6;
+  }
+
+  .day-date{
+    flex:0 0 auto;
+    font-size:14px;
+    font-weight:900;
+    color:#374151;
+    letter-spacing:0.01em;
+    text-transform:uppercase;
+  }
+
+  .day-metrics{
+    flex:1 1 auto;
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:10px;
+    flex-wrap:wrap;
+  }
+
+  .day-metric{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    color:#4b5563;
+    font-size:13px;
+    font-weight:800;
+    white-space:nowrap;
+  }
+
+  .day-metric-label{
+    color:#6b7280;
+    font-size:11px;
+    font-weight:900;
+    letter-spacing:0.04em;
+    text-transform:uppercase;
+  }
+
+  .day-divider{
+    width:1px;
+    height:18px;
+    background:#d1d5db;
+  }
+
   /* Indentacao: empurra o conteudo da OP para dentro, indicando que pertence ao dia */
   td.op-cell{
-    padding-left:48px !important;
+    padding-left:42px !important;
     position:relative;
   }
 
@@ -188,8 +250,8 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     content:"";
     position:absolute;
     left:24px;
-    top:10px;
-    bottom:10px;
+    top:8px;
+    bottom:8px;
     width:2px;
     background:#cbd5e1;
     border-radius:2px;
@@ -235,7 +297,7 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     background:#ffffff;
     color:#0f172a;
     border-radius:10px;
-    padding:6px 10px;
+    padding:5px 10px;
     font-weight:800;
     font-size:12px;
     cursor:pointer;
@@ -652,7 +714,8 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
 
   /* Clique na linha do dia */
   tr.day-row{ cursor:pointer; }
-  tr.day-row:hover td{ background:#f8fafc; }
+  tr.day-row:hover td,
+  tr.day-row:hover .day-summary{ background:#eceff3; }
 
 
   .hwrap{
@@ -3185,30 +3248,49 @@ btnEdit.addEventListener("click", _goEdit);
       tr.className = "day-row";
       tr.dataset.dayIso = getRowDateISO(r);
 
-      const tdData = document.createElement("td");
-      tdData.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
+      const tdDay = document.createElement("td");
+      tdDay.colSpan = 5;
 
-      const tdProd = document.createElement("td");
-      tdProd.className = "text-right";
-      tdProd.textContent = fmtNum(r.produzido);
+      const summary = document.createElement("div");
+      summary.className = "day-summary";
 
-      const tdBoas = document.createElement("td");
-      tdBoas.className = "text-right";
-      tdBoas.textContent = fmtNum(r.pecas_boas);
+      const dateEl = document.createElement("div");
+      dateEl.className = "day-date";
+      dateEl.textContent = isoToBr((r && (r.data_ref || r.data || r.dia_ref || r.date)) || "-");
 
-      const tdRef = document.createElement("td");
-      tdRef.className = "text-right";
-      tdRef.textContent = fmtNum((r && (r.refugo_total ?? r.refugo ?? 0)));
+      const metrics = document.createElement("div");
+      metrics.className = "day-metrics";
 
-      const tdDayActions = document.createElement("td");
-      tdDayActions.className = "text-right";
-      tdDayActions.textContent = "";
+      function createMetric(label, value, addDivider){
+        const wrap = document.createElement("div");
+        wrap.className = "day-metric";
 
-      tr.appendChild(tdData);
-      tr.appendChild(tdProd);
-      tr.appendChild(tdBoas);
-      tr.appendChild(tdRef);
-      tr.appendChild(tdDayActions);
+        const lab = document.createElement("span");
+        lab.className = "day-metric-label";
+        lab.textContent = label;
+
+        const val = document.createElement("span");
+        val.textContent = value;
+
+        wrap.appendChild(lab);
+        wrap.appendChild(val);
+        metrics.appendChild(wrap);
+
+        if(addDivider){
+          const divider = document.createElement("div");
+          divider.className = "day-divider";
+          metrics.appendChild(divider);
+        }
+      }
+
+      createMetric("Total", fmtNum(r.produzido), true);
+      createMetric("Boas", fmtNum(r.pecas_boas), true);
+      createMetric("Refugo", fmtNum((r && (r.refugo_total ?? r.refugo ?? 0))), false);
+
+      summary.appendChild(dateEl);
+      summary.appendChild(metrics);
+      tdDay.appendChild(summary);
+      tr.appendChild(tdDay);
 
       tr.addEventListener("click", function(ev){
         // Evita conflitar com clique em linhas de OP (elas sao outras trs)
