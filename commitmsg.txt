@@ -1,4 +1,5 @@
-﻿fix(front): livePcs somente na primeira bobina ao ativar OP
+﻿fix(db): criar tabelas de bobinas (eventos e pendencia) no init_db
 
-- Evita que o modo ao vivo preencha todas as bobinas quando os itens ainda estao zerados
-- Live overlay passa a aplicar apenas para idx 0
+- Adiciona ordens_producao_bobina_eventos com UNIQUE(op_id, seq)
+- Adiciona ordens_producao_bobina_pendencia para travar clique duplo e sincronizar inicio no primeiro machine/update
+- Cria indexes e faz migracao leve via add_column_if_missing
