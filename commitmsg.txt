@@ -1,5 +1,5 @@
-﻿fix(machine_routes): zera card da hora na virada quando baseline_hora ja reancorou
+﻿fix(machine_routes): zera producao da hora sempre que mudar a hora
 
-- adiciona normalizacao defensiva para virada de hora
-- zera _ph_acc, producao_hora e producao_hora_liquida quando houver heranca da hora anterior
-- reaplica a correcao em /machine/update e /machine/status
+- adiciona reset defensivo do card na troca de hora
+- zera _ph_acc, producao_hora e producao_hora_liquida na nova hora
+- reaplica a regra em /machine/update e /machine/status
