@@ -1,5 +1,6 @@
-﻿fix(db): criar tabelas de bobinas (eventos e pendencia) no init_db
+﻿fix(machine_routes): consumir e limpar pendencia de troca de bobina no machine/update
 
-- Adiciona ordens_producao_bobina_eventos com UNIQUE(op_id, seq)
-- Adiciona ordens_producao_bobina_pendencia para travar clique duplo e sincronizar inicio no primeiro machine/update
-- Cria indexes e faz migracao leve via add_column_if_missing
+- adiciona leitura da tabela ordens_producao_bobina_pendencia
+- abre a proxima bobina apenas no primeiro update real apos a troca
+- limpa a pendencia apos criar/completar o evento da proxima bobina
+- mantem fallback legado por eventos para compatibilidade
