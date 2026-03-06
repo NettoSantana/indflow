@@ -2670,63 +2670,67 @@ tdD.appendChild(wrap);
           const mat = calcMatBom(pcs, cost, ref, retrabalho);
 
           return `
-            <table class="block-table bobina-head">
-              <tr>
-                <th style="width:25%;">Bobina ${i + 1}</th>
-                <td style="width:25%;"></td>
-                <td style="width:25%;"></td>
-                <th style="width:25%;" class="text-right">Comprimento: ${comprimento} m</th>
-              </tr>
-            </table>
+            <div class="bobina-print-box">
+              <table class="block-table bobina-head">
+                <tr>
+                  <th style="width:25%;">BOBINA ${i + 1}</th>
+                  <td style="width:25%;"></td>
+                  <td style="width:25%;"></td>
+                  <th style="width:25%;" class="text-right">Comprimento: ${comprimento} m</th>
+                </tr>
+              </table>
 
-            <table class="block-table bobina-grid">
-              <tr>
-                <th>COMPRIMENTO DA BOBINA (M)</th>
-                <th>TOTAL PCS (BOBINA)</th>
-                <th>METRO LINEAR CONSUMIDO (M)</th>
-                <th>TEMPO DE CONSUMO (MIN)</th>
-              </tr>
-              <tr>
-                <td>${comprimento}</td>
-                <td>${pcs}</td>
-                <td>${escapeHtml(metro)}</td>
-                <td>${tempo}</td>
-              </tr>
-            </table>
+              <table class="block-table bobina-grid bobina-section">
+                <tr>
+                  <th>COMPRIMENTO DA BOBINA (M)</th>
+                  <th>TOTAL PCS (BOBINA)</th>
+                  <th>METRO LINEAR CONSUMIDO (M)</th>
+                  <th>TEMPO DE CONSUMO (MIN)</th>
+                </tr>
+                <tr>
+                  <td>${comprimento}</td>
+                  <td>${pcs}</td>
+                  <td>${escapeHtml(metro)}</td>
+                  <td>${tempo}</td>
+                </tr>
+              </table>
 
-            <table class="block-table two-col">
-              <tr>
-                <th>HORA INICIAL</th>
-                <th>HORA FINAL</th>
-              </tr>
-              <tr>
-                <td>${escapeHtml(hi)}</td>
-                <td>${escapeHtml(hf)}</td>
-              </tr>
-            </table>
+              <table class="block-table two-col bobina-section">
+                <tr>
+                  <th>HORA INICIAL</th>
+                  <th>HORA FINAL</th>
+                </tr>
+                <tr>
+                  <td>${escapeHtml(hi)}</td>
+                  <td>${escapeHtml(hf)}</td>
+                </tr>
+              </table>
 
-            <table class="block-table bobina-grid bobina-totals">
-              <tr>
-                <th>QTD. MAT BOM</th>
-                <th>QTD. COST. ELAS.</th>
-                <th>REFUGO</th>
-                <th>RETRABALHO</th>
-              </tr>
-              <tr>
-                <td>${mat}</td>
-                <td>${cost}</td>
-                <td>${ref}</td>
-                <td>${retrabalho}</td>
-              </tr>
-            </table>
+              <table class="block-table bobina-grid bobina-totals bobina-section">
+                <tr>
+                  <th>QTD. MAT BOM</th>
+                  <th>QTD. COST. ELAS.</th>
+                  <th>REFUGO</th>
+                  <th>RETRABALHO</th>
+                </tr>
+                <tr>
+                  <td>${mat}</td>
+                  <td>${cost}</td>
+                  <td>${ref}</td>
+                  <td>${retrabalho}</td>
+                </tr>
+              </table>
+            </div>
           `;
         }).join("")
       : `
-          <table class="block-table bobina-grid">
-            <tr>
-              <td class="empty">Sem bobinas registradas.</td>
-            </tr>
-          </table>
+          <div class="bobina-print-box bobina-print-box-empty">
+            <table class="block-table bobina-grid bobina-section">
+              <tr>
+                <td class="empty">Sem bobinas registradas.</td>
+              </tr>
+            </table>
+          </div>
         `;
 
     const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
@@ -2735,8 +2739,8 @@ tdD.appendChild(wrap);
 
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-06 18:20:00 -03:00
-MOTIVO: Ajustar impressao/PDF da OP para layout em retrato igual ao modal, removendo apenas o bloco de cadastro de bobinas e mantendo as fichas das bobinas.
+LAST_RECODE: 2026-03-06 19:40:00 -03:00
+MOTIVO: Destacar visualmente cada bobina na impressao/PDF com bloco cinza, borda externa e cabecalho industrial para separar melhor os dados.
 -->
 <html lang="pt-BR">
 <head>
@@ -2749,6 +2753,16 @@ MOTIVO: Ajustar impressao/PDF da OP para layout em retrato igual ao modal, remov
   .sheet{ width:100%; }
   .title-table,
   .block-table{ width:100%; border-collapse:separate; border-spacing:0; margin:0 0 8px 0; }
+  .bobina-print-box{
+    background:#e5e7eb;
+    border:1.5px solid #6b7280;
+    padding:8px;
+    margin:0 0 12px 0;
+    page-break-inside:avoid;
+    break-inside:avoid;
+  }
+  .bobina-print-box .block-table{ margin:0 0 6px 0; }
+  .bobina-print-box .block-table:last-child{ margin-bottom:0; }
   .title-table th,
   .block-table th,
   .block-table td{
@@ -2785,7 +2799,12 @@ MOTIVO: Ajustar impressao/PDF da OP para layout em retrato igual ao modal, remov
   .two-col th,
   .two-col td{ width:50%; }
   .bobina-head th,
-  .bobina-head td{ background:#dcfce7; }
+  .bobina-head td{ background:#d1d5db; }
+  .bobina-head th{
+    font-size:12px;
+    letter-spacing:0.03em;
+  }
+  .bobina-section td{ background:#ffffff; }
   .bobina-totals th,
   .bobina-totals td{ background:#fef3c7; }
   .obs-table td{
