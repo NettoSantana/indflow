@@ -1,8 +1,6 @@
-﻿style(historico): status da OP com barra lateral estilo MES
+﻿style(historico): cores neutras por status da OP
 
-- remove background colorido da linha inteira
-- adiciona barra lateral esquerda para indicar status
-- verde = ativa
-- azul = fila
-- cinza = encerrada
-- melhora leitura visual no historico
+- ativa: verde suave
+- fila: azul suave
+- encerrada: cinza
+- linha inteira colorida para facilitar leitura
