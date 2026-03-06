@@ -1,6 +1,5 @@
-﻿fix(machine_routes): consumir e limpar pendencia de troca de bobina no machine/update
+﻿feat(historico): destaca status das ops e bobina ativa; oculta troca na ultima bobina
 
-- adiciona leitura da tabela ordens_producao_bobina_pendencia
-- abre a proxima bobina apenas no primeiro update real apos a troca
-- limpa a pendencia apos criar/completar o evento da proxima bobina
-- mantem fallback legado por eventos para compatibilidade
+- aplica cor por status da OP na listagem
+- destaca slot da bobina ativa em verde claro
+- oculta botao de troca quando nao existe proxima bobina
