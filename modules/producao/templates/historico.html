@@ -1,4 +1,10 @@
 <!--
+Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+Ultimo recode: 2026-03-06 00:26:31 -0300
+Motivo: Evitar que o modo ao vivo (livePcs) preencha todas as bobinas ao ativar a OP; aplicar somente na primeira bobina.
+-->
+
+<!--
 Path: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
 Last recode: 2026-03-05 19:35:00 -03:00
 Reason: Troca de Bobina no modal com trava ate primeiro machine/update; evitar zerar metragem/pcs em bobinas fechadas; incluir eventos no detect de producao real
@@ -1767,7 +1773,7 @@ function safeText(v){
 
     // Atualizacao ao vivo: quando a OP esta ATIVA no dia atual e o backend envia esp_atual/baseline_pcs,
     // calcular pcs/metragem/tempo mesmo que o item ainda esteja zerado.
-    if((!forceZeroLive) && opts && opts.isLiveHoje && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
+    if((!forceZeroLive) && opts && opts.isLiveHoje && (idx === 0) && (derivedPcs <= 0) && (num0(opts.livePcs) > 0)){
       derivedPcs = Math.floor(num0(opts.livePcs));
       derivedMetroConsumido = num0(opts.liveMetros);
       if(num0(opts.liveTempoMin) > 0) tempoMin = Math.floor(num0(opts.liveTempoMin));
