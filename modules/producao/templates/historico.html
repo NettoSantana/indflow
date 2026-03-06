@@ -1,3 +1,8 @@
+<!--
+C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-03-06 20:35:00 -03:00
+MOTIVO: Corrigir impressao/PDF para calcular corretamente o tempo de consumo da bobina e eliminar erro JS que quebrava o botao Gerar PDF.
+-->
 
 
 
@@ -2642,6 +2647,25 @@ tdD.appendChild(wrap);
     const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
     const bobinas = pickOpBobinasItens(op);
 
+    function calcTempoBobinaPrint(b){
+      const tempoDireto = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? b.tempo_min ?? b.tempo ?? 0)));
+      if(tempoDireto > 0) return tempoDireto;
+
+      const startedRaw = safeText(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? "")).trim();
+      const endedRaw = safeText(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? "")).trim();
+      if(!startedRaw || !endedRaw) return 0;
+
+      try{
+        const ds = new Date(startedRaw);
+        const de = new Date(endedRaw);
+        if(isNaN(ds.getTime()) || isNaN(de.getTime())) return 0;
+        const diffMin = Math.floor((de.getTime() - ds.getTime()) / 60000);
+        return diffMin > 0 ? diffMin : 0;
+      }catch(e){
+        return 0;
+      }
+    }
+
     const machine = anyText(op && (op.machine_id || machineId));
     const operador = anyText(op && op.operador);
     const lote = anyText(op && op.lote);
@@ -2661,7 +2685,7 @@ tdD.appendChild(wrap);
           const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
           const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
           const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
-          const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
+          const tempo = calcTempoBobinaPrint(b);
           const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
           const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
           const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
@@ -2691,7 +2715,7 @@ tdD.appendChild(wrap);
                   <td>${comprimento}</td>
                   <td>${pcs}</td>
                   <td>${escapeHtml(metro)}</td>
-                  <td>${tempomMin}</td>
+                  <td>${tempo}</td>
                 </tr>
               </table>
 
