@@ -2638,62 +2638,96 @@ tdD.appendChild(wrap);
   }
 
   function buildOpPrintHtml(op){
-    const title = (op && op.lote) ? ("OP - Lote " + escapeHtml(op.lote)) : "OP";
+    const title = (op && op.lote) ? ("OP " + escapeHtml(anyText(op.op_id || op.id || "")) + " - Lote " + escapeHtml(op.lote)) : "OP";
     const conv = num0(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs ?? 0));
-
     const bobinas = pickOpBobinasItens(op);
 
-    function row2(label, value){
-      return `<tr><td class="k">${escapeHtml(label)}</td><td class="v">${escapeHtml(value)}</td></tr>`;
-    }
+    const machine = anyText(op && (op.machine_id || machineId));
+    const operador = anyText(op && op.operador);
+    const lote = anyText(op && op.lote);
+    const status = anyText(op && op.status);
+    const os = anyText(op && (op.os || op.os_num || op.ordem_servico));
+    const grFio = anyText(op && (op.gr_fio || op.gr_e_ou_fio));
+    const conversao = anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs));
+    const abertura = fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio));
+    const finalOp = fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim));
 
-    let infoRows = "";
-    infoRows += row2("Maquina", anyText(op && (op.machine_id || machineId)));
-    infoRows += row2("Operador", anyText(op && op.operador));
-    infoRows += row2("Lote", anyText(op && op.lote));
-    infoRows += row2("Status", anyText(op && op.status));
-    infoRows += row2("OS", anyText(op && (op.os || op.os_num || op.ordem_servico)));
-    infoRows += row2("GR e/ou fio", anyText(op && (op.gr_fio || op.gr_e_ou_fio)));
-    infoRows += row2("Conversao m/pcs", anyText(op && (op.op_conv_m_por_pcs ?? op.conv_m_por_pcs)));
-    infoRows += row2("ABERTURA OP", fmtIsoDateTimeLocal(op && (op.started_at || op.hs_inicial || op.inicio)));
-    infoRows += row2("FINAL OP", fmtIsoDateTimeLocal(op && (op.ended_at || op.hs_termino || op.fim)));
+    const bobinaResumo = bobinas.length
+      ? `${bobinas.length} bobina(s) | ${bobinas.map(b => Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)))).join(' | ')} m`
+      : "Sem bobinas";
 
-    let bobinasHtml = "";
-    if(bobinas.length === 0){
-      bobinasHtml = `<tr><td colspan="8" class="empty">Sem bobinas registradas.</td></tr>`;
-    }else{
-      bobinasHtml = bobinas.map((b, i) => {
-        const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
-        const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
-        const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
-        const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
-        const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
-        const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
-        const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
-        const ref = Math.floor(num0(b && (b.refugo ?? 0)));
-        const saco = Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)));
-        const mat = calcMatBom(pcs, cost, ref, saco);
+    const bobinasHtml = bobinas.length
+      ? bobinas.map((b, i) => {
+          const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
+          const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
+          const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
+          const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
+          const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
+          const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
+          const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
+          const ref = Math.floor(num0(b && (b.refugo ?? 0)));
+          const retrabalho = Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)));
+          const mat = calcMatBom(pcs, cost, ref, retrabalho);
 
-        return `
-          <tr>
-            <td class="c">${i + 1}</td>
-            <td class="r">${comprimento}</td>
-            <td class="r">${pcs}</td>
-            <td class="r">${metro}</td>
-            <td class="r">${tempo}</td>
-            <td>${escapeHtml(hi)}</td>
-            <td>${escapeHtml(hf)}</td>
-            <td class="r">${mat}</td>
-          </tr>
-          <tr class="sub">
-            <td></td>
-            <td colspan="2">Qtd. cost. elas.: <b>${cost}</b></td>
-            <td colspan="2">Refugo: <b>${ref}</b></td>
-            <td colspan="3">Retrabalho: <b>${saco}</b></td>
-          </tr>
+          return `
+            <table class="block-table bobina-head">
+              <tr>
+                <th style="width:25%;">Bobina ${i + 1}</th>
+                <td style="width:25%;"></td>
+                <td style="width:25%;"></td>
+                <th style="width:25%;" class="text-right">Comprimento: ${comprimento} m</th>
+              </tr>
+            </table>
+
+            <table class="block-table bobina-grid">
+              <tr>
+                <th>COMPRIMENTO DA BOBINA (M)</th>
+                <th>TOTAL PCS (BOBINA)</th>
+                <th>METRO LINEAR CONSUMIDO (M)</th>
+                <th>TEMPO DE CONSUMO (MIN)</th>
+              </tr>
+              <tr>
+                <td>${comprimento}</td>
+                <td>${pcs}</td>
+                <td>${escapeHtml(metro)}</td>
+                <td>${tempo}</td>
+              </tr>
+            </table>
+
+            <table class="block-table two-col">
+              <tr>
+                <th>HORA INICIAL</th>
+                <th>HORA FINAL</th>
+              </tr>
+              <tr>
+                <td>${escapeHtml(hi)}</td>
+                <td>${escapeHtml(hf)}</td>
+              </tr>
+            </table>
+
+            <table class="block-table bobina-grid bobina-totals">
+              <tr>
+                <th>QTD. MAT BOM</th>
+                <th>QTD. COST. ELAS.</th>
+                <th>REFUGO</th>
+                <th>RETRABALHO</th>
+              </tr>
+              <tr>
+                <td>${mat}</td>
+                <td>${cost}</td>
+                <td>${ref}</td>
+                <td>${retrabalho}</td>
+              </tr>
+            </table>
+          `;
+        }).join("")
+      : `
+          <table class="block-table bobina-grid">
+            <tr>
+              <td class="empty">Sem bobinas registradas.</td>
+            </tr>
+          </table>
         `;
-      }).join("");
-    }
 
     const obs = escapeHtml(op && op.observacoes ? op.observacoes : "");
 
@@ -2701,67 +2735,132 @@ tdD.appendChild(wrap);
 
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-05 00:31:39 -03:00
-MOTIVO: Substituir botão Fechar por Ativar/Encerrar OP no modal grande e remover abertura do modal ao clicar na linha da OP (acesso somente via Editar).
+LAST_RECODE: 2026-03-06 18:20:00 -03:00
+MOTIVO: Ajustar impressao/PDF da OP para layout em retrato igual ao modal, removendo apenas o bloco de cadastro de bobinas e mantendo as fichas das bobinas.
 -->
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
 <title>${title}</title>
 <style>
-  body{ font-family: Arial, sans-serif; color:#0f172a; margin:24px; }
-  h1{ font-size:18px; margin:0 0 12px 0; }
-  table{ width:100%; border-collapse:collapse; font-size:12px; }
-  td, th{ border:1px solid #e8e8e8; padding:8px; vertical-align:top; }
-  th{ background:#f1f5f9; text-align:left; }
-  .meta td{ border:1px solid #e8e8e8; }
-  .k{ width:180px; font-weight:700; background:#f8fafc; }
-  .v{ }
-  .r{ text-align:right; }
-  .text-right{ text-align:right; }
-  .text-center{ text-align:center; }
-  .c{ text-align:center; }
-  .sub td{ background:#fafafa; border-top:none; }
+  @page{ size:A4 portrait; margin:10mm; }
+  *{ box-sizing:border-box; }
+  body{ font-family: Arial, sans-serif; color:#0f172a; margin:0; font-size:12px; }
+  .sheet{ width:100%; }
+  .title-table,
+  .block-table{ width:100%; border-collapse:separate; border-spacing:0; margin:0 0 8px 0; }
+  .title-table th,
+  .block-table th,
+  .block-table td{
+    border:1px solid #cbd5e1;
+    padding:8px 10px;
+    vertical-align:middle;
+  }
+  .title-table th{
+    background:#f8fafc;
+    font-size:16px;
+    font-weight:800;
+    text-align:left;
+  }
+  .block-table th{
+    background:#f8fafc;
+    font-size:11px;
+    font-weight:800;
+    text-align:left;
+  }
+  .block-table td{
+    background:#ffffff;
+    font-size:12px;
+  }
+  .top-grid th,
+  .top-grid td,
+  .bobina-grid th,
+  .bobina-grid td,
+  .bobina-head th,
+  .bobina-head td,
+  .two-col th,
+  .two-col td,
+  .obs-table th,
+  .obs-table td{ width:25%; }
+  .two-col th,
+  .two-col td{ width:50%; }
+  .bobina-head th,
+  .bobina-head td{ background:#dcfce7; }
+  .bobina-totals th,
+  .bobina-totals td{ background:#fef3c7; }
+  .obs-table td{
+    min-height:78px;
+    height:78px;
+    white-space:pre-wrap;
+    vertical-align:top;
+  }
   .empty{ text-align:center; color:#64748b; }
-  .section{ margin-top:16px; }
-  .obs{ white-space:pre-wrap; border:1px solid #e8e8e8; padding:10px; border-radius:8px; }
+  .text-right{ text-align:right; }
   @media print{
-    body{ margin:0; }
+    html, body{ width:210mm; }
+    .sheet{ width:100%; }
   }
 </style>
 </head>
 <body>
-  <h1>${title}</h1>
-
-  <table class="meta">
-    <tbody>
-      ${infoRows}
-    </tbody>
-  </table>
-
-  <div class="section">
-    <table>
-      <thead>
-        <tr>
-          <th class="c">Bobina</th>
-          <th class="r">Comprimento (m)</th>
-          <th class="r">Total pcs</th>
-          <th class="r">Metro consumido (m)</th>
-          <th class="r">Tempo (min)</th>
-          <th>Hora inicial</th>
-          <th>Hora final</th>
-          <th class="r">Mat bom</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${bobinasHtml}
-      </tbody>
+  <div class="sheet">
+    <table class="title-table">
+      <tr>
+        <th>${title}</th>
+      </tr>
     </table>
-  </div>
 
-  <div class="section">
-    <h1>Observacoes</h1>
-    <div class="obs">${obs || "-"}</div>
+    <table class="block-table top-grid">
+      <tr>
+        <th>MÁQUINA</th>
+        <th>OPERADOR</th>
+        <th>LOTE</th>
+        <th>STATUS</th>
+      </tr>
+      <tr>
+        <td>${escapeHtml(machine)}</td>
+        <td>${escapeHtml(operador)}</td>
+        <td>${escapeHtml(lote)}</td>
+        <td>${escapeHtml(status)}</td>
+      </tr>
+    </table>
+
+    <table class="block-table top-grid">
+      <tr>
+        <th>OS</th>
+        <th>GR E/OU FIO</th>
+        <th>CONVERSÃO M/PCS</th>
+        <th>BOBINAS</th>
+      </tr>
+      <tr>
+        <td>${escapeHtml(os)}</td>
+        <td>${escapeHtml(grFio)}</td>
+        <td>${escapeHtml(conversao)}</td>
+        <td>${escapeHtml(bobinaResumo)}</td>
+      </tr>
+    </table>
+
+    <table class="block-table two-col">
+      <tr>
+        <th>ABERTURA OP</th>
+        <th>FINAL OP</th>
+      </tr>
+      <tr>
+        <td>${escapeHtml(abertura)}</td>
+        <td>${escapeHtml(finalOp)}</td>
+      </tr>
+    </table>
+
+    ${bobinasHtml}
+
+    <table class="block-table obs-table">
+      <tr>
+        <th>OBSERVAÇÕES</th>
+      </tr>
+      <tr>
+        <td>${obs || ""}</td>
+      </tr>
+    </table>
   </div>
 </body>
 </html>`;
@@ -3558,5 +3657,4 @@ if(dayModalClose){
 </script>
 
 {% endblock %}
-
 
