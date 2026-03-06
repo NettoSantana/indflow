@@ -1522,6 +1522,7 @@ function safeText(v){
 
   let dayModalTimer = null;
   let dayModalCurrentDay = null;
+  let livePausedByDayModal = false;
 
   let opModalTimer = null;
   let opModalRefreshing = false;
@@ -2285,6 +2286,22 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
   }
 
 
+  function pauseLiveRefreshForDayModal(){
+    if(liveTimer){
+      clearInterval(liveTimer);
+      liveTimer = null;
+    }
+    livePausedByDayModal = true;
+  }
+
+  function resumeLiveRefreshAfterDayModal(){
+    if(!livePausedByDayModal) return;
+    livePausedByDayModal = false;
+    if(!liveTimer){
+      liveTimer = setInterval(refreshLive, 5000);
+    }
+  }
+
   function closeDayModal(){
     if(dayModalBackdrop){
       dayModalBackdrop.classList.remove("open");
@@ -2297,6 +2314,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
       dayModalTimer = null;
     }
     dayModalCurrentDay = null;
+    resumeLiveRefreshAfterDayModal();
   }
 
   function parseTs(v){
@@ -2435,6 +2453,56 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
   }
 
 
+  function buildMetricsBar(isoDay, hourIdx, row){
+    const bar = document.createElement("div");
+    bar.className = "tbar";
+
+    const meta = Number(row && (row.meta ?? row.meta_hora ?? 0)) || 0;
+    const prod = Number(row && (row.produzido ?? row.producao ?? row.prod ?? 0)) || 0;
+    const tProdSec = Number(row && (row.tempo_produzindo_sec ?? row.tempo_produzindo_seg ?? row.tempo_produzindo_s ?? 0)) || 0;
+    const tStopSec = Number(row && (row.tempo_parado_sec ?? row.tempo_parado_seg ?? row.tempo_parado_s ?? 0)) || 0;
+    const tProdMinRaw = Number(row && (row.tempo_produzindo_min ?? row.tempo_produzindo_minutos ?? row.tempo_produzindo ?? 0)) || 0;
+    const tStopMinRaw = Number(row && (row.tempo_parado_min ?? row.tempo_parado_minutos ?? row.tempo_parado ?? 0)) || 0;
+
+    const tProdMin = tProdSec > 0 ? Math.round(tProdSec / 60) : tProdMinRaw;
+    const tStopMin = tStopSec > 0 ? Math.round(tStopSec / 60) : tStopMinRaw;
+
+    function seg(cls, widthPct){
+      const div = document.createElement("div");
+      div.className = "tseg " + cls;
+      div.style.width = Math.max(0, widthPct).toFixed(3) + "%";
+      bar.appendChild(div);
+    }
+
+    if(isFutureHour(isoDay, hourIdx)){
+      seg("np", 100);
+      return bar;
+    }
+
+    if((tProdMin + tStopMin) > 0){
+      const prodPct = Math.min(100, (tProdMin / 60) * 100);
+      const stopPct = Math.min(100 - prodPct, (tStopMin / 60) * 100);
+      const npPct = Math.max(0, 100 - prodPct - stopPct);
+
+      if(prodPct > 0) seg("run", prodPct);
+      if(stopPct > 0) seg("stop", stopPct);
+      if(npPct > 0) seg("np", npPct);
+      return bar;
+    }
+
+    if(prod > 0){
+      if(meta > 0 && prod < meta){
+        seg("stop", 100);
+      }else{
+        seg("run", 100);
+      }
+      return bar;
+    }
+
+    seg("np", 100);
+    return bar;
+  }
+
   async function fetchDayDetail(isoDay){
     if(!machineId) throw new Error("machine_id vazio");
 
@@ -2526,8 +2594,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
       if(segments && segments.length){
         wrap.appendChild(buildHourBar(isoDay, hourIdx, segments));
       }else{
-        const st = buildTrailBar(isoDay, hourIdx);
-        wrap.appendChild(st.bar);
+        wrap.appendChild(buildMetricsBar(isoDay, hourIdx, h));
       }
 
 tdD.appendChild(wrap);
@@ -2560,6 +2627,8 @@ tdD.appendChild(wrap);
     dayModalCurrentDay = String(dateIso || "");
     if(!dayModalCurrentDay) return;
 
+    pauseLiveRefreshForDayModal();
+
     dayModalBackdrop.classList.add("open");
     dayModalBackdrop.style.display = "";
     dayModalBackdrop.setAttribute("aria-hidden", "false");
@@ -2569,7 +2638,15 @@ tdD.appendChild(wrap);
       dayModalTimer = null;
     }
 
-    await refreshDayModal(false);
+    dayHourTbody.innerHTML = '<tr><td colspan="2">Carregando...</td></tr>';
+
+    try{
+      const payload = await fetchDayDetail(dayModalCurrentDay);
+      renderDayDetail(payload);
+    }catch(err){
+      console.error(err);
+      dayHourTbody.innerHTML = '<tr><td colspan="2">Falha ao carregar detalhe do dia.</td></tr>';
+    }
   }
 
   function escapeHtml(s){
