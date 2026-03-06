@@ -1,5 +1,8 @@
-﻿style(historico): melhora contraste da op em fila
+﻿style(historico): status da OP com barra lateral estilo MES
 
-- ajusta background da classe op-row-lista
-- define azul claro mais visivel para OP em fila
-- mantem verde para ativa e cinza para encerrada
+- remove background colorido da linha inteira
+- adiciona barra lateral esquerda para indicar status
+- verde = ativa
+- azul = fila
+- cinza = encerrada
+- melhora leitura visual no historico
