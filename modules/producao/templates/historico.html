@@ -1,7 +1,7 @@
 <!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-03-06 13:05:00 -0300
-Motivo: Reorganizar linha de produção do dia em cabeçalho industrial, aumentar altura do cabeçalho e compactar linhas das OPs.
+Ultimo recode: 2026-03-06 13:40:00 -0300
+Motivo: Remover barra superior da tabela, ocultar dias sem producao no frontend e encurtar visualmente as linhas de OP.
 -->
 
 <!--
@@ -109,6 +109,10 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     font-size:14px;
   }
 
+  thead{
+    display:none;
+  }
+
   thead th{
     background:#f1f5f9;
     color:#0f172a;
@@ -149,28 +153,19 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     color:#334155;
     font-size:13px;
     font-weight:700;
-    padding-top:6px;
-    padding-bottom:6px;
+    padding-top:4px;
+    padding-bottom:4px;
     border-bottom:1px solid #94a3b8; /* mais escuro que o dia */
   }
 
-  /* Status visual com barra lateral estilo MES */
+  /* Status visual sem barra lateral */
   .op-row.op-row-lista td{
     background:#ffffff;
   }
-  .op-row.op-row-lista td:first-child{
-    border-left:6px solid #3b82f6;
-  }
 
   .op-row.op-row-ativa td{ background:#d9f0e1; }
-  .op-row.op-row-ativa td:first-child{
-    border-left:6px solid #16a34a;
-  }
 
   .op-row.op-row-encerrada td{ background:#eeeeee; }
-  .op-row.op-row-encerrada td:first-child{
-    border-left:6px solid #9ca3af;
-  }
 
   .op-row{
     cursor:pointer;
@@ -239,22 +234,23 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     background:#d1d5db;
   }
 
-  /* Indentacao: empurra o conteudo da OP para dentro, indicando que pertence ao dia */
+  /* Linha da OP mais curta visualmente */
   td.op-cell{
-    padding-left:42px !important;
-    position:relative;
+    padding-left:14px !important;
+    padding-right:0 !important;
   }
 
-  /* Guia visual (opcional): linha vertical suave na esquerda da OP */
-  td.op-cell::before{
-    content:"";
-    position:absolute;
-    left:24px;
-    top:8px;
-    bottom:8px;
-    width:2px;
-    background:#cbd5e1;
-    border-radius:2px;
+  .op-content{
+    display:inline-flex;
+    align-items:center;
+    max-width:640px;
+    width:100%;
+    min-height:28px;
+  }
+
+  td.op-actions{
+    width:132px;
+    padding-left:8px !important;
   }
 
   .op-pill{
@@ -3124,8 +3120,11 @@ if(modalSave){
       const label = document.createElement("span");
       label.textContent = " " + buildOpLabel(op);
 
-      tdOp.appendChild(pill);
-      tdOp.appendChild(label);
+      const content = document.createElement("div");
+      content.className = "op-content";
+      content.appendChild(pill);
+      content.appendChild(label);
+      tdOp.appendChild(content);
 
       const tdBlank1 = document.createElement("td");
       const tdBlank2 = document.createElement("td");
@@ -3237,12 +3236,20 @@ btnEdit.addEventListener("click", _goEdit);
     if(!tbody) return;
     tbody.innerHTML = "";
 
-    if(!Array.isArray(rows) || rows.length === 0){
+    const visibleRows = (Array.isArray(rows) ? rows : []).filter((r) => {
+      const produzido = Number(r && r.produzido);
+      const pecasBoas = Number(r && r.pecas_boas);
+      const refugo = Number(r && (r.refugo_total ?? r.refugo ?? 0));
+      const ops = Array.isArray(r && r.ops) ? r.ops : [];
+      return (produzido > 0) || (pecasBoas > 0) || (refugo > 0) || (ops.length > 0);
+    });
+
+    if(!visibleRows.length){
       renderMsgRow("Nenhum dado encontrado.");
       return;
     }
 
-    rows.forEach((r) => {
+    visibleRows.forEach((r) => {
       const tr = document.createElement("tr");
 
       tr.className = "day-row";
