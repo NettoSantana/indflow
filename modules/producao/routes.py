@@ -3762,7 +3762,7 @@ def op_salvar():
             for item in bobinas_payload:
                 if not isinstance(item, dict):
                     continue
-                idx = _int(item.get("idx"))
+                idx_raw = _int(item.get("idx"))
                 qtd_cost_elas = _int(item.get("costuras")) if item.get("costuras") is not None else _int(item.get("qtd_cost_elas"))
                 refugo = _int(item.get("refugo"))
                 qtd_saco_caixa = _int(item.get("retrabalho")) if item.get("retrabalho") is not None else _int(item.get("qtd_saco_caixa"))
@@ -3771,13 +3771,18 @@ def op_salvar():
                     conn.rollback()
                     return jsonify({
                         "error": "Valores nao podem ser negativos",
-                        "idx": int(idx),
+                        "idx": int(idx_raw),
                     }), 400
 
-                # comprimento e pcs_total derivados da OP (fonte unica)
-                if idx < 0 or idx >= len(bobinas_m):
+                # Aceita idx 0-based (backend legado) e 1-based (payload do modal).
+                if 0 <= idx_raw < len(bobinas_m):
+                    idx = idx_raw
+                elif 1 <= idx_raw <= len(bobinas_m):
+                    idx = idx_raw - 1
+                else:
                     continue
 
+                # comprimento e pcs_total derivados da OP (fonte unica)
                 comprimento_m = bobinas_m[idx]
                 pcs_total = alloc_pcs[idx] if idx < len(alloc_pcs) else 0
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
