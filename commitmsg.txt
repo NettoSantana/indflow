@@ -1,6 +1,9 @@
-﻿style(historico): cores neutras por status da OP
+﻿style(historico): pintar linha completa por status da OP
 
-- ativa: verde suave
-- fila: azul suave
-- encerrada: cinza
-- linha inteira colorida para facilitar leitura
+ativa: verde suave
+
+fila: azul claro
+
+encerrada: cinza
+
+aplicado diretamente nas classes op-row-ativa / op-row-lista / op-row-encerrada
