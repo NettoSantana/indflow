@@ -1,7 +1,7 @@
 <!--
 Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-Ultimo recode: 2026-03-06 00:26:31 -0300
-Motivo: Evitar que o modo ao vivo (livePcs) preencha todas as bobinas ao ativar a OP; aplicar somente na primeira bobina.
+Ultimo recode: 2026-03-06 09:20:00 -0300
+Motivo: Destacar linhas da OP por status; ocultar botao Troca de Bobina na ultima bobina; destacar slot da bobina ativa.
 -->
 
 <!--
@@ -146,6 +146,18 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     border-bottom:1px solid #94a3b8; /* mais escuro que o dia */
   }
 
+  .op-row.op-row-lista td{
+    background:#dbeafe;
+  }
+
+  .op-row.op-row-ativa td{
+    background:#dcfce7;
+  }
+
+  .op-row.op-row-encerrada td{
+    background:#e5e7eb;
+  }
+
   /* Linha do DIA fica mais clara */
   tr.day-row td{
     border-bottom:1px solid #e5e7eb;
@@ -156,7 +168,7 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
   }
 
   .op-row:hover td{
-    background:#eef2ff;
+    filter:brightness(0.98);
   }
 
   /* Indentacao: empurra o conteudo da OP para dentro, indicando que pertence ao dia */
@@ -475,6 +487,11 @@ MOTIVO: Ajustar render do card da bobina para usar bobinas_eventos (started_at/c
     border-radius:14px;
     padding:12px;
     background:#ffffff;
+  }
+
+  .bobina-card.bobina-card-ativa{
+    background:#dcfce7;
+    border-color:#86efac;
   }
 
   .bobina-title{
@@ -1337,6 +1354,67 @@ function safeText(v){
     return "op-pill-unk";
   }
 
+  function opRowClass(status){
+    const s = safeText(status).toUpperCase();
+    if(s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL")) return "op-row-encerrada";
+    if(s.includes("ATIV") || s.includes("ABERT") || s.includes("EM_ANDAMENTO") || s.includes("PRODU") || s.includes("ANDAMENTO")) return "op-row-ativa";
+    return "op-row-lista";
+  }
+
+  function getBobinasCount(op){
+    if(!op) return 0;
+    const itens = pickOpBobinasItens(op);
+    if(Array.isArray(itens) && itens.length) return itens.length;
+    const arrM = Array.isArray(op.bobinas_m) ? op.bobinas_m : (Array.isArray(op.bobinasM) ? op.bobinasM : []);
+    if(arrM.length) return arrM.length;
+    const arrLegacy = Array.isArray(op.bobinas) ? op.bobinas : [];
+    if(arrLegacy.length) return arrLegacy.length;
+    return 0;
+  }
+
+  function getOpenBobinaSeq(op){
+    if(!op) return -1;
+
+    const eventos = Array.isArray(op.bobinas_eventos) ? op.bobinas_eventos : (Array.isArray(op.bobinasEventos) ? op.bobinasEventos : (Array.isArray(op.bobinas_eventos_detail) ? op.bobinas_eventos_detail : []));
+    if(Array.isArray(eventos) && eventos.length){
+      for(let i = eventos.length - 1; i >= 0; i--){
+        const ev = eventos[i];
+        if(!ev || typeof ev !== "object") continue;
+        const endedAt = safeText(ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at).trim();
+        const endedAbs = Number(ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? 0);
+        if(!endedAt && !(endedAbs > 0)){
+          const seq = Number(ev.seq ?? ev.idx ?? i);
+          if(Number.isFinite(seq) && seq >= 0) return seq;
+        }
+      }
+    }
+
+    const itens = pickOpBobinasItens(op);
+    if(Array.isArray(itens) && itens.length){
+      for(let i = 0; i < itens.length; i++){
+        const it = itens[i];
+        const startedAt = safeText(it && (it.started_at ?? it.inicio ?? it.hs_inicial ?? it.start_at)).trim();
+        const endedAt = safeText(it && (it.ended_at ?? it.fim ?? it.hs_final ?? it.hs_termino ?? it.end_at)).trim();
+        if(startedAt && !endedAt) return i;
+      }
+    }
+
+    const st = safeText(op.status).toUpperCase();
+    if((st.includes("ATIV") || st.includes("PRODU") || st.includes("ANDAMENTO")) && getBobinasCount(op) > 0){
+      return 0;
+    }
+
+    return -1;
+  }
+
+  function hasNextBobinaAvailable(op){
+    const total = getBobinasCount(op);
+    if(total <= 0) return false;
+    const openSeq = getOpenBobinaSeq(op);
+    if(openSeq < 0) return true;
+    return openSeq < (total - 1);
+  }
+
   function anyText(v){
     const s = safeText(v).trim();
     return s ? s : "-";
@@ -1664,6 +1742,11 @@ function safeText(v){
     const card = document.createElement("div");
     card.className = "bobina-card";
     card.setAttribute("data-bobina-idx", String(idx));
+
+    const activeSeq = getOpenBobinaSeq(opCtx);
+    if(activeSeq === idx){
+      card.classList.add("bobina-card-ativa");
+    }
 
     const title = document.createElement("div");
     title.className = "bobina-title";
@@ -2625,14 +2708,17 @@ if(modalBackdrop){
       const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
       const ativa = isOpAtiva(st);
 
-      // swap so faz sentido com OP ativa e bobinas cadastradas
-      const hasBobinas = Array.isArray(currentOp && currentOp.bobinas) ? (currentOp.bobinas.length > 0) : (Array.isArray(currentOp && currentOp.bobinas_m) ? (currentOp.bobinas_m.length > 0) : false);
+      // swap so faz sentido com OP ativa, com bobinas cadastradas e com proxima bobina disponivel
+      const hasBobinas = getBobinasCount(currentOp) > 0;
+      const hasNextBobina = hasNextBobinaAvailable(currentOp);
 
-      modalSwap.style.display = (ativa ? "" : "none");
-      modalSwap.disabled = (!ativa) || (!hasBobinas) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
+      modalSwap.style.display = (ativa && hasBobinas && hasNextBobina) ? "" : "none";
+      modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
 
       if(!hasBobinas){
         modalSwap.title = "Sem bobina cadastrada.";
+      }else if(!hasNextBobina){
+        modalSwap.title = "Ultima bobina ja esta em uso.";
       }else if(modalSwap.disabled && swapLockActive){
         modalSwap.title = "Aguardando primeiro machine/update apos a troca.";
       }else{
@@ -2957,7 +3043,7 @@ if(modalSave){
 
     ops.forEach((op) => {
       const trOp = document.createElement("tr");
-      trOp.className = "op-row";
+      trOp.className = "op-row " + opRowClass(op && op.status);
 
       const tdOp = document.createElement("td");
       tdOp.className = "op-cell";
