@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-06 00:00:00 (America/Bahia)
-# MOTIVO: Bloquear troca de bobina quando a OP ja estiver na ultima bobina cadastrada, evitando pendencia invalida e troca infinita.
+# LAST_RECODE: 2026-03-06 21:20:00 (America/Bahia)
+# MOTIVO: Corrigir /op/salvar para preservar bobinas 1-based sem zerar dados ao salvar fechamento manual.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -3744,9 +3744,10 @@ def op_salvar():
             alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
 
             # Se removeu bobinas, limpa linhas antigas (idx fora do range)
+            # Importante: ordens_producao_bobinas usa idx 1-based.
             try:
                 cur.execute(
-                    "DELETE FROM ordens_producao_bobinas WHERE op_id = ? AND idx >= ?",
+                    "DELETE FROM ordens_producao_bobinas WHERE op_id = ? AND idx > ?",
                     (op_id, int(len(bobinas_m) or 0)),
                 )
             except Exception:
@@ -3774,17 +3775,18 @@ def op_salvar():
                         "idx": int(idx_raw),
                     }), 400
 
-                # Aceita idx 0-based (backend legado) e 1-based (payload do modal).
-                if 0 <= idx_raw < len(bobinas_m):
-                    idx = idx_raw
-                elif 1 <= idx_raw <= len(bobinas_m):
-                    idx = idx_raw - 1
+                # ordens_producao_bobinas usa idx 1-based; listas Python usam pos 0-based.
+                idx_db = int(idx_raw)
+                if 1 <= idx_db <= len(bobinas_m):
+                    pos = idx_db - 1
+                elif 0 <= idx_db < len(bobinas_m):
+                    pos = idx_db
+                    idx_db = pos + 1
                 else:
                     continue
 
-                # comprimento e pcs_total derivados da OP (fonte unica)
-                comprimento_m = bobinas_m[idx]
-                pcs_total = alloc_pcs[idx] if idx < len(alloc_pcs) else 0
+                comprimento_m = bobinas_m[pos]
+                pcs_total = alloc_pcs[pos] if pos < len(alloc_pcs) else 0
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
 
                 soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
@@ -3792,7 +3794,7 @@ def op_salvar():
                     conn.rollback()
                     return jsonify({
                         "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL PCS da bobina",
-                        "idx": int(idx),
+                        "idx": int(idx_db),
                         "pcs_total": int(pcs_total or 0),
                         "qtd_cost_elas": int(qtd_cost_elas or 0),
                         "refugo": int(refugo or 0),
@@ -3819,7 +3821,7 @@ def op_salvar():
                     """,
                     (
                         op_id,
-                        idx,
+                        idx_db,
                         int(comprimento_m or 0),
                         int(pcs_total or 0),
                         float(metro_consumido or 0.0),
