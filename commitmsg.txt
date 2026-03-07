@@ -1,6 +1,4 @@
-﻿fix(print): corrige exibicao do tempo de consumo no PDF
+﻿feat(admin): endpoint de diagnostico de uso de disco
 
-- mantém correcao do botao de imprimir
-- calcula tempo da bobina com fallback por campos do payload
-- usa diferenca entre started_at e ended_at quando necessario
-- garante exibicao do TEMPO DE CONSUMO (MIN) na impressao
+adiciona /admin/storage para identificar arquivos que estao
+ocupando volume no railway
