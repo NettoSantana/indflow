@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# ULTIMO_RECODE: 2026-03-04 21:30:00
-# MOTIVO: Detalhe-dia: hours[].produzido deve vir de SUM(delta) em producao_evento por janela local (America/Bahia), evitando sobrescrita por machine_state.
+# ULTIMO_RECODE: 2026-03-07 14:45:00
+# MOTIVO: Detalhe-dia: aplicar fallback de chaves legacy/scoped em machine_state_event para recuperar segmentos historicos de dias antigos.
 
 
 from __future__ import annotations
@@ -379,6 +379,82 @@ def _resolve_effective_machine_id(conn: sqlite3.Connection, machine_id: str, dat
 
     return mid
 
+def _resolve_state_event_machine_ids(
+    conn: sqlite3.Connection,
+    machine_id: str,
+    effective_machine_id: str,
+    data_ref: date,
+) -> list[str]:
+    """
+    Resolve candidatas de machine_id para leitura retroativa em machine_state_event.
+
+    Ordem de prioridade:
+    1) effective_machine_id resolvido para o dia
+    2) machine_id original (legacy)
+    3) quaisquer ids gravados no proprio dia que casem com legacy/scoped
+       pelos formatos: <cliente>::<maquina> ou <maquina>::<ctx>
+
+    Isso permite ler historicos antigos onde a mesma maquina foi gravada
+    em chaves diferentes ao longo do tempo.
+    """
+    out: list[str] = []
+
+    def _add(v: str | None) -> None:
+        s = (v or '').strip()
+        if s and s not in out:
+            out.append(s)
+
+    base_mid = (machine_id or '').strip()
+    eff_mid = (effective_machine_id or '').strip()
+
+    _add(eff_mid)
+    _add(base_mid)
+
+    if not _table_exists(conn, 'machine_state_event'):
+        return out
+
+    cols = _get_columns(conn, 'machine_state_event')
+    id_col = 'effective_machine_id' if 'effective_machine_id' in cols else ('machine_id' if 'machine_id' in cols else None)
+    if not id_col:
+        return out
+
+    date_col = 'data_ref' if 'data_ref' in cols else _resolve_data_col(conn, 'machine_state_event')
+    if not date_col:
+        return out
+
+    # Descobre o nome base da maquina para procurar formatos antigos/novos.
+    probe_mid = base_mid
+    if not probe_mid and eff_mid:
+        if '::' in eff_mid:
+            left, right = eff_mid.split('::', 1)
+            probe_mid = right or left or eff_mid
+        else:
+            probe_mid = eff_mid
+    elif '::' in probe_mid:
+        probe_mid = probe_mid.split('::', 1)[-1] or probe_mid
+
+    probe_mid = (probe_mid or '').strip()
+    if not probe_mid:
+        return out
+
+    sql = (
+        f'SELECT DISTINCT {id_col} AS mid FROM machine_state_event '
+        f'WHERE {date_col} = ? AND ({id_col} = ? OR {id_col} LIKE ? OR {id_col} LIKE ?)'
+    )
+    params = (data_ref.isoformat(), probe_mid, f'%::{probe_mid}', f'{probe_mid}::%')
+
+    try:
+        for row in conn.execute(sql, params).fetchall():
+            try:
+                _add(row['mid'] if isinstance(row, sqlite3.Row) else row[0])
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return out
+
+
 def _parse_date_any(s: str | None) -> date | None:
     if not s:
         return None
@@ -736,6 +812,7 @@ def _fetch_state_segments_from_state_events(
     conn: sqlite3.Connection,
     effective_machine_id: str,
     data_ref: date,
+    machine_id: str | None = None,
 ) -> list[tuple[datetime, datetime, str]]:
     """
     Monta segmentos de estado (RUN/STOP/IDLE/NP) para o dia, baseados EXCLUSIVAMENTE em machine_state_event.
@@ -816,14 +893,24 @@ def _fetch_state_segments_from_state_events(
             "WHERE {id_col}=? AND {ts_col} < ? "
             "ORDER BY {ts_col} DESC LIMIT 1"
         ).format(state_col=state_col, ts_col=ts_col, id_col=id_col)
-        r0 = conn.execute(sql0, (effective_machine_id, day_start_ms)).fetchone()
-        if r0:
+        candidate_ids = _resolve_state_event_machine_ids(conn, (machine_id or effective_machine_id), effective_machine_id, data_ref)
+        best_r0 = None
+        for candidate_mid in candidate_ids:
+            r0 = conn.execute(sql0, (candidate_mid, day_start_ms)).fetchone()
+            if not r0:
+                continue
             try:
-                r0_state = str(r0[0] or "").upper()
-                r0_ts_ms = int(r0[1]) if r0[1] is not None else None
+                cand_state = str(r0[0] or "").upper()
+                cand_ts_ms = int(r0[1]) if r0[1] is not None else None
             except Exception:
-                r0_state = ""
-                r0_ts_ms = None
+                continue
+            if cand_state not in allowed or cand_ts_ms is None:
+                continue
+            if best_r0 is None or cand_ts_ms > best_r0[1]:
+                best_r0 = (cand_state, cand_ts_ms)
+
+        if best_r0:
+            r0_state, r0_ts_ms = best_r0
 
             # tolerancia anti-heranca "muito antiga"
             stale_ms = 6 * 60 * 60 * 1000
@@ -844,24 +931,32 @@ def _fetch_state_segments_from_state_events(
             "WHERE {id_col}=? AND {date_col}=? "
             "ORDER BY {ts_col} ASC"
         ).format(ts_col=ts_col, state_col=state_col, id_col=id_col, date_col=date_col)
-        rows = conn.execute(sql, (effective_machine_id, data_ref.isoformat())).fetchall()
-        for r in rows:
-            try:
-                ts_ms = int(r[0])
-            except Exception:
-                continue
-            st = str(r[1] or "").upper()
-            if st not in allowed:
-                continue
-            try:
-                t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
-            except Exception:
-                continue
-            if t < day_start:
-                continue
-            if t > hard_end:
-                break
-            evs.append((t, st))
+        seen = set()
+        candidate_ids = _resolve_state_event_machine_ids(conn, (machine_id or effective_machine_id), effective_machine_id, data_ref)
+        for candidate_mid in candidate_ids:
+            rows = conn.execute(sql, (candidate_mid, data_ref.isoformat())).fetchall()
+            for r in rows:
+                try:
+                    ts_ms = int(r[0])
+                except Exception:
+                    continue
+                st = str(r[1] or "").upper()
+                if st not in allowed:
+                    continue
+                sig = (ts_ms, st)
+                if sig in seen:
+                    continue
+                seen.add(sig)
+                try:
+                    t = datetime.fromtimestamp(ts_ms / 1000.0, tz=TZ_BAHIA).replace(tzinfo=None)
+                except Exception:
+                    continue
+                if t < day_start:
+                    continue
+                if t > hard_end:
+                    continue
+                evs.append((t, st))
+        evs.sort(key=lambda x: x[0])
     except Exception:
         evs = []
 
@@ -1562,7 +1657,7 @@ def api_producao_detalhe_dia():
 
             # Segmentos RUN/STOP agora vem do rastro persistido em machine_state_event.
             # Se nao houver eventos (ou tabela), cai para lista vazia (tudo STOP dentro de hora programada).
-            day_state_segments = _fetch_state_segments_from_state_events(conn, eff_mid, data_ref)
+            day_state_segments = _fetch_state_segments_from_state_events(conn, eff_mid, data_ref, machine_id=machine_id)
             # Tabela horaria (meta/produzido/refugo)
             hor = _fetch_horaria(conn, eff_mid, data_ref)
 
