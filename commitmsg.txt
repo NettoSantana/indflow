@@ -1,5 +1,6 @@
-﻿fix(machine_routes): valida zeramento correto da producao na virada da hora
+﻿fix(print): corrige exibicao do tempo de consumo no PDF
 
-- card da hora reinicia corretamente na mudanca de hora
-- novos pulsos passam a contar a partir de zero
-- comportamento validado em dev
+- mantém correcao do botao de imprimir
+- calcula tempo da bobina com fallback por campos do payload
+- usa diferenca entre started_at e ended_at quando necessario
+- garante exibicao do TEMPO DE CONSUMO (MIN) na impressao
