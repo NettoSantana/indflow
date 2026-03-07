@@ -3943,4 +3943,26 @@ def op_salvar():
             conn.close()
 
     return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"}) 
-    
+    @app.route("/admin/storage")
+def admin_storage():
+    import os
+
+    result = []
+
+    for root, dirs, files in os.walk("/"):
+        for f in files:
+            try:
+                path = os.path.join(root, f)
+                size = os.path.getsize(path)
+                result.append({
+                    "file": path,
+                    "size_mb": round(size / (1024 * 1024), 2)
+                })
+            except:
+                pass
+
+    result.sort(key=lambda x: x["size_mb"], reverse=True)
+
+    return {
+        "largest_files": result[:30]
+    }
