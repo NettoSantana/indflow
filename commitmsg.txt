@@ -1,5 +1,6 @@
-﻿fix(machine_routes): zera producao da hora sempre que mudar a hora
+﻿fix(print): corrige exibicao do tempo de consumo no PDF
 
-- adiciona reset defensivo do card na troca de hora
-- zera _ph_acc, producao_hora e producao_hora_liquida na nova hora
-- reaplica a regra em /machine/update e /machine/status
+- mantém correcao do botao de imprimir
+- calcula tempo da bobina com fallback por campos do payload
+- usa diferenca entre started_at e ended_at quando necessario
+- garante exibicao do TEMPO DE CONSUMO (MIN) na impressao
