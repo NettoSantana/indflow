@@ -2740,9 +2740,23 @@ tdD.appendChild(wrap);
           const comprimento = Math.floor(num0(b && (b.comprimento_m ?? b.metros ?? b.bobina_m ?? 0)));
           const pcs = Math.floor(num0(b && (b.pcs_total ?? b.total_pcs ?? 0)));
           const metro = fmtMeters2Floor(num0(b && (b.metro_consumido ?? b.metro_linear_consumido ?? (pcs * conv))));
-          const tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? 0)));
-          const hi = fmtIsoDateTimeLocal(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? ""));
-          const hf = fmtIsoDateTimeLocal(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? ""));
+          const startedRaw = safeText(b && (b.started_at ?? b.inicio ?? b.hs_inicial ?? b.start_at ?? "")).trim();
+          const endedRaw = safeText(b && (b.ended_at ?? b.fim ?? b.hs_final ?? b.hs_termino ?? b.end_at ?? "")).trim();
+          let tempo = Math.floor(num0(b && (b.tempo_consumo_min ?? b.tempo_consumo ?? b.tempo_min ?? b.tempo ?? 0)));
+          if(!(tempo > 0) && startedRaw && endedRaw){
+            try{
+              const ds = new Date(startedRaw);
+              const de = new Date(endedRaw);
+              if(!isNaN(ds.getTime()) && !isNaN(de.getTime())){
+                const diff = Math.floor((de.getTime() - ds.getTime()) / 60000);
+                if(diff > 0) tempo = diff;
+              }
+            }catch(e){
+              // ignore
+            }
+          }
+          const hi = fmtIsoDateTimeLocal(startedRaw);
+          const hf = fmtIsoDateTimeLocal(endedRaw);
           const cost = Math.floor(num0(b && (b.qtd_cost_elas ?? b.cost_elas ?? 0)));
           const ref = Math.floor(num0(b && (b.refugo ?? 0)));
           const retrabalho = Math.floor(num0(b && (b.qtd_saco_caixa ?? b.saco_caixa ?? 0)));
@@ -2818,8 +2832,8 @@ tdD.appendChild(wrap);
 
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-06 19:40:00 -03:00
-MOTIVO: Destacar visualmente cada bobina na impressao/PDF com bloco cinza, borda externa e cabecalho industrial para separar melhor os dados.
+LAST_RECODE: 2026-03-06 21:30:00 -03:00
+MOTIVO: Corrigir a impressao para calcular e exibir o tempo de consumo das bobinas no PDF, mantendo o layout em retrato e os blocos visuais.
 -->
 <html lang="pt-BR">
 <head>
