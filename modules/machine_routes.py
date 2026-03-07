@@ -1,10 +1,6 @@
 # Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Ultimo recode: 2026-03-06 01:45:34 -0300
-# Motivo: Fazer o /machine/update consumir e limpar corretamente a pendencia de troca de bobina, evitando travar da segunda para a terceira bobina.
-
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
-# LAST_RECODE: 2026-03-05 19:46 America/Bahia
-# MOTIVO: Corrigir abertura sequencial de bobinas (N bobinas) no /machine/update; se existir evento seq ja criado mas vazio, preencher started_at/start_abs_pcs em vez de ignorar.
+# Ultimo recode: 2026-03-07 00:00:00 -0300
+# Motivo: Padronizar effective_machine_id no timeline e remover referencia invalida a cid_req no /machine/update.
 
 import os
 import json
@@ -2798,7 +2794,7 @@ def update_machine():
             meta_abs = int(m.get("meta_turno", 0) or 0)
         except Exception:
             meta_abs = 0
-        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=(m.get("cliente_id") or cid_req), dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
+        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=(m.get("cliente_id") or cliente_id), dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
     except Exception:
         pass
 
@@ -2872,7 +2868,7 @@ def update_machine():
         hora_evt_u = int(dt_evt_u.hour)
         data_ref_evt_u = dia_operacional_ref_str(dt_evt_u)
         raw_mid_u = _norm_machine_id(machine_id)
-        eff_mid_u = raw_mid_u
+        eff_mid_u = _machine_id_scoped(str(cliente_id) if cliente_id else None, raw_mid_u)
 
         _record_machine_state_transition(
             raw_mid_u,
@@ -3726,7 +3722,7 @@ def machine_status():
             data_ref_evt = dia_operacional_ref_str(agora_evt)
             cid_evt = (m.get("cliente_id") or None)
             raw_mid = _norm_machine_id(machine_id)
-            eff_mid = raw_mid
+            eff_mid = _machine_id_scoped(cid_evt, raw_mid)
             _record_machine_state_transition(raw_mid, eff_mid, cid_evt, "NP", agora_evt, data_ref_evt, hora_evt)
         except Exception:
             pass
@@ -3753,7 +3749,7 @@ def machine_status():
         data_ref_evt = dia_operacional_ref_str(agora_evt)
         cid_evt = (m.get("cliente_id") or None)
         raw_mid = _norm_machine_id(machine_id)
-        eff_mid = raw_mid
+        eff_mid = _machine_id_scoped(cid_evt, raw_mid)
         st_evt = _infer_state_for_timeline(m, hora_evt)
         _record_machine_state_transition(raw_mid, eff_mid, cid_evt, st_evt, agora_evt, data_ref_evt, hora_evt)
     except Exception:

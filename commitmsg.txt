@@ -1,4 +1,0 @@
-﻿feat(admin): endpoint de diagnostico de uso de disco
-
-adiciona /admin/storage para identificar arquivos que estao
-ocupando volume no railway
