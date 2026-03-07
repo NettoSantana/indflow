@@ -1,6 +1,6 @@
 # Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Ultimo recode: 2026-03-06 01:45:34 -0300
-# Motivo: Fazer o /machine/update consumir e limpar corretamente a pendencia de troca de bobina, evitando travar da segunda para a terceira bobina.
+# Ultimo recode: 2026-03-07 06:27:00 -0300
+# Motivo: Padronizar machine_state_event para usar sempre effective_machine_id scoped no /machine/update e /machine/status, evitando tempos/paradas zerados no historico.
 
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
 # LAST_RECODE: 2026-03-05 19:46 America/Bahia
@@ -2872,7 +2872,7 @@ def update_machine():
         hora_evt_u = int(dt_evt_u.hour)
         data_ref_evt_u = dia_operacional_ref_str(dt_evt_u)
         raw_mid_u = _norm_machine_id(machine_id)
-        eff_mid_u = raw_mid_u
+        eff_mid_u = f"{cliente_id}::{raw_mid_u}" if cliente_id else raw_mid_u
 
         _record_machine_state_transition(
             raw_mid_u,
@@ -3726,7 +3726,7 @@ def machine_status():
             data_ref_evt = dia_operacional_ref_str(agora_evt)
             cid_evt = (m.get("cliente_id") or None)
             raw_mid = _norm_machine_id(machine_id)
-            eff_mid = raw_mid
+            eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
             _record_machine_state_transition(raw_mid, eff_mid, cid_evt, "NP", agora_evt, data_ref_evt, hora_evt)
         except Exception:
             pass
@@ -3753,7 +3753,7 @@ def machine_status():
         data_ref_evt = dia_operacional_ref_str(agora_evt)
         cid_evt = (m.get("cliente_id") or None)
         raw_mid = _norm_machine_id(machine_id)
-        eff_mid = raw_mid
+        eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
         st_evt = _infer_state_for_timeline(m, hora_evt)
         _record_machine_state_transition(raw_mid, eff_mid, cid_evt, st_evt, agora_evt, data_ref_evt, hora_evt)
     except Exception:
