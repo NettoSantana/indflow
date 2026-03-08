@@ -1,6 +1,6 @@
 # Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Ultimo recode: 2026-03-07 00:00:00 -0300
-# Motivo: Padronizar effective_machine_id no timeline e remover referencia invalida a cid_req no /machine/update.
+# Ultimo recode: 2026-03-08 00:00:00 -0300
+# Motivo: Aceitar domingo como 0 no active_days e converter para 7 no backend.
 
 import os
 import json
@@ -1930,7 +1930,7 @@ def _cfgv2_break_rel(shift_start: int, br_start: int, br_end: int) -> tuple[int,
 def _cfgv2_validate(raw: dict) -> dict:
     cfg = {}
 
-    # active_days: 1..7
+    # active_days: aceita 0..7 no payload, mas persiste padrao 1..7 (domingo=7)
     ad = raw.get("active_days")
     if ad is None:
         ad = [1, 2, 3, 4, 5, 6, 7]
@@ -1942,6 +1942,8 @@ def _cfgv2_validate(raw: dict) -> dict:
             di = int(d)
         except Exception:
             continue
+        if di == 0:
+            di = 7
         if 1 <= di <= 7 and di not in days:
             days.append(di)
     if not days:
