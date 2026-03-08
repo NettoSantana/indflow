@@ -1,5 +1,0 @@
-﻿fix(machine_state): padroniza effective_machine_id no timeline
-
-- usa machine_state_event sempre com machine_id scoped quando houver cliente_id
-- corrige gravacao inconsistente entre /machine/update e /machine/status
-- evita tempo/paradas zerados no historico por eventos salvos em chaves diferentes
