@@ -1,7 +1,7 @@
 <!--
 PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\config_maquina_for.html
-LAST_RECODE: 2026-02-26 13:46 (America/Bahia)
-MOTIVO: Corrigir acessibilidade (labels associados a campos) para remover avisos no DevTools/Lighthouse.
+LAST_RECODE: 2026-03-08 13:12 (America/Bahia)
+MOTIVO: Alinhar domingo como 7 no frontend para refletir o padrao salvo pelo backend.
 -->
 {% extends "base.html" %}
 
@@ -172,7 +172,7 @@ function ensureArray(x){ return Array.isArray(x) ? x : []; }
 
 // Days UI
 const DAYS = [
-  {key:1,label:"Seg"},{key:2,label:"Ter"},{key:3,label:"Qua"},{key:4,label:"Qui"},{key:5,label:"Sex"},{key:6,label:"Sab"},{key:0,label:"Dom"}
+  {key:1,label:"Seg"},{key:2,label:"Ter"},{key:3,label:"Qua"},{key:4,label:"Qui"},{key:5,label:"Sex"},{key:6,label:"Sab"},{key:7,label:"Dom"}
 ];
 function renderDays(activeSet){
   const box=document.getElementById("dias-ativos");
@@ -697,7 +697,7 @@ function applyConfigFromStatus(data){
 
   // days
   const ad = ensureArray(data.active_days ?? data.config?.active_days ?? data.config_v2?.active_days);
-  const set = new Set(ad.length ? ad.map(Number) : [0,1,2,3,4,5,6]);
+  const set = new Set(ad.length ? ad.map(Number) : [1,2,3,4,5,6,7]);
   renderDays(set);
 
   // shifts v2
@@ -878,7 +878,7 @@ async function carregarTabela(){
 }
 
 // init
-renderDays(new Set([0,1,2,3,4,5,6]));
+renderDays(new Set([1,2,3,4,5,6,7]));
 shiftsState = [newShiftSkeleton(0)];
 renderShifts();
 renderSummary();
