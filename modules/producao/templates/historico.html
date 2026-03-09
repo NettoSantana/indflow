@@ -1,7 +1,7 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-09 15:20:00 -03:00
-MOTIVO: Remover botao Salvar e toda chamada ao endpoint /producao/op/salvar do modal da OP.
+LAST_RECODE: 2026-03-09 17:25:00 -03:00
+MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
 -->
 
 
@@ -2155,8 +2155,40 @@ function safeText(v){
     throw lastErr || new Error("Falha ao carregar OP.");
   }
 
-  async function postOpSwapBobina(opId){
-    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+
+  function collectCurrentOpenBobinaManualPayload(){
+    const op = currentOp || null;
+    const idx = getEditableBobinaSeq(op);
+    if(!op || idx < 0) return null;
+
+    const card = bobinasWrap ? bobinasWrap.querySelector('[data-bobina-idx="' + String(idx) + '"]') : null;
+    const manual = {
+      qtd_cost_elas: 0,
+      refugo: 0,
+      qtd_saco_caixa: 0
+    };
+
+    if(card){
+      const fields = ["qtd_cost_elas", "refugo", "qtd_saco_caixa"];
+      fields.forEach((name) => {
+        try{
+          const inp = card.querySelector('[data-field="' + name + '"]');
+          if(inp){
+            manual[name] = Math.floor(num0(inp.value));
+          }
+        }catch(e){}
+      });
+    }
+
+    const bobinaPayload = buildBobinaSavePayload(op, idx, manual);
+    bobinaPayload.idx = Math.floor(num0(bobinaPayload.idx || (idx + 1)));
+    bobinaPayload.seq = Math.floor(num0(bobinaPayload.seq || idx));
+
+    return bobinaPayload;
+  }
+
+  async function postOpSwapBobina(opId, extraPayload){
+    const payload = Object.assign({ op_id: Number(opId || 0), machine_id: machineId || "" }, (extraPayload || {}));
     const url = "/producao/op/troca-bobina";
 
     try{
@@ -3318,7 +3350,23 @@ if(modalBackdrop){
 
       try{
         modalSwap.disabled = true;
-        const resp = await postOpSwapBobina(opId);
+
+        const bobinaAtualPayload = collectCurrentOpenBobinaManualPayload();
+        const swapPayload = bobinaAtualPayload ? {
+          idx: bobinaAtualPayload.idx,
+          seq: bobinaAtualPayload.seq,
+          qtd_cost_elas: Math.floor(num0(bobinaAtualPayload.qtd_cost_elas)),
+          refugo: Math.floor(num0(bobinaAtualPayload.refugo)),
+          qtd_saco_caixa: Math.floor(num0(bobinaAtualPayload.qtd_saco_caixa)),
+          qtd_mat_bom: Math.floor(num0(bobinaAtualPayload.qtd_mat_bom)),
+          pcs_total: Math.floor(num0(bobinaAtualPayload.pcs_total)),
+          start_abs_pcs: Math.floor(num0(bobinaAtualPayload.start_abs_pcs)),
+          end_abs_pcs: Math.floor(num0(bobinaAtualPayload.end_abs_pcs)),
+          metro_consumido: round2(num0(bobinaAtualPayload.metro_consumido)),
+          bobina_atual: bobinaAtualPayload
+        } : {};
+
+        const resp = await postOpSwapBobina(opId, swapPayload);
 
         // Travar nova troca ate chegar o primeiro machine/update e abrir a proxima bobina (seq next_seq)
         const nextSeq = (resp && (resp.next_seq ?? resp.nextSeq ?? resp.next)) ?? null;
