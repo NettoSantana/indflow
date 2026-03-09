@@ -1,7 +1,7 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-09 00:00:00 -03:00
-MOTIVO: Travar edicao por bobina no historico, limitar salvamento a bobina atual e ajustar visibilidade dos botoes da OP no modal.
+LAST_RECODE: 2026-03-09 15:20:00 -03:00
+MOTIVO: Remover botao Salvar e toda chamada ao endpoint /producao/op/salvar do modal da OP.
 -->
 
 
@@ -875,7 +875,6 @@ MOTIVO: Travar edicao por bobina no historico, limitar salvamento a bobina atual
       <button type="button" id="op-modal-toggle" class="btn-secondary">Ativar OP</button>
       <button type="button" id="op-modal-swap" class="btn-secondary">Troca de Bobina</button>
       <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
-      <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
   </div>
 </div>
@@ -1517,7 +1516,6 @@ function safeText(v){
   const modalClose = document.getElementById("op-modal-close");
   const modalToggle = document.getElementById("op-modal-toggle");
   const modalSwap = document.getElementById("op-modal-swap");
-  const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
 
@@ -3159,11 +3157,6 @@ if(modalBackdrop){
       }
     }
 
-    if(modalSave){
-      modalSave.style.display = encerrada ? "none" : "";
-      modalSave.disabled = encerrada;
-    }
-
     if(modalPdf){
       modalPdf.style.display = "";
       modalPdf.disabled = false;
@@ -3338,119 +3331,6 @@ if(modalBackdrop){
     });
   }
 
-if(modalSave){
-    modalSave.addEventListener("click", async function(){
-      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
-      if(!opId){
-        alert("OP invalida.");
-        return;
-      }
-
-
-      // valida duplicidade de OS (no escopo cliente + maquina) usando cache local do historico
-      const osValue = (opv_os && opv_os.value) ? opv_os.value : "";
-      const dup = findDuplicateOsInCache(osValue, opId);
-      if(dup){
-        alert("Ja existe uma OP com esse numero (OS): " + safeText(osValue));
-        return;
-      }
-
-      const bobinasPayload = [];
-      if(bobinasWrap){
-        const editableIdx = getEditableBobinaSeq(currentOp);
-        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
-        cards.forEach((card) => {
-          const idx = Number(card.getAttribute("data-bobina-idx") || "0");
-          if(idx !== editableIdx) return;
-
-          const getField = (name) => {
-            const el = card.querySelector('[data-field="' + name + '"]');
-            if(!el) return 0;
-            return num0(el.value);
-          };
-
-          bobinasPayload.push(buildBobinaSavePayload(currentOp, idx, {
-            qtd_cost_elas: Math.floor(getField("qtd_cost_elas")),
-            refugo: Math.floor(getField("refugo")),
-            qtd_saco_caixa: Math.floor(getField("qtd_saco_caixa"))
-          }));
-        });
-      }
-
-      const payload = {
-        op_id: opId,
-        observacoes: (ope_obs && ope_obs.value) ? ope_obs.value : "",
-        bobinas: bobinasPayload,
-        
-      };
-
-      if(currentOpMode === "edit"){
-        payload.os = (opv_os && opv_os.value) ? opv_os.value : "";
-        payload.lote = (opv_lote && opv_lote.value) ? opv_lote.value : "";
-        payload.operador = (opv_operador && opv_operador.value) ? opv_operador.value : "";
-        payload.gr_fio = (opv_gr_fio && opv_gr_fio.value) ? opv_gr_fio.value : "";
-        payload.conv = (opv_conv && opv_conv.value) ? opv_conv.value : "";
-        payload.started_at = (opv_started && opv_started.value) ? opv_started.value : "";
-        payload.ended_at = (opv_ended && opv_ended.value) ? opv_ended.value : "";
-
-        // bobinas em metros (add/remove no modo edicao)
-        payload.bobinas_m = collectBobinasMFromUI();
-      }
-
-
-      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (somente bobina atual)
-      if(bobinasWrap){
-        const editableIdx = getEditableBobinaSeq(currentOp);
-        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
-        for(const card of cards){
-          const idxBob = Number(card.getAttribute("data-bobina-idx") || 0);
-          if(idxBob !== editableIdx) continue;
-
-          const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
-          const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
-
-          const cost = Number((card.querySelector("input[data-field='qtd_cost_elas']") || {}).value || 0) || 0;
-          const refugo = Number((card.querySelector("input[data-field='refugo']") || {}).value || 0) || 0;
-          const retrabalho = Number((card.querySelector("input[data-field='qtd_saco_caixa']") || {}).value || 0) || 0;
-
-          const soma = cost + refugo + retrabalho;
-
-          if(pcsTotal > 0 && soma > pcsTotal){
-            alert("Bobina " + (idxBob + 1) + ": costuras + refugo + retrabalho nao pode ser maior que Total pcs.");
-            return;
-          }
-        }
-      }
-
-      modalSave.disabled = true;
-
-      try{
-        const resp = await fetch("/producao/op/salvar", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-
-        const data = await resp.json().catch(() => null);
-
-        if(!resp.ok){
-          const msg = data && (data.error || data.message)
-            ? (data.error || data.message)
-            : ("Erro HTTP " + resp.status);
-          throw new Error(msg);
-        }
-
-        alert("OP salva com sucesso.");
-        closeModal();
-        await fetchHistorico();
-
-      }catch(err){
-        alert("Falha ao salvar OP: " + (err.message || err));
-      }finally{
-        modalSave.disabled = false;
-      }
-    });
-  }
 
   if(modalPdf){
     modalPdf.addEventListener("click", function(){
