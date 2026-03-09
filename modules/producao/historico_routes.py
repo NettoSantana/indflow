@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\historico_routes.py
-# ULTIMO_RECODE: 2026-03-07 14:45:00
-# MOTIVO: Detalhe-dia: aplicar fallback de chaves legacy/scoped em machine_state_event para recuperar segmentos historicos de dias antigos.
+# ULTIMO_RECODE: 2026-03-08 12:10:00
+# MOTIVO: Fazer a OP pertencer ao dia da ativacao (started_at/ativada_at) apos ativar, em vez de ficar presa ao dia da abertura.
 
 
 from __future__ import annotations
@@ -1427,18 +1427,17 @@ def _diaria_do_dia(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> 
 def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> list[dict]:
     """
     Regra oficial:
-    - A OP pertence ao dia operacional da ABERTURA (inicio_iso).
+    - A OP nasce no dia da abertura, mas depois da ativacao ela passa a pertencer ao dia da ATIVACAO.
     - Atravessar a virada do dia (ou encerrar em outro dia) NAO cria segunda ocorrencia no historico.
 
     Implementacao:
-    - Filtra por janela [data_ref 00:01, proximo_dia 00:01) usando APENAS inicio_iso.
+    - Prioridade da data de pertencimento: ativada_at -> started_at -> inicio_iso.
+    - Filtra por janela [data_ref 00:01, proximo_dia 00:01) usando a melhor data disponivel.
     - Comparacao feita via datetime() do SQLite para evitar erro de comparacao textual e formatos ISO diferentes.
-    - Sem fallback por data_ref. Se nao bater por inicio_iso, nao exibe.
     - Deduplica registros repetidos do banco para nao exibir a mesma OP duas vezes no mesmo dia.
     """
     eff_mid = _resolve_effective_machine_id(conn, machine_id, data_ref)
 
-    # Janela do dia operacional: vira as 00:01 (inclusive). 00:00 ainda pertence ao dia anterior.
     try:
         d0 = date.fromisoformat(str(data_ref))
     except Exception:
@@ -1448,17 +1447,32 @@ def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> li
     start_dt = f"{d0.isoformat()} 00:01:00"
     end_dt = f"{d1.isoformat()} 00:01:00"
 
-    # datetime(replace(inicio_iso,'T',' ')) cobre:
-    # - "YYYY-MM-DDTHH:MM:SS"
-    # - "YYYY-MM-DD HH:MM:SS"
-    # - com ou sem offset, conforme parser do SQLite.
-    sql = """
-        SELECT op, lote, operador, inicio_iso, fim_iso, status
+    cols = _get_columns(conn, "ordens_producao")
+    if not cols:
+        return []
+
+    select_cols = ["op", "lote", "operador", "inicio_iso", "fim_iso", "status"]
+    ref_candidates = []
+    if "ativada_at" in cols:
+        select_cols.append("ativada_at")
+        ref_candidates.append("datetime(replace(ativada_at, 'T', ' '))")
+    else:
+        select_cols.append("NULL AS ativada_at")
+    if "started_at" in cols:
+        select_cols.append("started_at")
+        ref_candidates.append("datetime(replace(started_at, 'T', ' '))")
+    else:
+        select_cols.append("NULL AS started_at")
+    ref_candidates.append("datetime(replace(inicio_iso, 'T', ' '))")
+    ref_expr = f"COALESCE({', '.join(ref_candidates)})"
+
+    sql = f"""
+        SELECT {', '.join(select_cols)}, {ref_expr} AS data_pertencimento
           FROM ordens_producao
          WHERE machine_id = ?
-           AND datetime(replace(inicio_iso, 'T', ' ')) >= datetime(?)
-           AND datetime(replace(inicio_iso, 'T', ' ')) < datetime(?)
-         ORDER BY datetime(replace(inicio_iso, 'T', ' ')) ASC
+           AND {ref_expr} >= datetime(?)
+           AND {ref_expr} < datetime(?)
+         ORDER BY {ref_expr} ASC, datetime(replace(inicio_iso, 'T', ' ')) ASC
     """
 
     try:
@@ -1479,9 +1493,17 @@ def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> li
         inicio_iso = r["inicio_iso"]
         fim_iso = r["fim_iso"]
         status = r["status"]
+        ativada_at = r["ativada_at"]
+        started_at = r["started_at"]
+        data_pertencimento = r["data_pertencimento"]
 
-        # Dedup defensivo: mesma OP/lote/inicio nao deve aparecer duas vezes
-        key = (str(opv or ""), str(lote or ""), str(operador or ""), str(inicio_iso or ""))
+        key = (
+            str(opv or ""),
+            str(lote or ""),
+            str(operador or ""),
+            str(inicio_iso or ""),
+            str(ativada_at or started_at or data_pertencimento or ""),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -1494,6 +1516,9 @@ def _op_contexto(conn: sqlite3.Connection, machine_id: str, data_ref: str) -> li
                 "inicio_iso": inicio_iso,
                 "fim_iso": fim_iso,
                 "status": status,
+                "ativada_at": ativada_at,
+                "started_at": started_at,
+                "data_pertencimento": data_pertencimento,
             }
         )
 
