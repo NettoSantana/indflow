@@ -3125,10 +3125,22 @@ if(modalBackdrop){
     const criada = !ativa && !encerrada;
 
     if(modalToggle){
-      modalToggle.textContent = "Ativar OP";
-      modalToggle.style.display = criada ? "" : "none";
-      modalToggle.disabled = !criada;
-      modalToggle.title = criada ? "" : "";
+      if(encerrada){
+        modalToggle.textContent = "Encerrar OP";
+        modalToggle.style.display = "none";
+        modalToggle.disabled = true;
+        modalToggle.title = "";
+      }else if(ativa){
+        modalToggle.textContent = "Encerrar OP";
+        modalToggle.style.display = "";
+        modalToggle.disabled = false;
+        modalToggle.title = "";
+      }else{
+        modalToggle.textContent = "Ativar OP";
+        modalToggle.style.display = "";
+        modalToggle.disabled = false;
+        modalToggle.title = "";
+      }
     }
 
     if(modalSwap){
@@ -3157,33 +3169,37 @@ if(modalBackdrop){
   }
 
   async function postOpAction(opId, action){
-    const qs = "";
     const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
 
     const urls = [];
     if(action === "ativar"){
-      urls.push("/producao/op/tivar", "/op/tivar", "/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
+      urls.push("/producao/op/ativar", "/op/ativar");
     }else{
-      urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
+      urls.push("/producao/op/encerrar-by-id", "/op/encerrar-by-id", "/producao/op/encerrar", "/op/encerrar");
     }
 
     let lastErr = null;
     for(const u of urls){
       try{
-        const r = await fetch(u + qs, {
+        const r = await fetch(u, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-        if(!r.ok){
-          lastErr = new Error("HTTP " + r.status);
-          continue;
-        }
+
         const data = await r.json().catch(() => ({}));
-        if(data && (data.ok === false)){
-          lastErr = new Error(data.error || "Falha.");
+
+        if(!r.ok){
+          const msg = (data && (data.error || data.err || data.message)) ? (data.error || data.err || data.message) : ("HTTP " + r.status);
+          lastErr = new Error(msg);
           continue;
         }
+
+        if(data && (data.ok === false || data.error || data.err)){
+          lastErr = new Error(data.error || data.err || "Falha.");
+          continue;
+        }
+
         return true;
       }catch(e){
         lastErr = e;
@@ -3248,25 +3264,31 @@ if(modalBackdrop){
         return;
       }
 
-      const action = "ativar";
+      const ativa = isOpAtiva(currentOp && currentOp.status);
+      const encerrada = isOpEncerrada(currentOp && currentOp.status);
+      if(encerrada){
+        return;
+      }
+
+      const action = ativa ? "encerrar" : "ativar";
+      const actionLabel = ativa ? "encerrar" : "ativar";
 
       try{
         modalToggle.disabled = true;
         await postOpAction(opId, action);
-        // Recarregar OP para refletir o novo status
         const op = await fetchOpGet(opId);
         if(op){
           openModal(op, "edit");
-        }else{
-          currentOp.status = "ATIVA";
+        }else if(currentOp){
+          currentOp.status = ativa ? "ENCERRADA" : "ATIVA";
           updateToggleButton();
         }
-        // Recarregar tabela do histórico para refletir status
         await fetchHistorico();
       }catch(err){
-        alert("Falha ao ativar: " + (err.message || err));
+        alert("Falha ao " + actionLabel + ": " + (err.message || err));
       }finally{
         modalToggle.disabled = false;
+        updateToggleButton();
       }
     });
   }
