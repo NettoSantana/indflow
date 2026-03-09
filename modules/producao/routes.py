@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-09 14:20:00 (America/Bahia)
-# MOTIVO: Corrigir op_get e op_salvar para recalcular bobina aberta ao vivo e validar pcs_total da bobina atual com fallback pelo ESP.
+# LAST_RECODE: 2026-03-09 14:55:00 (America/Bahia)
+# MOTIVO: Remover dependencia do botao Salvar no fechamento da bobina, transferindo validacao e gravacao para a troca de bobina.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1555,6 +1555,160 @@ def _get_open_bobina_event_seq_and_start_abs(conn: sqlite3.Connection, op_id: in
     except Exception:
         cm = 0
     return (seq, start_abs, cm)
+
+
+def _extract_current_bobina_payload(data: dict, active_seq: int, active_idx_db: int) -> dict:
+    """Extrai os campos manuais da bobina atual a partir do payload da troca.
+
+    Aceita formatos:
+    - bobina_atual: {...}
+    - bobinas: [{idx/seq/...}]
+    - campos diretos no root: costuras/refugo/retrabalho
+    """
+    def _int(v):
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    payload = {}
+
+    bobina_atual = data.get("bobina_atual")
+    if isinstance(bobina_atual, dict):
+        payload = dict(bobina_atual)
+
+    if not payload and isinstance(data.get("bobinas"), list):
+        for item in data.get("bobinas") or []:
+            if not isinstance(item, dict):
+                continue
+            idx_raw = item.get("idx")
+            seq_raw = item.get("seq")
+            try:
+                idx_val = int(idx_raw) if idx_raw is not None and str(idx_raw).strip() != "" else None
+            except Exception:
+                idx_val = None
+            try:
+                seq_val = int(seq_raw) if seq_raw is not None and str(seq_raw).strip() != "" else None
+            except Exception:
+                seq_val = None
+
+            match_idx = idx_val is not None and int(idx_val) == int(active_idx_db)
+            match_seq = seq_val is not None and int(seq_val) == int(active_seq)
+            if match_idx or match_seq:
+                payload = dict(item)
+                break
+
+    if not payload:
+        payload = dict(data or {})
+
+    qtd_cost_elas = _int(payload.get("costuras")) if payload.get("costuras") is not None else _int(payload.get("qtd_cost_elas"))
+    refugo = _int(payload.get("refugo"))
+    qtd_saco_caixa = _int(payload.get("retrabalho")) if payload.get("retrabalho") is not None else _int(payload.get("qtd_saco_caixa"))
+
+    return {
+        "qtd_cost_elas": int(qtd_cost_elas or 0),
+        "refugo": int(refugo or 0),
+        "qtd_saco_caixa": int(qtd_saco_caixa or 0),
+    }
+
+
+def _upsert_bobina_fechamento(conn: sqlite3.Connection, op_id: int, idx_db: int, comprimento_m: int, pcs_total: int, conv: float,
+                              qtd_cost_elas: int, refugo: int, qtd_saco_caixa: int, updated_at: str):
+    pcs_total_i = int(pcs_total or 0)
+    comprimento_i = int(comprimento_m or 0)
+    qtd_cost_i = int(qtd_cost_elas or 0)
+    refugo_i = int(refugo or 0)
+    qtd_saco_i = int(qtd_saco_caixa or 0)
+    metro_consumido = float(pcs_total_i) * float(conv or 0.0) if float(conv or 0.0) > 0 else 0.0
+    qtd_mat_bom = pcs_total_i - (qtd_cost_i + refugo_i + qtd_saco_i)
+    if qtd_mat_bom < 0:
+        qtd_mat_bom = 0
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO ordens_producao_bobinas
+            (op_id, idx, comprimento_m, pcs_total, metro_consumido,
+             qtd_cost_elas, refugo, qtd_saco_caixa, qtd_mat_bom, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(op_id, idx) DO UPDATE SET
+            comprimento_m = excluded.comprimento_m,
+            pcs_total = excluded.pcs_total,
+            metro_consumido = excluded.metro_consumido,
+            qtd_cost_elas = excluded.qtd_cost_elas,
+            refugo = excluded.refugo,
+            qtd_saco_caixa = excluded.qtd_saco_caixa,
+            qtd_mat_bom = excluded.qtd_mat_bom,
+            updated_at = excluded.updated_at
+        """,
+        (
+            int(op_id),
+            int(idx_db),
+            int(comprimento_i),
+            int(pcs_total_i),
+            float(metro_consumido or 0.0),
+            int(qtd_cost_i),
+            int(refugo_i),
+            int(qtd_saco_i),
+            int(qtd_mat_bom),
+            _as_str(updated_at),
+        ),
+    )
+    return {
+        "pcs_total": int(pcs_total_i),
+        "metro_consumido": float(metro_consumido or 0.0),
+        "qtd_mat_bom": int(qtd_mat_bom),
+        "qtd_cost_elas": int(qtd_cost_i),
+        "refugo": int(refugo_i),
+        "qtd_saco_caixa": int(qtd_saco_i),
+    }
+
+
+def _refresh_op_legacy_fechamento(conn: sqlite3.Connection, op_id: int, observacoes: str | None = None):
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT
+            COALESCE(SUM(qtd_mat_bom), 0),
+            COALESCE(SUM(qtd_cost_elas), 0),
+            COALESCE(SUM(refugo), 0),
+            COALESCE(SUM(qtd_saco_caixa), 0)
+        FROM ordens_producao_bobinas
+        WHERE op_id = ?
+        """,
+        (int(op_id),),
+    )
+    row_sum = cur.fetchone() or (0, 0, 0, 0)
+    sum_mat_bom = int(row_sum[0] or 0)
+    sum_cost = int(row_sum[1] or 0)
+    sum_refugo = int(row_sum[2] or 0)
+    sum_saco = int(row_sum[3] or 0)
+
+    if observacoes is None:
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET qtd_mat_bom = ?,
+                qtd_cost_elas = ?,
+                refugo = ?,
+                qtd_saco_caixa = ?
+            WHERE id = ?
+            """,
+            (sum_mat_bom, sum_cost, sum_refugo, sum_saco, int(op_id)),
+        )
+    else:
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET qtd_mat_bom = ?,
+                qtd_cost_elas = ?,
+                refugo = ?,
+                qtd_saco_caixa = ?,
+                observacoes = ?
+            WHERE id = ?
+            """,
+            (sum_mat_bom, sum_cost, sum_refugo, sum_saco, _as_str(observacoes), int(op_id)),
+        )
 
 
 def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: str) -> dict:
@@ -3358,7 +3512,7 @@ def op_troca_bobina():
 
         stage = "fetch_op"
         row = cur.execute(
-            "SELECT id, machine_id, status, bobina FROM ordens_producao WHERE id = ? LIMIT 1",
+            "SELECT id, machine_id, status, bobina, op_conv_m_por_pcs, baseline_pcs FROM ordens_producao WHERE id = ? LIMIT 1",
             (op_id,),
         ).fetchone()
         if not row:
@@ -3367,6 +3521,11 @@ def op_troca_bobina():
         machine_id = _sanitize_mid(_as_str(row["machine_id"] or ""))
         status = _as_str(row["status"] or "")
         bobina_csv = _as_str(row["bobina"] or "")
+        try:
+            conv = float(row["op_conv_m_por_pcs"] or 0.0)
+        except Exception:
+            conv = 0.0
+        baseline_pcs = int(row["baseline_pcs"] or 0)
 
         if not machine_id:
             return jsonify({"error": "machine_id invalido"}), 400
@@ -3390,7 +3549,8 @@ def op_troca_bobina():
         open_info = _get_open_bobina_event_seq_and_start_abs(conn, op_id)
         if not open_info:
             return jsonify({"error": "Nenhuma bobina aberta para trocar"}), 409
-        open_seq, open_start_abs, _open_cm = open_info
+        open_seq, open_start_abs, open_cm = open_info
+        active_idx_db = int(open_seq) + 1
 
         stage = "validate_next_bobina"
         total_bobinas = len(bobinas_list or [])
@@ -3399,10 +3559,17 @@ def op_troca_bobina():
         if int(open_seq) >= int(total_bobinas) - 1:
             return jsonify({"error": "Ultima bobina ja esta em uso. Nao existe proxima bobina para trocar."}), 409
 
+        stage = "manual_payload"
+        manual = _extract_current_bobina_payload(data, int(open_seq), int(active_idx_db))
+        qtd_cost_elas = int(manual.get("qtd_cost_elas") or 0)
+        refugo = int(manual.get("refugo") or 0)
+        qtd_saco_caixa = int(manual.get("qtd_saco_caixa") or 0)
+        if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
+            return jsonify({"error": "Valores nao podem ser negativos", "idx": int(active_idx_db)}), 400
+
         stage = "esp_snapshot"
         esp_abs, esp_ts = _get_current_esp_snapshot(conn, machine_id)
         if esp_abs is None:
-            # fallback: usa baseline + pcs ja computado da OP (melhor que zero)
             try:
                 row_bp = cur.execute(
                     "SELECT baseline_pcs, op_pcs FROM ordens_producao WHERE id = ? LIMIT 1",
@@ -3420,38 +3587,86 @@ def op_troca_bobina():
             end_abs = int(open_start_abs or 0)
         if end_abs < int(open_start_abs or 0):
             end_abs = int(open_start_abs or 0)
+        if end_abs < int(baseline_pcs or 0):
+            end_abs = int(baseline_pcs or 0)
+
+        pcs_total = max(0, int(end_abs or 0) - int(open_start_abs or 0))
+        soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
+        if soma_defeitos > int(pcs_total or 0):
+            return jsonify({
+                "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL PCS da bobina",
+                "idx": int(active_idx_db),
+                "pcs_total": int(pcs_total or 0),
+                "qtd_cost_elas": int(qtd_cost_elas or 0),
+                "refugo": int(refugo or 0),
+                "qtd_saco_caixa": int(qtd_saco_caixa or 0),
+            }), 409
 
         ended_at = _now_iso()
 
+        stage = "save_closing_bobina"
+        fechamento = _upsert_bobina_fechamento(
+            conn=conn,
+            op_id=int(op_id),
+            idx_db=int(active_idx_db),
+            comprimento_m=int(open_cm or 0),
+            pcs_total=int(pcs_total or 0),
+            conv=float(conv or 0.0),
+            qtd_cost_elas=int(qtd_cost_elas or 0),
+            refugo=int(refugo or 0),
+            qtd_saco_caixa=int(qtd_saco_caixa or 0),
+            updated_at=ended_at,
+        )
+
+        stage = "refresh_legacy"
+        observacoes = data.get("observacoes") if "observacoes" in data else None
+        _refresh_op_legacy_fechamento(conn, int(op_id), observacoes)
+
         stage = "close_event"
-        # Fecha a bobina atual imediatamente
         _close_last_bobina_event(op_id, ended_at, end_abs)
 
         stage = "arm_pending"
         next_seq = _get_bobina_event_next_seq(op_id)
-
-        # Se next_seq nao avancou (caso raro), garante proximo
         if next_seq <= open_seq:
             next_seq = int(open_seq) + 1
 
         _set_bobina_pendencia(op_id, machine_id, open_seq, end_abs, next_seq, ended_at)
+
+        conn.commit()
 
         return jsonify({
             "status": "ok",
             "op_id": int(op_id),
             "machine_id": machine_id,
             "closed_seq": int(open_seq),
+            "closed_idx": int(active_idx_db),
             "closed_abs_pcs": int(end_abs),
             "closed_at": ended_at,
+            "pcs_total": int(fechamento.get("pcs_total") or 0),
+            "metro_consumido": float(fechamento.get("metro_consumido") or 0.0),
+            "qtd_mat_bom": int(fechamento.get("qtd_mat_bom") or 0),
+            "qtd_cost_elas": int(fechamento.get("qtd_cost_elas") or 0),
+            "refugo": int(fechamento.get("refugo") or 0),
+            "qtd_saco_caixa": int(fechamento.get("qtd_saco_caixa") or 0),
             "pending": True,
             "next_seq": int(next_seq),
         })
 
     except RuntimeError as e:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
         if str(e) == "troca_pendente":
             return jsonify({"error": "Troca ja solicitada. Aguardando primeiro machine/update."}), 409
         return jsonify({"error": "Falha na troca de bobina", "stage": stage}), 500
     except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
         return jsonify({"error": "Falha na troca de bobina", "stage": stage}), 500
     finally:
         try:
@@ -3634,469 +3849,8 @@ def op_encerrar():
 @producao_bp.route("/op/salvar", methods=["POST"])
 @login_required
 def op_salvar():
-    data = request.get_json(silent=True) or {}
-
-    try:
-        op_id = int(data.get("op_id", 0))
-    except Exception:
-        op_id = 0
-
-    if op_id <= 0:
-        return jsonify({"error": "op_id invalido"}), 400
-
-    def _int(v):
-        try:
-            return int(v)
-        except Exception:
-            return 0
-
-    def _float(v):
-        try:
-            return float(v)
-        except Exception:
-            return 0.0
-
-    def _clean_bobinas_list(v):
-        out = []
-        if not isinstance(v, list):
-            return out
-        for it in v:
-            try:
-                n = int(str(it).strip())
-            except Exception:
-                continue
-            if n <= 0:
-                continue
-            out.append(n)
-        return out
-
-    os_txt = (data.get("os") or "").strip()
-    lote_txt = (data.get("lote") or "").strip()
-    operador_txt = (data.get("operador") or "").strip()
-    gr_fio_txt = (data.get("gr_fio") or "").strip()
-    observacoes = (data.get("observacoes") or "").strip()
-
-    op_pcs_new = _int(data.get("op_pcs")) if data.get("op_pcs") is not None else None
-    op_conv_new = _float(data.get("op_conv_m_por_pcs")) if data.get("op_conv_m_por_pcs") is not None else None
-
-    bobinas_m_list = _clean_bobinas_list(data.get("bobinas_m"))
-    bobina_csv_new = (data.get("bobina") or "").strip()
-    if bobinas_m_list:
-        bobina_csv_new = ",".join(str(x) for x in bobinas_m_list)
-
-    def _update_op_cadastro(conn: sqlite3.Connection):
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM ordens_producao WHERE id = ?", (op_id,))
-        if not cur.fetchone():
-            return False
-
-        sets = []
-        args = []
-
-        if os_txt != "":
-            sets.append("os = ?")
-            args.append(os_txt)
-        if lote_txt != "":
-            sets.append("lote = ?")
-            args.append(lote_txt)
-        if operador_txt != "":
-            sets.append("operador = ?")
-            args.append(operador_txt)
-        if gr_fio_txt != "":
-            sets.append("gr_fio = ?")
-            args.append(gr_fio_txt)
-        if "observacoes" in data:
-            sets.append("observacoes = ?")
-            args.append(observacoes)
-        if op_pcs_new is not None:
-            sets.append("op_pcs = ?")
-            args.append(int(op_pcs_new or 0))
-        if op_conv_new is not None:
-            sets.append("op_conv_m_por_pcs = ?")
-            args.append(float(op_conv_new or 0.0))
-        if bobina_csv_new != "":
-            sets.append("bobina = ?")
-            args.append(bobina_csv_new)
-
-        if not sets:
-            return True
-
-        args.append(op_id)
-        cur.execute(
-            "UPDATE ordens_producao SET " + ", ".join(sets) + " WHERE id = ?",
-            tuple(args),
-        )
-        return True
-
-    bobinas_payload = data.get("bobinas")
-    if isinstance(bobinas_payload, list):
-        conn = None
-        stage = "init"
-        try:
-            conn = _get_conn()
-            cur = conn.cursor()
-
-            stage = "update_cadastro"
-            if not _update_op_cadastro(conn):
-                return jsonify({"error": "OP nao encontrada"}), 404
-
-            for col, ddl in [
-                ("qtd_mat_bom", "INTEGER DEFAULT 0"),
-                ("qtd_cost_elas", "INTEGER DEFAULT 0"),
-                ("refugo", "INTEGER DEFAULT 0"),
-                ("qtd_saco_caixa", "INTEGER DEFAULT 0"),
-            ]:
-                try:
-                    cur.execute(f"ALTER TABLE ordens_producao ADD COLUMN {col} {ddl}")
-                except Exception:
-                    pass
-
-            stage = "fetch_op"
-            cur.execute(
-                """
-                SELECT machine_id, status, bobina, op_pcs, op_conv_m_por_pcs, baseline_pcs
-                FROM ordens_producao
-                WHERE id = ?
-                """,
-                (op_id,),
-            )
-            row = cur.fetchone()
-            if not row:
-                return jsonify({"error": "OP nao encontrada"}), 404
-
-            machine_id = _sanitize_mid(_as_str(row[0]))
-            status_op = _as_str(row[1])
-            bobina_csv = row[2] or ""
-            op_pcs_total = int(row[3] or 0)
-            conv = float(row[4] or 0.0)
-            baseline_pcs = int(row[5] or 0)
-
-            bobinas_m = _parse_bobinas_csv(bobina_csv)
-            alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
-
-            active_seq = None
-            active_idx_db = None
-            esp_atual = 0
-            eventos_by_seq = {}
-            pending_seq = None
-            pending_closed_abs_pcs = 0
-            pending_armed_at = ""
-
-            stage = "fetch_events"
-            cur.execute(
-                """
-                SELECT seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs
-                FROM ordens_producao_bobina_eventos
-                WHERE op_id = ?
-                ORDER BY seq ASC
-                """,
-                (op_id,),
-            )
-            for rr in cur.fetchall() or []:
-                seq = int(rr[0] or 0)
-                ev = {
-                    "seq": seq,
-                    "comprimento_m": int(rr[1] or 0),
-                    "started_at": _as_str(rr[2]),
-                    "ended_at": _as_str(rr[3]),
-                    "start_abs_pcs": int(rr[4] or 0),
-                    "end_abs_pcs": int(rr[5] or 0),
-                }
-                eventos_by_seq[seq] = ev
-                if not ev["ended_at"]:
-                    if active_seq is None or seq > active_seq:
-                        active_seq = seq
-
-            stage = "fetch_pending"
-            try:
-                cur.execute(
-                    """
-                    SELECT next_seq, closed_abs_pcs, armed_at
-                    FROM ordens_producao_bobina_pendencia
-                    WHERE op_id = ?
-                    LIMIT 1
-                    """,
-                    (op_id,),
-                )
-                row_pend = cur.fetchone()
-                if row_pend:
-                    pending_seq = int(row_pend[0] or 0)
-                    pending_closed_abs_pcs = int(row_pend[1] or 0)
-                    pending_armed_at = _as_str(row_pend[2])
-            except Exception:
-                pending_seq = None
-                pending_closed_abs_pcs = 0
-                pending_armed_at = ""
-
-            if pending_seq is not None and pending_seq >= 0:
-                active_seq = int(pending_seq)
-            if active_seq is not None:
-                active_idx_db = int(active_seq) + 1
-
-            if status_op == "ATIVA":
-                try:
-                    esp_atual = int(_get_current_esp_abs(conn, machine_id) or 0)
-                except Exception:
-                    esp_atual = 0
-                if esp_atual < baseline_pcs:
-                    esp_atual = baseline_pcs
-
-            try:
-                cur.execute(
-                    "DELETE FROM ordens_producao_bobinas WHERE op_id = ? AND idx > ?",
-                    (op_id, int(len(bobinas_m) or 0)),
-                )
-            except Exception:
-                pass
-
-            now_iso = _now_iso()
-            saved_any = False
-
-            for item in bobinas_payload:
-                if not isinstance(item, dict):
-                    continue
-
-                idx_raw = _int(item.get("idx"))
-                seq_raw = item.get("seq")
-                try:
-                    seq_norm = int(seq_raw) if seq_raw is not None and str(seq_raw).strip() != "" else None
-                except Exception:
-                    seq_norm = None
-
-                if seq_norm is None:
-                    if idx_raw >= 1:
-                        seq_norm = int(idx_raw) - 1
-                    else:
-                        seq_norm = int(idx_raw)
-
-                if seq_norm < 0 or seq_norm >= len(bobinas_m):
-                    continue
-
-                pos = int(seq_norm)
-                idx_db = int(pos) + 1
-
-                if status_op == "ATIVA" and active_seq is not None and int(seq_norm) != int(active_seq):
-                    continue
-
-                qtd_cost_elas = _int(item.get("costuras")) if item.get("costuras") is not None else _int(item.get("qtd_cost_elas"))
-                refugo = _int(item.get("refugo"))
-                qtd_saco_caixa = _int(item.get("retrabalho")) if item.get("retrabalho") is not None else _int(item.get("qtd_saco_caixa"))
-
-                if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
-                    conn.rollback()
-                    return jsonify({"error": "Valores nao podem ser negativos", "idx": int(idx_db)}), 400
-
-                comprimento_m = int(bobinas_m[pos] or 0)
-                ev = eventos_by_seq.get(pos) or {}
-                started_at_ev = _as_str(ev.get("started_at"))
-                ended_at_ev = _as_str(ev.get("ended_at"))
-                start_abs_ev = int(ev.get("start_abs_pcs") or 0)
-                end_abs_ev = int(ev.get("end_abs_pcs") or 0)
-
-                if status_op == "ATIVA" and pending_seq is not None and pos == int(pending_seq):
-                    if start_abs_ev <= 0:
-                        start_abs_ev = int(pending_closed_abs_pcs or 0)
-                    if not started_at_ev:
-                        started_at_ev = pending_armed_at
-                    ended_at_ev = ""
-                    end_abs_ev = 0
-
-                pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
-                metro_payload = _float(item.get("metro_consumido")) if item.get("metro_consumido") is not None else None
-
-                bobina_aberta = bool(started_at_ev) and (((not ended_at_ev) or int(end_abs_ev or 0) <= 0))
-
-                if bobina_aberta and status_op == "ATIVA" and pos == active_seq:
-                    # Regra do bug atual:
-                    # - bobina aberta valida com o maior valor entre o payload e o calculado ao vivo
-                    pcs_total_calc = max(0, int(esp_atual or 0) - int(start_abs_ev or 0))
-                    pcs_total_payload_norm = max(0, int(pcs_total_payload or 0)) if pcs_total_payload is not None else 0
-                    pcs_total = max(int(pcs_total_payload_norm or 0), int(pcs_total_calc or 0))
-                    metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
-                elif started_at_ev:
-                    end_abs_calc = int(end_abs_ev or 0)
-                    if end_abs_calc > 0 and end_abs_calc >= int(start_abs_ev or 0):
-                        pcs_total = max(0, end_abs_calc - int(start_abs_ev or 0))
-                        metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
-                    else:
-                        pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
-                        metro_consumido = metro_payload if item.get("metro_consumido") is not None else (float(pcs_total) * conv if conv > 0 else 0.0)
-                else:
-                    pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
-                    metro_consumido = metro_payload if item.get("metro_consumido") is not None else (float(pcs_total) * conv if conv > 0 else 0.0)
-
-                if pcs_total < 0:
-                    pcs_total = 0
-                if metro_consumido < 0:
-                    metro_consumido = 0.0
-
-                soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
-                if soma_defeitos > int(pcs_total or 0):
-                    conn.rollback()
-                    return jsonify({
-                        "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL PCS da bobina",
-                        "idx": int(idx_db),
-                        "pcs_total": int(pcs_total or 0),
-                        "qtd_cost_elas": int(qtd_cost_elas or 0),
-                        "refugo": int(refugo or 0),
-                        "qtd_saco_caixa": int(qtd_saco_caixa or 0),
-                    }), 409
-
-                qtd_mat_bom = int(int(pcs_total or 0) - soma_defeitos)
-
-                stage = "upsert_bobina"
-                cur.execute(
-                    """
-                    INSERT INTO ordens_producao_bobinas
-                        (op_id, idx, comprimento_m, pcs_total, metro_consumido,
-                         qtd_cost_elas, refugo, qtd_saco_caixa, qtd_mat_bom, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(op_id, idx) DO UPDATE SET
-                        comprimento_m = excluded.comprimento_m,
-                        pcs_total = excluded.pcs_total,
-                        metro_consumido = excluded.metro_consumido,
-                        qtd_cost_elas = excluded.qtd_cost_elas,
-                        refugo = excluded.refugo,
-                        qtd_saco_caixa = excluded.qtd_saco_caixa,
-                        qtd_mat_bom = excluded.qtd_mat_bom,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        op_id,
-                        idx_db,
-                        comprimento_m,
-                        int(pcs_total or 0),
-                        float(metro_consumido or 0.0),
-                        int(qtd_cost_elas or 0),
-                        int(refugo or 0),
-                        int(qtd_saco_caixa or 0),
-                        int(qtd_mat_bom or 0),
-                        now_iso,
-                    ),
-                )
-                saved_any = True
-
-            if status_op == "ATIVA" and not saved_any:
-                conn.rollback()
-                return jsonify({"error": "Nenhum fechamento valido da bobina atual foi recebido", "idx_atual": int(active_idx_db or 1)}), 409
-
-            stage = "sum_legacy"
-            cur.execute(
-                """
-                SELECT
-                    COALESCE(SUM(qtd_mat_bom), 0),
-                    COALESCE(SUM(qtd_cost_elas), 0),
-                    COALESCE(SUM(refugo), 0),
-                    COALESCE(SUM(qtd_saco_caixa), 0)
-                FROM ordens_producao_bobinas
-                WHERE op_id = ?
-                """,
-                (op_id,),
-            )
-            row_sum = cur.fetchone() or (0, 0, 0, 0)
-            sum_mat_bom = int(row_sum[0] or 0)
-            sum_cost = int(row_sum[1] or 0)
-            sum_refugo = int(row_sum[2] or 0)
-            sum_saco = int(row_sum[3] or 0)
-
-            stage = "update_legacy"
-            cur.execute(
-                """
-                UPDATE ordens_producao
-                SET qtd_mat_bom = ?,
-                    qtd_cost_elas = ?,
-                    refugo = ?,
-                    qtd_saco_caixa = ?,
-                    observacoes = ?
-                WHERE id = ?
-                """,
-                (sum_mat_bom, sum_cost, sum_refugo, sum_saco, observacoes, op_id),
-            )
-
-            conn.commit()
-        except Exception as e:
-            if conn:
-                conn.rollback()
-            return jsonify({"error": "Falha ao salvar fechamento por bobina", "stage": stage, "detail": str(e)[:200]}), 500
-        finally:
-            if conn:
-                conn.close()
-
-        return jsonify({"status": "ok", "op_id": op_id, "mode": "bobinas"})
-
-    qtd_cost_elas = _int(data.get("costuras")) if data.get("costuras") is not None else _int(data.get("qtd_cost_elas"))
-    refugo = _int(data.get("refugo"))
-    qtd_saco_caixa = _int(data.get("retrabalho")) if data.get("retrabalho") is not None else _int(data.get("qtd_saco_caixa"))
-
-    if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
-        return jsonify({"error": "Valores nao podem ser negativos"}), 400
-
-    conn = None
-    try:
-        conn = _get_conn()
-        cur = conn.cursor()
-
-        if not _update_op_cadastro(conn):
-            return jsonify({"error": "OP nao encontrada"}), 404
-
-        for col, ddl in [
-            ("qtd_mat_bom", "INTEGER DEFAULT 0"),
-            ("qtd_cost_elas", "INTEGER DEFAULT 0"),
-            ("refugo", "INTEGER DEFAULT 0"),
-            ("qtd_saco_caixa", "INTEGER DEFAULT 0"),
-        ]:
-            try:
-                cur.execute(f"ALTER TABLE ordens_producao ADD COLUMN {col} {ddl}")
-            except Exception:
-                pass
-
-        cur.execute("SELECT COALESCE(op_pcs, 0) FROM ordens_producao WHERE id = ?", (op_id,))
-        rpcs = cur.fetchone()
-        total_pcs = int(rpcs[0] or 0) if rpcs else 0
-
-        soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
-        if soma_defeitos > int(total_pcs or 0):
-            return jsonify({
-                "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL_PCS",
-                "total_pcs": int(total_pcs or 0),
-                "costuras": int(qtd_cost_elas or 0),
-                "refugo": int(refugo or 0),
-                "retrabalho": int(qtd_saco_caixa or 0),
-            }), 409
-
-        qtd_mat_bom = int(int(total_pcs or 0) - soma_defeitos)
-
-        cur.execute(
-            """
-            UPDATE ordens_producao
-            SET qtd_mat_bom = ?,
-                qtd_cost_elas = ?,
-                refugo = ?,
-                qtd_saco_caixa = ?,
-                observacoes = ?
-            WHERE id = ?
-            """,
-            (
-                qtd_mat_bom,
-                qtd_cost_elas,
-                refugo,
-                qtd_saco_caixa,
-                observacoes,
-                op_id,
-            ),
-        )
-
-        if cur.rowcount == 0:
-            return jsonify({"error": "OP nao encontrada"}), 404
-
-        conn.commit()
-    except Exception:
-        if conn:
-            conn.rollback()
-        return jsonify({"error": "Falha ao salvar fechamento da OP"}), 500
-    finally:
-        if conn:
-            conn.close()
-
-    return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"})
+    return jsonify({
+        "error": "Endpoint desativado. O fechamento da bobina agora acontece na troca de bobina.",
+        "use": "/producao/op/troca-bobina",
+    }), 410
 
