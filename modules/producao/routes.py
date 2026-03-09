@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-09 12:10:00 (America/Bahia)
-# MOTIVO: Ajustar /op/salvar para validar e salvar somente a bobina atual em OP ativa, usando pcs_total vindo do payload.
+# LAST_RECODE: 2026-03-06 21:20:00 (America/Bahia)
+# MOTIVO: Corrigir /op/salvar para preservar bobinas 1-based sem zerar dados ao salvar fechamento manual.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -2923,116 +2923,149 @@ def op_get():
     except Exception:
         active_seq = None
 
-    if (not bobinas_detail) and bobinas_eventos:
-        for ev in bobinas_eventos:
-            seq = int(ev.get("seq") or 0)
-            start_abs = int(ev.get("start_abs_pcs") or 0)
-            end_abs_raw = int(ev.get("end_abs_pcs") or 0)
-            end_abs = end_abs_raw
-            # Somente a bobina ativa (evento aberto e de maior seq) pode usar o ESP atual como fim "ao vivo".
-            # Qualquer outro evento com end_abs_pcs vazio fica travado (pcs_total = 0) ate ser realmente fechado/iniciado corretamente.
-            if end_abs <= 0 and status == "ATIVA":
-                if active_seq is not None and int(seq) == int(active_seq):
-                    try:
-                        end_abs = int(esp_atual or 0)
-                    except Exception:
-                        end_abs = 0
-                else:
-                    end_abs = int(start_abs or 0)
-            pcs_total = max(0, int(end_abs) - int(start_abs))
-            try:
-                metro_consumido = round(float(pcs_total) * float(op_conv or 0.0), 3)
-            except Exception:
-                metro_consumido = 0.0
-            bobinas_detail.append(
-                {
-                    "idx": int(seq) + 1,
-                    "comprimento_m": int(ev.get("comprimento_m") or 0),
-                    "pcs_total": int(pcs_total or 0),
-                    "metro_consumido": float(metro_consumido or 0.0),
-                    "started_at": _as_str(ev.get("started_at") or ""),
-                    "ended_at": _as_str(ev.get("ended_at") or ""),
-                    "start_abs_pcs": int(start_abs or 0),
-                    "end_abs_pcs": int(end_abs_raw or 0),
-                    # campos de fechamento manual (quando nao existem ainda)
-                    "qtd_cost_elas": 0,
-                    "refugo": 0,
-                    "qtd_saco_caixa": 0,
-                    "qtd_mat_bom": 0,
-                }
-            )
-    elif bobinas_detail and bobinas_eventos:
-        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas
-        map_ev = {}
-        for ev in bobinas_eventos:
-            try:
-                map_ev[int(ev.get("seq") or 0) + 1] = ev
-            except Exception:
-                continue
-        for it in bobinas_detail:
-            try:
-                idx = int(it.get("idx") or 0)
-            except Exception:
-                idx = 0
-            ev = map_ev.get(idx)
-            if not ev:
-                continue
-            if not it.get("comprimento_m"):
-                it["comprimento_m"] = int(ev.get("comprimento_m") or 0)
-            it["started_at"] = _as_str(ev.get("started_at") or "")
-            it["ended_at"] = _as_str(ev.get("ended_at") or "")
-            it["start_abs_pcs"] = int(ev.get("start_abs_pcs") or 0)
-            it["end_abs_pcs"] = int(ev.get("end_abs_pcs") or 0)
+    # Merge correto para o modal:
+    # - eventos = verdade de producao/start/end por bobina
+    # - ordens_producao_bobinas = somente fechamento manual (costuras/refugo/retrabalho/mat bom)
+    # Assim o Salvar nao pode zerar bobinas anteriores nem congelar a bobina atual.
+    map_ev = {}
+    for ev in bobinas_eventos or []:
+        try:
+            map_ev[int(ev.get("seq") or 0) + 1] = ev
+        except Exception:
+            continue
 
-    # Garante que o modal receba TODAS as bobinas cadastradas, mesmo as que ainda nao iniciaram.
-    # Regra: so a bobina ativa (evento aberto) acumula pcs/metros; as demais ficam zeradas ate a troca.
+    map_det = {}
+    for it in bobinas_detail or []:
+        try:
+            map_det[int(it.get("idx") or 0)] = it
+        except Exception:
+            continue
+
     try:
         total_bobinas = len(bobinas_m or [])
     except Exception:
         total_bobinas = 0
 
     if total_bobinas > 0:
-        map_det = {}
-        for it in bobinas_detail or []:
-            try:
-                map_det[int(it.get("idx") or 0)] = it
-            except Exception:
-                continue
-
         new_list = []
         for i in range(1, total_bobinas + 1):
-            it = map_det.get(i)
-            if not it:
+            ev = map_ev.get(i)
+            det = map_det.get(i)
+
+            comprimento = 0
+            try:
+                comprimento = int((bobinas_m or [])[i - 1] or 0)
+            except Exception:
                 comprimento = 0
+
+            item = {
+                "idx": int(i),
+                "comprimento_m": int(comprimento or 0),
+                "pcs_total": 0,
+                "metro_consumido": 0.0,
+                "started_at": "",
+                "ended_at": "",
+                "start_abs_pcs": 0,
+                "end_abs_pcs": 0,
+                "qtd_cost_elas": 0,
+                "refugo": 0,
+                "qtd_saco_caixa": 0,
+                "qtd_mat_bom": 0,
+            }
+
+            if ev:
+                seq = int(ev.get("seq") or 0)
+                start_abs = int(ev.get("start_abs_pcs") or 0)
+                end_abs_raw = int(ev.get("end_abs_pcs") or 0)
+                end_abs_calc = end_abs_raw
+
+                if end_abs_calc <= 0 and status == "ATIVA":
+                    if active_seq is not None and int(seq) == int(active_seq):
+                        try:
+                            end_abs_calc = int(esp_atual or 0)
+                        except Exception:
+                            end_abs_calc = 0
+                    else:
+                        end_abs_calc = int(start_abs or 0)
+
+                pcs_total_calc = max(0, int(end_abs_calc) - int(start_abs))
                 try:
-                    comprimento = int((bobinas_m or [])[i - 1] or 0)
+                    metro_consumido_calc = round(float(pcs_total_calc) * float(op_conv or 0.0), 3)
                 except Exception:
-                    comprimento = 0
-                new_list.append(
+                    metro_consumido_calc = 0.0
+
+                item.update(
                     {
-                        "idx": int(i),
-                        "comprimento_m": int(comprimento or 0),
-                        "pcs_total": 0,
-                        "metro_consumido": 0.0,
-                        "started_at": "",
-                        "ended_at": "",
-                        "start_abs_pcs": 0,
-                        "end_abs_pcs": 0,
-                        "qtd_cost_elas": 0,
-                        "refugo": 0,
-                        "qtd_saco_caixa": 0,
-                        "qtd_mat_bom": 0,
+                        "comprimento_m": int(ev.get("comprimento_m") or item["comprimento_m"] or 0),
+                        "pcs_total": int(pcs_total_calc or 0),
+                        "metro_consumido": float(metro_consumido_calc or 0.0),
+                        "started_at": _as_str(ev.get("started_at") or ""),
+                        "ended_at": _as_str(ev.get("ended_at") or ""),
+                        "start_abs_pcs": int(start_abs or 0),
+                        "end_abs_pcs": int(end_abs_raw or 0),
                     }
                 )
-            else:
-                if not it.get("comprimento_m"):
+
+            if det:
+                item["qtd_cost_elas"] = int(det.get("qtd_cost_elas") or 0)
+                item["refugo"] = int(det.get("refugo") or 0)
+                item["qtd_saco_caixa"] = int(det.get("qtd_saco_caixa") or 0)
+                item["qtd_mat_bom"] = int(det.get("qtd_mat_bom") or 0)
+
+                if not ev:
+                    item["comprimento_m"] = int(det.get("comprimento_m") or item["comprimento_m"] or 0)
+                    item["pcs_total"] = int(det.get("pcs_total") or 0)
                     try:
-                        it["comprimento_m"] = int((bobinas_m or [])[i - 1] or 0)
+                        item["metro_consumido"] = float(det.get("metro_consumido") or 0.0)
                     except Exception:
-                        pass
-                new_list.append(it)
+                        item["metro_consumido"] = 0.0
+                    item["started_at"] = _as_str(det.get("started_at") or "")
+                    item["ended_at"] = _as_str(det.get("ended_at") or "")
+                    item["start_abs_pcs"] = int(det.get("start_abs_pcs") or 0)
+                    item["end_abs_pcs"] = int(det.get("end_abs_pcs") or 0)
+
+            new_list.append(item)
 
         bobinas_detail = new_list
+    elif bobinas_eventos:
+        bobinas_detail = []
+        for ev in bobinas_eventos:
+            seq = int(ev.get("seq") or 0)
+            start_abs = int(ev.get("start_abs_pcs") or 0)
+            end_abs_raw = int(ev.get("end_abs_pcs") or 0)
+            end_abs_calc = end_abs_raw
+
+            if end_abs_calc <= 0 and status == "ATIVA":
+                if active_seq is not None and int(seq) == int(active_seq):
+                    try:
+                        end_abs_calc = int(esp_atual or 0)
+                    except Exception:
+                        end_abs_calc = 0
+                else:
+                    end_abs_calc = int(start_abs or 0)
+
+            pcs_total_calc = max(0, int(end_abs_calc) - int(start_abs))
+            try:
+                metro_consumido_calc = round(float(pcs_total_calc) * float(op_conv or 0.0), 3)
+            except Exception:
+                metro_consumido_calc = 0.0
+
+            bobinas_detail.append(
+                {
+                    "idx": int(seq) + 1,
+                    "comprimento_m": int(ev.get("comprimento_m") or 0),
+                    "pcs_total": int(pcs_total_calc or 0),
+                    "metro_consumido": float(metro_consumido_calc or 0.0),
+                    "started_at": _as_str(ev.get("started_at") or ""),
+                    "ended_at": _as_str(ev.get("ended_at") or ""),
+                    "start_abs_pcs": int(start_abs or 0),
+                    "end_abs_pcs": int(end_abs_raw or 0),
+                    "qtd_cost_elas": 0,
+                    "refugo": 0,
+                    "qtd_saco_caixa": 0,
+                    "qtd_mat_bom": 0,
+                }
+            )
     return jsonify(
         {
             "op_id": int(r[0] or 0),
@@ -3725,10 +3758,10 @@ def op_salvar():
                 except Exception:
                     pass
 
-            # Buscar dados base da OP (bobinas/csv, op_pcs, conv, status)
+            # Buscar dados base da OP (bobinas/csv, op_pcs, conv)
             cur.execute(
                 """
-                SELECT bobina, op_pcs, op_conv_m_por_pcs, status
+                SELECT bobina, op_pcs, op_conv_m_por_pcs
                 FROM ordens_producao
                 WHERE id = ?
                 """,
@@ -3741,33 +3774,9 @@ def op_salvar():
             bobina_csv = row[0] or ""
             op_pcs_total = int(row[1] or 0)
             conv = float(row[2] or 0.0)
-            status_op = _as_str(row[3])
 
             bobinas_m = _parse_bobinas_csv(bobina_csv)
             alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
-
-            active_idx_db = None
-            if status_op == "ATIVA":
-                try:
-                    cur.execute(
-                        """
-                        SELECT seq
-                        FROM ordens_producao_bobina_eventos
-                        WHERE op_id = ?
-                          AND (ended_at IS NULL OR ended_at = '')
-                        ORDER BY seq DESC
-                        LIMIT 1
-                        """,
-                        (op_id,),
-                    )
-                    row_active = cur.fetchone()
-                    if row_active and row_active[0] is not None:
-                        active_idx_db = int(row_active[0] or 0) + 1
-                except Exception:
-                    active_idx_db = None
-
-                if active_idx_db is None:
-                    active_idx_db = 1
 
             # Se removeu bobinas, limpa linhas antigas (idx fora do range)
             # Importante: ordens_producao_bobinas usa idx 1-based.
@@ -3811,17 +3820,8 @@ def op_salvar():
                 else:
                     continue
 
-                if status_op == "ATIVA" and active_idx_db is not None and int(idx_db) != int(active_idx_db):
-                    conn.rollback()
-                    return jsonify({
-                        "error": "Somente a bobina atual pode ser salva enquanto a OP estiver ativa",
-                        "idx": int(idx_db),
-                        "idx_atual": int(active_idx_db),
-                    }), 409
-
                 comprimento_m = bobinas_m[pos]
-                pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
-                pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
+                pcs_total = alloc_pcs[pos] if pos < len(alloc_pcs) else 0
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
 
                 soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
