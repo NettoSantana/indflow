@@ -1700,8 +1700,9 @@ def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: s
     """Helper para ser chamado no machine/update.
 
     Se existir pendencia de troca para a OP ATIVA da maquina:
-      - abre a proxima bobina (novo evento) usando o primeiro pulso apos a troca
-      - limpa a pendencia
+      - abre a proxima bobina no primeiro pulso apos a troca
+      - preserva continuidade de pecas usando closed_abs_pcs como start_abs_pcs
+      - limpa a pendencia na mesma transacao
 
     Retorna dict com informacoes do que foi feito (sem exceptions).
     """
@@ -1732,12 +1733,14 @@ def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: s
             return out
 
         pend = cur.execute(
-            "SELECT op_id, next_seq FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+            "SELECT op_id, next_seq, closed_abs_pcs, armed_at FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
             (op_id,),
         ).fetchone()
         if not pend:
             return out
         next_seq = int(pend["next_seq"] or 0)
+        closed_abs_pcs = int(pend["closed_abs_pcs"] or 0)
+        armed_at = _as_str(pend["armed_at"] or "")
 
         # comprimento_m opcional: pega da lista cadastrada na OP se existir
         bobina_csv = _as_str(row_op["bobina"] or "")
@@ -1749,16 +1752,57 @@ def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: s
             except Exception:
                 comprimento_m = 0
 
-        _upsert_bobina_event_start(op_id, next_seq, comprimento_m, ts, esp_val)
-        _clear_bobina_pendencia(op_id)
+        # Regra importante:
+        # - a nova bobina nasce no primeiro machine/update apos a troca
+        # - mas o start_abs_pcs deve ser o contador fechado da bobina anterior
+        #   para nao descartar a diferenca entre o fechamento e o primeiro pulso novo
+        start_abs_pcs = int(closed_abs_pcs or 0)
+        if start_abs_pcs <= 0:
+            start_abs_pcs = int(esp_val or 0)
+
+        started_at = ts or armed_at or _now_iso()
+
+        now_iso = _now_iso()
+        cur.execute(
+            """
+            INSERT INTO ordens_producao_bobina_eventos
+                (op_id, seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs, created_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)
+            ON CONFLICT(op_id, seq) DO UPDATE SET
+                comprimento_m = excluded.comprimento_m,
+                started_at = excluded.started_at,
+                start_abs_pcs = excluded.start_abs_pcs,
+                updated_at = excluded.updated_at
+            """,
+            (
+                int(op_id),
+                int(next_seq),
+                int(comprimento_m or 0),
+                _as_str(started_at),
+                int(start_abs_pcs or 0),
+                now_iso,
+                now_iso,
+            ),
+        )
+
+        cur.execute("DELETE FROM ordens_producao_bobina_pendencia WHERE op_id = ?", (int(op_id),))
+        conn.commit()
+
         out["applied"] = True
         out["op_id"] = int(op_id)
         out["seq"] = int(next_seq)
-        out["started_at"] = ts
-        out["start_abs_pcs"] = int(esp_val)
+        out["started_at"] = started_at
+        out["start_abs_pcs"] = int(start_abs_pcs)
+        out["closed_abs_pcs"] = int(closed_abs_pcs or 0)
+        out["first_update_abs_pcs"] = int(esp_val or 0)
         out["comprimento_m"] = int(comprimento_m)
         return out
     except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
         return out
     finally:
         try:
@@ -1766,6 +1810,7 @@ def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: s
                 conn.close()
         except Exception:
             pass
+
 def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     """
     Busca OPs que cruzam o intervalo [day_min, day_max].
