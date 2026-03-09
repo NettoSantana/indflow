@@ -1466,34 +1466,43 @@ def _get_bobina_pendencia(op_id: int) -> dict | None:
             pass
 
 
-def _set_bobina_pendencia(conn: sqlite3.Connection, op_id: int, machine_id: str, closed_seq: int, closed_abs_pcs: int, next_seq: int, armed_at: str):
-    """Arma a pendencia de troca usando a mesma conexao/transacao do caller.
-
-    Motivo:
-    - Evita abrir uma segunda conexao SQLite dentro de /op/troca-bobina,
-      o que gerava lock no stage arm_pending.
-    """
+def _set_bobina_pendencia(op_id: int, machine_id: str, closed_seq: int, closed_abs_pcs: int, next_seq: int, armed_at: str):
     oid = int(op_id or 0)
     mid = _sanitize_mid(_as_str(machine_id))
     if oid <= 0 or not mid:
         raise ValueError("op_id/machine_id invalido")
-
     now_iso = _now_iso()
-    cur = conn.cursor()
+    conn = None
+    try:
+        conn = _get_conn()
+        cur = conn.cursor()
+        # Impede dupla troca rapida: se ja existir, retorna erro
+        cur.execute(
+            "SELECT 1 FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+            (oid,),
+        )
+        if cur.fetchone() is not None:
+            raise RuntimeError("troca_pendente")
 
-    # Impede dupla troca rapida: se ja existir, retorna erro
-    cur.execute(
-        "SELECT 1 FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
-        (oid,),
-    )
-    if cur.fetchone() is not None:
-        raise RuntimeError("troca_pendente")
-
-    cur.execute(
-        "INSERT INTO ordens_producao_bobina_pendencia (op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (oid, mid, _as_str(armed_at), int(closed_seq or 0), int(closed_abs_pcs or 0), int(next_seq or 0), now_iso, now_iso),
-    )
+        cur.execute(
+            "INSERT INTO ordens_producao_bobina_pendencia (op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (oid, mid, _as_str(armed_at), int(closed_seq or 0), int(closed_abs_pcs or 0), int(next_seq or 0), now_iso, now_iso),
+        )
+        conn.commit()
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
 
 def _clear_bobina_pendencia(op_id: int):
@@ -3217,6 +3226,67 @@ def op_get():
                 new_list.append(it)
 
         bobinas_detail = new_list
+
+        # Merge final com eventos depois dos placeholders.
+        # Isso garante que uma bobina iniciada pelo primeiro machine/update
+        # apareca em bobinas_detail mesmo quando o item foi criado como placeholder.
+        map_ev_final = {}
+        for ev in bobinas_eventos or []:
+            try:
+                map_ev_final[int(ev.get("seq") or 0) + 1] = ev
+            except Exception:
+                continue
+
+        for it in bobinas_detail:
+            try:
+                idx = int(it.get("idx") or 0)
+            except Exception:
+                idx = 0
+            ev = map_ev_final.get(idx)
+            if not ev:
+                continue
+
+            started_at_ev = _as_str(ev.get("started_at") or "")
+            ended_at_ev = _as_str(ev.get("ended_at") or "")
+            start_abs_ev = int(ev.get("start_abs_pcs") or 0)
+            end_abs_ev = int(ev.get("end_abs_pcs") or 0)
+            bobina_aberta = (not ended_at_ev) or (end_abs_ev <= 0)
+
+            it["comprimento_m"] = int(ev.get("comprimento_m") or it.get("comprimento_m") or 0)
+            it["started_at"] = started_at_ev
+            it["ended_at"] = ended_at_ev
+            it["start_abs_pcs"] = int(start_abs_ev or 0)
+            it["end_abs_pcs"] = int(end_abs_ev or 0)
+
+            qtd_cost_elas = int(it.get("qtd_cost_elas") or 0)
+            refugo = int(it.get("refugo") or 0)
+            qtd_saco_caixa = int(it.get("qtd_saco_caixa") or 0)
+
+            if bobina_aberta:
+                if status == "ATIVA":
+                    try:
+                        pcs_total_live = max(0, int(esp_atual or 0) - int(start_abs_ev or 0))
+                    except Exception:
+                        pcs_total_live = 0
+                else:
+                    pcs_total_live = 0
+                it["pcs_total"] = int(pcs_total_live or 0)
+                try:
+                    it["metro_consumido"] = round(float(pcs_total_live) * float(op_conv or 0.0), 3)
+                except Exception:
+                    it["metro_consumido"] = 0.0
+            else:
+                pcs_total_fechado = max(0, int(end_abs_ev or 0) - int(start_abs_ev or 0))
+                it["pcs_total"] = int(pcs_total_fechado or 0)
+                try:
+                    it["metro_consumido"] = round(float(pcs_total_fechado) * float(op_conv or 0.0), 3)
+                except Exception:
+                    it["metro_consumido"] = 0.0
+
+            qtd_mat_bom = int(int(it.get("pcs_total") or 0) - (qtd_cost_elas + refugo + qtd_saco_caixa))
+            if qtd_mat_bom < 0:
+                qtd_mat_bom = 0
+            it["qtd_mat_bom"] = int(qtd_mat_bom or 0)
     return jsonify(
         {
             "op_id": int(r[0] or 0),
@@ -3625,7 +3695,7 @@ def op_troca_bobina():
         if next_seq <= open_seq:
             next_seq = int(open_seq) + 1
 
-        _set_bobina_pendencia(conn, op_id, machine_id, open_seq, end_abs, next_seq, ended_at)
+        _set_bobina_pendencia(op_id, machine_id, open_seq, end_abs, next_seq, ended_at)
 
         conn.commit()
 
