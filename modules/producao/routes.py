@@ -3623,7 +3623,11 @@ def op_troca_bobina():
         _refresh_op_legacy_fechamento(conn, int(op_id), observacoes)
 
         stage = "close_event"
-        _close_last_bobina_event(op_id, ended_at, end_abs)
+        cur.execute("""
+            UPDATE ordens_producao_bobina_eventos
+            SET ended_at = ?, end_abs_pcs = ?, updated_at = ?
+            WHERE op_id = ? AND (ended_at IS NULL OR ended_at = '')
+        """, (ended_at, int(end_abs), ended_at, int(op_id)))
 
         stage = "arm_pending"
         next_seq = _get_bobina_event_next_seq(op_id)
@@ -3853,4 +3857,3 @@ def op_salvar():
         "error": "Endpoint desativado. O fechamento da bobina agora acontece na troca de bobina.",
         "use": "/producao/op/troca-bobina",
     }), 410
-
