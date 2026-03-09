@@ -3200,11 +3200,13 @@ def op_ativar():
         baseline_pcs = int(_get_current_esp_abs(conn, machine_id) or 0)
 
         stage = "update_op"
-        # Regra: NAO sobrescreve started_at (abertura da OP). Apenas ancora baseline e marca ATIVA.
+        # Regra: a OP pertence ao dia em que foi ATIVADA.
+        # Portanto, ao ativar, started_at deve ser sobrescrito com o timestamp da ativacao.
         cur.execute(
-            "UPDATE ordens_producao SET status = ?, baseline_pcs = ?, ended_at = NULL WHERE id = ?",
-            ("ATIVA", baseline_pcs, op_id),
+            "UPDATE ordens_producao SET status = ?, baseline_pcs = ?, started_at = ?, ended_at = NULL WHERE id = ?",
+            ("ATIVA", baseline_pcs, now_iso, op_id),
         )
+        op_started_at = now_iso
 
         stage = "bobinas_parse"
         bobina_csv = _as_str(row[3])
