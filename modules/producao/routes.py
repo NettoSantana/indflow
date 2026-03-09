@@ -1466,43 +1466,28 @@ def _get_bobina_pendencia(op_id: int) -> dict | None:
             pass
 
 
-def _set_bobina_pendencia(op_id: int, machine_id: str, closed_seq: int, closed_abs_pcs: int, next_seq: int, armed_at: str):
+def _set_bobina_pendencia(conn: sqlite3.Connection, op_id: int, machine_id: str, closed_seq: int, closed_abs_pcs: int, next_seq: int, armed_at: str):
     oid = int(op_id or 0)
     mid = _sanitize_mid(_as_str(machine_id))
     if oid <= 0 or not mid:
         raise ValueError("op_id/machine_id invalido")
-    now_iso = _now_iso()
-    conn = None
-    try:
-        conn = _get_conn()
-        cur = conn.cursor()
-        # Impede dupla troca rapida: se ja existir, retorna erro
-        cur.execute(
-            "SELECT 1 FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
-            (oid,),
-        )
-        if cur.fetchone() is not None:
-            raise RuntimeError("troca_pendente")
 
-        cur.execute(
-            "INSERT INTO ordens_producao_bobina_pendencia (op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (oid, mid, _as_str(armed_at), int(closed_seq or 0), int(closed_abs_pcs or 0), int(next_seq or 0), now_iso, now_iso),
-        )
-        conn.commit()
-    except Exception:
-        try:
-            if conn:
-                conn.rollback()
-        except Exception:
-            pass
-        raise
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
+    now_iso = _now_iso()
+    cur = conn.cursor()
+
+    # Impede dupla troca rapida: se ja existir, retorna erro
+    cur.execute(
+        "SELECT 1 FROM ordens_producao_bobina_pendencia WHERE op_id = ? LIMIT 1",
+        (oid,),
+    )
+    if cur.fetchone() is not None:
+        raise RuntimeError("troca_pendente")
+
+    cur.execute(
+        "INSERT INTO ordens_producao_bobina_pendencia (op_id, machine_id, armed_at, closed_seq, closed_abs_pcs, next_seq, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (oid, mid, _as_str(armed_at), int(closed_seq or 0), int(closed_abs_pcs or 0), int(next_seq or 0), now_iso, now_iso),
+    )
 
 
 def _clear_bobina_pendencia(op_id: int):
@@ -3695,7 +3680,7 @@ def op_troca_bobina():
         if next_seq <= open_seq:
             next_seq = int(open_seq) + 1
 
-        _set_bobina_pendencia(op_id, machine_id, open_seq, end_abs, next_seq, ended_at)
+        _set_bobina_pendencia(conn, op_id, machine_id, open_seq, end_abs, next_seq, ended_at)
 
         conn.commit()
 
