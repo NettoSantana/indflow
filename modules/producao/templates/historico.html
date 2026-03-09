@@ -1,3 +1,8 @@
+<!--
+C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
+LAST_RECODE: 2026-03-09 00:00:00 -03:00
+MOTIVO: Travar edicao por bobina no historico, limitar salvamento a bobina atual e ajustar visibilidade dos botoes da OP no modal.
+-->
 
 
 
@@ -537,6 +542,27 @@
   .bobina-card.bobina-card-ativa{
     background:#dcfce7;
     border-color:#86efac;
+  }
+
+  .bobina-card.bobina-card-travada{
+    background:#f8fafc;
+    border-color:#cbd5e1;
+  }
+
+  .bobina-card.bobina-card-futura{
+    background:#f1f5f9;
+    border-color:#cbd5e1;
+    opacity:0.82;
+  }
+
+  .bobina-card input[readonly],
+  .bobina-card input:disabled{
+    cursor:not-allowed;
+  }
+
+  .bobina-card-futura .op-edit input{
+    background:#e5e7eb;
+    border-color:#cbd5e1;
   }
 
   .bobina-title{
@@ -1596,7 +1622,40 @@ function safeText(v){
     }
   }
 
+  function setDisabled(el, disabled){
+    if(!el) return;
+    el.disabled = !!disabled;
+  }
+
+  function isOpEncerrada(statusStr){
+    const s = safeText(statusStr).toUpperCase();
+    if(!s) return false;
+    return s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL");
+  }
+
+  function getEditableBobinaSeq(op){
+    const total = getBobinasCount(op);
+    if(total <= 0) return -1;
+    const aberta = getOpenBobinaSeq(op);
+    if(aberta >= 0) return aberta;
+    return 0;
+  }
+
+  function getBobinaState(op, idx){
+    const editableSeq = getEditableBobinaSeq(op);
+    if(editableSeq < 0){
+      return { editable: false, passada: false, futura: false, atual: false };
+    }
+    return {
+      editable: idx === editableSeq,
+      passada: idx < editableSeq,
+      futura: idx > editableSeq,
+      atual: idx === editableSeq
+    };
+  }
+
   function showBobinasM(show){
+
     if(!bobinasMWrap) return;
     bobinasMWrap.style.display = show ? "" : "none";
   }
@@ -1869,9 +1928,16 @@ function safeText(v){
     card.className = "bobina-card";
     card.setAttribute("data-bobina-idx", String(idx));
 
-    const activeSeq = getOpenBobinaSeq(opCtx);
-    if(activeSeq === idx){
+    const bobinaState = getBobinaState(opCtx, idx);
+    const opEndedState = isOpEncerrada(opCtx && opCtx.status);
+    const canEditBobina = !!(opts.isEdit && !opEndedState && bobinaState.editable);
+
+    if(bobinaState.atual && !opEndedState){
       card.classList.add("bobina-card-ativa");
+    }else if(bobinaState.passada || opEndedState){
+      card.classList.add("bobina-card-travada");
+    }else if(bobinaState.futura){
+      card.classList.add("bobina-card-futura");
     }
 
     const title = document.createElement("div");
@@ -1880,7 +1946,17 @@ function safeText(v){
 
     const sub = document.createElement("div");
     sub.className = "bobina-sub";
-    sub.textContent = "Comprimento: " + String(Math.floor(comprimentoM)) + " m";
+    let bobinaStatusTxt = "Travada";
+    if(opEndedState){
+      bobinaStatusTxt = "Travada";
+    }else if(bobinaState.atual){
+      bobinaStatusTxt = "Atual";
+    }else if(bobinaState.passada){
+      bobinaStatusTxt = "Encerrada";
+    }else if(bobinaState.futura){
+      bobinaStatusTxt = "Futura";
+    }
+    sub.textContent = "Comprimento: " + String(Math.floor(comprimentoM)) + " m | " + bobinaStatusTxt;
     title.appendChild(sub);
 
     const grid = document.createElement("div");
@@ -1917,6 +1993,8 @@ function safeText(v){
       inp.step = "1";
       inp.value = String(Math.floor(num0(value)));
       inp.setAttribute("data-field", name);
+      inp.readOnly = !canEditBobina;
+      inp.disabled = !canEditBobina;
 
       w.appendChild(l);
       w.appendChild(inp);
@@ -2038,6 +2116,15 @@ function safeText(v){
     fRef.input.addEventListener("input", recalc);
     fSaco.input.addEventListener("input", recalc);
 
+    if(!canEditBobina){
+      fCost.wrap.classList.remove("op-edit");
+      fCost.wrap.classList.add("op-ro");
+      fRef.wrap.classList.remove("op-edit");
+      fRef.wrap.classList.add("op-ro");
+      fSaco.wrap.classList.remove("op-edit");
+      fSaco.wrap.classList.add("op-ro");
+    }
+
     card.appendChild(title);
     card.appendChild(grid);
     return card;
@@ -2153,14 +2240,25 @@ function safeText(v){
 
     // no modo edicao, liberar campos principais (exceto maquina/status)
     const isEdit = (currentOpMode === "edit");
-    setReadonly(opv_operador, !isEdit);
-    setReadonly(opv_lote, !isEdit);
-    setReadonly(opv_os, !isEdit);
-    setReadonly(opv_gr_fio, !isEdit);
-    setReadonly(opv_conv, !isEdit);
-    setReadonly(opv_started, !isEdit);
-    setReadonly(opv_ended, !isEdit);
-    showBobinasM(isEdit);
+    const opStatusOpen = safeText(currentOp && currentOp.status);
+    const opAtivaAgora = isOpAtiva(opStatusOpen);
+    const opEncerradaAgora = isOpEncerrada(opStatusOpen);
+    const canEditMainFields = isEdit && !opEncerradaAgora;
+    const canEditBobinasM = isEdit && !opAtivaAgora && !opEncerradaAgora;
+
+    setReadonly(opv_operador, !canEditMainFields);
+    setReadonly(opv_lote, !canEditMainFields);
+    setReadonly(opv_os, !canEditMainFields);
+    setReadonly(opv_gr_fio, !canEditMainFields);
+    setReadonly(opv_conv, !canEditMainFields);
+    setReadonly(opv_started, !canEditMainFields);
+    setReadonly(opv_ended, !canEditMainFields);
+    setReadonly(ope_obs, !canEditMainFields);
+    showBobinasM(canEditBobinasM);
+    if(bobinasMAdd){
+      bobinasMAdd.style.display = canEditBobinasM ? "" : "none";
+      bobinasMAdd.disabled = !canEditBobinasM;
+    }
 
     if(isEdit){
       currentBobinasM = normalizeBobinasM(op);
@@ -2292,7 +2390,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
 
         if(opv_bobinas_resumo) opv_bobinas_resumo.value = bobinasResumo(pseudoItens);
         pseudoItens.forEach((b, i) => {
-          const card = createBobinaCard(b, i, convMporPcs, {op: op, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
+          const card = createBobinaCard(b, i, convMporPcs, {op: op, isEdit: isEdit, forceZeroLive: forceZeroLive, isLiveHoje: isLiveHoje, livePcs: livePcs, liveMetros: liveMetros, liveTempoMin: liveTempoMin});
           if(bobinasWrap) bobinasWrap.appendChild(card);
         });
       }else{
@@ -2311,7 +2409,7 @@ if(opv_os) opv_os.value = anyText(op && (op.os || op.os_num || op.ordem_servico)
         qtd_saco_caixa: num0(op && (op.qtd_saco_caixa ?? 0))
       };
 
-      const card = createBobinaCard(legacy, 0, convMporPcs, {op: op, forceZeroLive: forceZeroLive});
+      const card = createBobinaCard(legacy, 0, convMporPcs, {op: op, isEdit: isEdit, forceZeroLive: forceZeroLive});
       if(bobinasWrap) bobinasWrap.appendChild(card);
       }
     }
@@ -3030,20 +3128,24 @@ if(modalBackdrop){
   }
 
   function updateToggleButton(){
+    const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
+    const ativa = isOpAtiva(st);
+    const encerrada = isOpEncerrada(st);
+    const criada = !ativa && !encerrada;
+
     if(modalToggle){
-      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
-      modalToggle.textContent = isOpAtiva(st) ? "Encerrar" : "Ativar OP";
+      modalToggle.textContent = "Ativar OP";
+      modalToggle.style.display = criada ? "" : "none";
+      modalToggle.disabled = !criada;
+      modalToggle.title = criada ? "" : "";
     }
 
     if(modalSwap){
-      const st = (currentOp && (currentOp.status || currentOp.stat)) || "";
-      const ativa = isOpAtiva(st);
-
-      // swap so faz sentido com OP ativa, com bobinas cadastradas e com proxima bobina disponivel
       const hasBobinas = getBobinasCount(currentOp) > 0;
       const hasNextBobina = hasNextBobinaAvailable(currentOp);
+      const canShowSwap = ativa && hasBobinas && hasNextBobina;
 
-      modalSwap.style.display = (ativa && hasBobinas && hasNextBobina) ? "" : "none";
+      modalSwap.style.display = canShowSwap ? "" : "none";
       modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
 
       if(!hasBobinas){
@@ -3055,6 +3157,16 @@ if(modalBackdrop){
       }else{
         modalSwap.title = "";
       }
+    }
+
+    if(modalSave){
+      modalSave.style.display = encerrada ? "none" : "";
+      modalSave.disabled = encerrada;
+    }
+
+    if(modalPdf){
+      modalPdf.style.display = "";
+      modalPdf.disabled = false;
     }
   }
 
@@ -3150,8 +3262,7 @@ if(modalBackdrop){
         return;
       }
 
-      const ativa = isOpAtiva(currentOp && currentOp.status);
-      const action = ativa ? "encerrar" : "ativar";
+      const action = "ativar";
 
       try{
         modalToggle.disabled = true;
@@ -3161,14 +3272,13 @@ if(modalBackdrop){
         if(op){
           openModal(op, "edit");
         }else{
-          // fallback: atualizar apenas status local
-          currentOp.status = (action === "ativar") ? "ATIVA" : "ENCERRADA";
+          currentOp.status = "ATIVA";
           updateToggleButton();
         }
         // Recarregar tabela do histórico para refletir status
         await fetchHistorico();
       }catch(err){
-        alert("Falha ao " + (action === "ativar" ? "ativar" : "encerrar") + ": " + (err.message || err));
+        alert("Falha ao ativar: " + (err.message || err));
       }finally{
         modalToggle.disabled = false;
       }
@@ -3247,9 +3357,11 @@ if(modalSave){
 
       const bobinasPayload = [];
       if(bobinasWrap){
+        const editableIdx = getEditableBobinaSeq(currentOp);
         const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
         cards.forEach((card) => {
           const idx = Number(card.getAttribute("data-bobina-idx") || "0");
+          if(idx !== editableIdx) return;
 
           const getField = (name) => {
             const el = card.querySelector('[data-field="' + name + '"]');
@@ -3286,11 +3398,14 @@ if(modalSave){
       }
 
 
-      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (bobina)
+      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (somente bobina atual)
       if(bobinasWrap){
+        const editableIdx = getEditableBobinaSeq(currentOp);
         const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
         for(const card of cards){
           const idxBob = Number(card.getAttribute("data-bobina-idx") || 0);
+          if(idxBob !== editableIdx) continue;
+
           const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
           const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
 
