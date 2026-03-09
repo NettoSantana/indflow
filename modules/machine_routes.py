@@ -1,10 +1,6 @@
 # Arquivo: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\machine_routes.py
-# Ultimo recode: 2026-03-07 06:27:00 -0300
-# Motivo: Padronizar machine_state_event para usar sempre effective_machine_id scoped no /machine/update e /machine/status, evitando tempos/paradas zerados no historico.
-
-# PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\machine_routes.py
-# LAST_RECODE: 2026-03-05 19:46 America/Bahia
-# MOTIVO: Corrigir abertura sequencial de bobinas (N bobinas) no /machine/update; se existir evento seq ja criado mas vazio, preencher started_at/start_abs_pcs em vez de ignorar.
+# Ultimo recode: 2026-03-08 00:00:00 -0300
+# Motivo: Aceitar domingo como 0 no active_days e converter para 7 no backend.
 
 import os
 import json
@@ -1934,7 +1930,7 @@ def _cfgv2_break_rel(shift_start: int, br_start: int, br_end: int) -> tuple[int,
 def _cfgv2_validate(raw: dict) -> dict:
     cfg = {}
 
-    # active_days: 1..7
+    # active_days: aceita 0..7 no payload, mas persiste padrao 1..7 (domingo=7)
     ad = raw.get("active_days")
     if ad is None:
         ad = [1, 2, 3, 4, 5, 6, 7]
@@ -1946,6 +1942,8 @@ def _cfgv2_validate(raw: dict) -> dict:
             di = int(d)
         except Exception:
             continue
+        if di == 0:
+            di = 7
         if 1 <= di <= 7 and di not in days:
             days.append(di)
     if not days:
@@ -2798,7 +2796,7 @@ def update_machine():
             meta_abs = int(m.get("meta_turno", 0) or 0)
         except Exception:
             meta_abs = 0
-        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=(m.get("cliente_id") or cid_req), dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
+        _sync_producao_diaria_absoluta(machine_id=str(machine_id), cliente_id=(m.get("cliente_id") or cliente_id), dia_ref=str(dia_ref_pd), produzido_abs=int(prod_abs), meta=int(meta_abs))
     except Exception:
         pass
 
@@ -2872,7 +2870,7 @@ def update_machine():
         hora_evt_u = int(dt_evt_u.hour)
         data_ref_evt_u = dia_operacional_ref_str(dt_evt_u)
         raw_mid_u = _norm_machine_id(machine_id)
-        eff_mid_u = f"{cliente_id}::{raw_mid_u}" if cliente_id else raw_mid_u
+        eff_mid_u = _machine_id_scoped(str(cliente_id) if cliente_id else None, raw_mid_u)
 
         _record_machine_state_transition(
             raw_mid_u,
@@ -3726,7 +3724,7 @@ def machine_status():
             data_ref_evt = dia_operacional_ref_str(agora_evt)
             cid_evt = (m.get("cliente_id") or None)
             raw_mid = _norm_machine_id(machine_id)
-            eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
+            eff_mid = _machine_id_scoped(cid_evt, raw_mid)
             _record_machine_state_transition(raw_mid, eff_mid, cid_evt, "NP", agora_evt, data_ref_evt, hora_evt)
         except Exception:
             pass
@@ -3753,7 +3751,7 @@ def machine_status():
         data_ref_evt = dia_operacional_ref_str(agora_evt)
         cid_evt = (m.get("cliente_id") or None)
         raw_mid = _norm_machine_id(machine_id)
-        eff_mid = f"{cid_evt}::{raw_mid}" if cid_evt else raw_mid
+        eff_mid = _machine_id_scoped(cid_evt, raw_mid)
         st_evt = _infer_state_for_timeline(m, hora_evt)
         _record_machine_state_transition(raw_mid, eff_mid, cid_evt, st_evt, agora_evt, data_ref_evt, hora_evt)
     except Exception:
