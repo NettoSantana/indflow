@@ -3178,16 +3178,16 @@ if(modalBackdrop){
     if(modalSwap){
       const hasBobinas = getBobinasCount(currentOp) > 0;
       const hasNextBobina = hasNextBobinaAvailable(currentOp);
-      const canShowSwap = ativa && hasBobinas && hasNextBobina;
+      const waitingSwapUpdate = swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0));
 
-      modalSwap.style.display = canShowSwap ? "" : "none";
-      modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
+      modalSwap.style.display = (ativa && hasBobinas) ? "" : "none";
+      modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || waitingSwapUpdate;
 
       if(!hasBobinas){
         modalSwap.title = "Sem bobina cadastrada.";
       }else if(!hasNextBobina){
         modalSwap.title = "Ultima bobina ja esta em uso.";
-      }else if(modalSwap.disabled && swapLockActive){
+      }else if(waitingSwapUpdate){
         modalSwap.title = "Aguardando primeiro machine/update apos a troca.";
       }else{
         modalSwap.title = "";
