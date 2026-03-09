@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-06 21:20:00 (America/Bahia)
-# MOTIVO: Corrigir /op/salvar para preservar bobinas 1-based sem zerar dados ao salvar fechamento manual.
+# LAST_RECODE: 2026-03-09 12:10:00 (America/Bahia)
+# MOTIVO: Ajustar /op/salvar para validar e salvar somente a bobina atual em OP ativa, usando pcs_total vindo do payload.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -3725,10 +3725,10 @@ def op_salvar():
                 except Exception:
                     pass
 
-            # Buscar dados base da OP (bobinas/csv, op_pcs, conv)
+            # Buscar dados base da OP (bobinas/csv, op_pcs, conv, status)
             cur.execute(
                 """
-                SELECT bobina, op_pcs, op_conv_m_por_pcs
+                SELECT bobina, op_pcs, op_conv_m_por_pcs, status
                 FROM ordens_producao
                 WHERE id = ?
                 """,
@@ -3741,9 +3741,33 @@ def op_salvar():
             bobina_csv = row[0] or ""
             op_pcs_total = int(row[1] or 0)
             conv = float(row[2] or 0.0)
+            status_op = _as_str(row[3])
 
             bobinas_m = _parse_bobinas_csv(bobina_csv)
             alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
+
+            active_idx_db = None
+            if status_op == "ATIVA":
+                try:
+                    cur.execute(
+                        """
+                        SELECT seq
+                        FROM ordens_producao_bobina_eventos
+                        WHERE op_id = ?
+                          AND (ended_at IS NULL OR ended_at = '')
+                        ORDER BY seq DESC
+                        LIMIT 1
+                        """,
+                        (op_id,),
+                    )
+                    row_active = cur.fetchone()
+                    if row_active and row_active[0] is not None:
+                        active_idx_db = int(row_active[0] or 0) + 1
+                except Exception:
+                    active_idx_db = None
+
+                if active_idx_db is None:
+                    active_idx_db = 1
 
             # Se removeu bobinas, limpa linhas antigas (idx fora do range)
             # Importante: ordens_producao_bobinas usa idx 1-based.
@@ -3787,8 +3811,17 @@ def op_salvar():
                 else:
                     continue
 
+                if status_op == "ATIVA" and active_idx_db is not None and int(idx_db) != int(active_idx_db):
+                    conn.rollback()
+                    return jsonify({
+                        "error": "Somente a bobina atual pode ser salva enquanto a OP estiver ativa",
+                        "idx": int(idx_db),
+                        "idx_atual": int(active_idx_db),
+                    }), 409
+
                 comprimento_m = bobinas_m[pos]
-                pcs_total = alloc_pcs[pos] if pos < len(alloc_pcs) else 0
+                pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
+                pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
 
                 soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
