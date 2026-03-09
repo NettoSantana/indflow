@@ -3739,6 +3739,9 @@ def op_salvar():
             active_idx_db = None
             esp_atual = 0
             eventos_by_seq = {}
+            pending_seq = None
+            pending_closed_abs_pcs = 0
+            pending_armed_at = ""
 
             stage = "fetch_events"
             cur.execute(
@@ -3765,6 +3768,29 @@ def op_salvar():
                     if active_seq is None or seq > active_seq:
                         active_seq = seq
 
+            stage = "fetch_pending"
+            try:
+                cur.execute(
+                    """
+                    SELECT next_seq, closed_abs_pcs, armed_at
+                    FROM ordens_producao_bobina_pendencia
+                    WHERE op_id = ?
+                    LIMIT 1
+                    """,
+                    (op_id,),
+                )
+                row_pend = cur.fetchone()
+                if row_pend:
+                    pending_seq = int(row_pend[0] or 0)
+                    pending_closed_abs_pcs = int(row_pend[1] or 0)
+                    pending_armed_at = _as_str(row_pend[2])
+            except Exception:
+                pending_seq = None
+                pending_closed_abs_pcs = 0
+                pending_armed_at = ""
+
+            if pending_seq is not None and pending_seq >= 0:
+                active_seq = int(pending_seq)
             if active_seq is not None:
                 active_idx_db = int(active_seq) + 1
 
@@ -3827,6 +3853,14 @@ def op_salvar():
                 ended_at_ev = _as_str(ev.get("ended_at"))
                 start_abs_ev = int(ev.get("start_abs_pcs") or 0)
                 end_abs_ev = int(ev.get("end_abs_pcs") or 0)
+
+                if status_op == "ATIVA" and pending_seq is not None and pos == int(pending_seq):
+                    if start_abs_ev <= 0:
+                        start_abs_ev = int(pending_closed_abs_pcs or 0)
+                    if not started_at_ev:
+                        started_at_ev = pending_armed_at
+                    ended_at_ev = ""
+                    end_abs_ev = 0
 
                 pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
                 metro_payload = _float(item.get("metro_consumido")) if item.get("metro_consumido") is not None else None
