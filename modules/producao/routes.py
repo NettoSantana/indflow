@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-09 14:25:00 (America/Bahia)
-# MOTIVO: Corrigir op_get para manter a bobina aberta recalculando pcs_total/metros ao vivo apos salvar.
+# LAST_RECODE: 2026-03-09 14:35:00 (America/Bahia)
+# MOTIVO: Corrigir /op/salvar no arquivo original para validar bobina aberta com base no maior valor entre pcs_total do payload e ESP atual.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -2962,10 +2962,7 @@ def op_get():
                 }
             )
     elif bobinas_detail and bobinas_eventos:
-        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas.
-        # Regra critica:
-        # - bobina fechada usa valores congelados do evento
-        # - bobina aberta continua AO VIVO mesmo apos salvar campos manuais
+        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas
         map_ev = {}
         for ev in bobinas_eventos:
             try:
@@ -2982,54 +2979,10 @@ def op_get():
                 continue
             if not it.get("comprimento_m"):
                 it["comprimento_m"] = int(ev.get("comprimento_m") or 0)
-
-            started_at_ev = _as_str(ev.get("started_at") or "")
-            ended_at_ev = _as_str(ev.get("ended_at") or "")
-            start_abs_ev = int(ev.get("start_abs_pcs") or 0)
-            end_abs_raw_ev = int(ev.get("end_abs_pcs") or 0)
-
-            it["started_at"] = started_at_ev
-            it["ended_at"] = ended_at_ev
-            it["start_abs_pcs"] = int(start_abs_ev or 0)
-            it["end_abs_pcs"] = int(end_abs_raw_ev or 0)
-
-            seq_ev = int(ev.get("seq") or 0)
-            is_open_live = (
-                status == "ATIVA"
-                and active_seq is not None
-                and int(seq_ev) == int(active_seq)
-                and not ended_at_ev
-            )
-
-            if is_open_live:
-                try:
-                    end_abs_live = int(esp_atual or 0)
-                except Exception:
-                    end_abs_live = 0
-                if end_abs_live < int(start_abs_ev or 0):
-                    end_abs_live = int(start_abs_ev or 0)
-                pcs_total_calc = max(0, int(end_abs_live) - int(start_abs_ev or 0))
-            else:
-                end_abs_final = int(end_abs_raw_ev or 0)
-                if end_abs_final < int(start_abs_ev or 0):
-                    end_abs_final = int(start_abs_ev or 0)
-                pcs_total_calc = max(0, int(end_abs_final) - int(start_abs_ev or 0))
-
-            try:
-                metro_consumido_calc = round(float(pcs_total_calc) * float(op_conv or 0.0), 3)
-            except Exception:
-                metro_consumido_calc = 0.0
-
-            qtd_cost = int(it.get("qtd_cost_elas") or 0)
-            qtd_ref = int(it.get("refugo") or 0)
-            qtd_saco = int(it.get("qtd_saco_caixa") or 0)
-            qtd_mat_bom_calc = int(pcs_total_calc - (qtd_cost + qtd_ref + qtd_saco))
-            if qtd_mat_bom_calc < 0:
-                qtd_mat_bom_calc = 0
-
-            it["pcs_total"] = int(pcs_total_calc)
-            it["metro_consumido"] = float(metro_consumido_calc)
-            it["qtd_mat_bom"] = int(qtd_mat_bom_calc)
+            it["started_at"] = _as_str(ev.get("started_at") or "")
+            it["ended_at"] = _as_str(ev.get("ended_at") or "")
+            it["start_abs_pcs"] = int(ev.get("start_abs_pcs") or 0)
+            it["end_abs_pcs"] = int(ev.get("end_abs_pcs") or 0)
 
     # Garante que o modal receba TODAS as bobinas cadastradas, mesmo as que ainda nao iniciaram.
     # Regra: so a bobina ativa (evento aberto) acumula pcs/metros; as demais ficam zeradas ate a troca.
@@ -3665,7 +3618,6 @@ def op_salvar():
             return 0.0
 
     def _clean_bobinas_list(v):
-        # Aceita lista de numeros (metros). Remove vazios/negativos e limita para int.
         out = []
         if not isinstance(v, list):
             return out
@@ -3679,26 +3631,20 @@ def op_salvar():
             out.append(n)
         return out
 
-    # Campos de cadastro (opcional) - permitem editar tudo pelo modal do Historico
     os_txt = (data.get("os") or "").strip()
     lote_txt = (data.get("lote") or "").strip()
     operador_txt = (data.get("operador") or "").strip()
     gr_fio_txt = (data.get("gr_fio") or "").strip()
     observacoes = (data.get("observacoes") or "").strip()
 
-    # Campos numericos (opcional)
     op_pcs_new = _int(data.get("op_pcs")) if data.get("op_pcs") is not None else None
     op_conv_new = _float(data.get("op_conv_m_por_pcs")) if data.get("op_conv_m_por_pcs") is not None else None
 
-    # Bobinas (comprimentos em metros) - pode vir como lista ou como CSV
     bobinas_m_list = _clean_bobinas_list(data.get("bobinas_m"))
     bobina_csv_new = (data.get("bobina") or "").strip()
-
-    # Se veio lista, ela manda. Se nao, usa CSV se fornecido.
     if bobinas_m_list:
         bobina_csv_new = ",".join(str(x) for x in bobinas_m_list)
 
-    # Atualiza cadastro da OP antes de salvar fechamento (se algum campo veio)
     def _update_op_cadastro(conn: sqlite3.Connection):
         cur = conn.cursor()
         cur.execute("SELECT id FROM ordens_producao WHERE id = ?", (op_id,))
@@ -3720,19 +3666,15 @@ def op_salvar():
         if gr_fio_txt != "":
             sets.append("gr_fio = ?")
             args.append(gr_fio_txt)
-
-        # Observacoes pode ser vazia (permitir limpar)
         if "observacoes" in data:
             sets.append("observacoes = ?")
             args.append(observacoes)
-
         if op_pcs_new is not None:
             sets.append("op_pcs = ?")
             args.append(int(op_pcs_new or 0))
         if op_conv_new is not None:
             sets.append("op_conv_m_por_pcs = ?")
             args.append(float(op_conv_new or 0.0))
-
         if bobina_csv_new != "":
             sets.append("bobina = ?")
             args.append(bobina_csv_new)
@@ -3747,20 +3689,18 @@ def op_salvar():
         )
         return True
 
-
-    # Novo formato: salvar por bobina
     bobinas_payload = data.get("bobinas")
     if isinstance(bobinas_payload, list):
         conn = None
+        stage = "init"
         try:
             conn = _get_conn()
             cur = conn.cursor()
 
-            # Atualiza cadastro (inclui bobinas) antes do fechamento
+            stage = "update_cadastro"
             if not _update_op_cadastro(conn):
                 return jsonify({"error": "OP nao encontrada"}), 404
 
-            # Garantir colunas legacy na OP (compatibilidade)
             for col, ddl in [
                 ("qtd_mat_bom", "INTEGER DEFAULT 0"),
                 ("qtd_cost_elas", "INTEGER DEFAULT 0"),
@@ -3772,10 +3712,10 @@ def op_salvar():
                 except Exception:
                     pass
 
-            # Buscar dados base da OP (bobinas/csv, op_pcs, conv)
+            stage = "fetch_op"
             cur.execute(
                 """
-                SELECT bobina, op_pcs, op_conv_m_por_pcs
+                SELECT machine_id, status, bobina, op_pcs, op_conv_m_por_pcs, baseline_pcs
                 FROM ordens_producao
                 WHERE id = ?
                 """,
@@ -3785,15 +3725,83 @@ def op_salvar():
             if not row:
                 return jsonify({"error": "OP nao encontrada"}), 404
 
-            bobina_csv = row[0] or ""
-            op_pcs_total = int(row[1] or 0)
-            conv = float(row[2] or 0.0)
+            machine_id = _sanitize_mid(_as_str(row[0]))
+            status_op = _as_str(row[1])
+            bobina_csv = row[2] or ""
+            op_pcs_total = int(row[3] or 0)
+            conv = float(row[4] or 0.0)
+            baseline_pcs = int(row[5] or 0)
 
             bobinas_m = _parse_bobinas_csv(bobina_csv)
             alloc_pcs = _alloc_pcs_by_bobinas(op_pcs_total, bobinas_m, conv)
 
-            # Se removeu bobinas, limpa linhas antigas (idx fora do range)
-            # Importante: ordens_producao_bobinas usa idx 1-based.
+            active_seq = None
+            active_idx_db = None
+            esp_atual = 0
+            eventos_by_seq = {}
+            pending_seq = None
+            pending_closed_abs_pcs = 0
+            pending_armed_at = ""
+
+            stage = "fetch_events"
+            cur.execute(
+                """
+                SELECT seq, comprimento_m, started_at, ended_at, start_abs_pcs, end_abs_pcs
+                FROM ordens_producao_bobina_eventos
+                WHERE op_id = ?
+                ORDER BY seq ASC
+                """,
+                (op_id,),
+            )
+            for rr in cur.fetchall() or []:
+                seq = int(rr[0] or 0)
+                ev = {
+                    "seq": seq,
+                    "comprimento_m": int(rr[1] or 0),
+                    "started_at": _as_str(rr[2]),
+                    "ended_at": _as_str(rr[3]),
+                    "start_abs_pcs": int(rr[4] or 0),
+                    "end_abs_pcs": int(rr[5] or 0),
+                }
+                eventos_by_seq[seq] = ev
+                if not ev["ended_at"]:
+                    if active_seq is None or seq > active_seq:
+                        active_seq = seq
+
+            stage = "fetch_pending"
+            try:
+                cur.execute(
+                    """
+                    SELECT next_seq, closed_abs_pcs, armed_at
+                    FROM ordens_producao_bobina_pendencia
+                    WHERE op_id = ?
+                    LIMIT 1
+                    """,
+                    (op_id,),
+                )
+                row_pend = cur.fetchone()
+                if row_pend:
+                    pending_seq = int(row_pend[0] or 0)
+                    pending_closed_abs_pcs = int(row_pend[1] or 0)
+                    pending_armed_at = _as_str(row_pend[2])
+            except Exception:
+                pending_seq = None
+                pending_closed_abs_pcs = 0
+                pending_armed_at = ""
+
+            if pending_seq is not None and pending_seq >= 0:
+                active_seq = int(pending_seq)
+            if active_seq is not None:
+                active_idx_db = int(active_seq) + 1
+
+            if status_op == "ATIVA":
+                try:
+                    esp_atual = int(_get_current_esp_abs(conn, machine_id) or 0)
+                except Exception:
+                    esp_atual = 0
+                if esp_atual < baseline_pcs:
+                    esp_atual = baseline_pcs
+
             try:
                 cur.execute(
                     "DELETE FROM ordens_producao_bobinas WHERE op_id = ? AND idx > ?",
@@ -3802,41 +3810,84 @@ def op_salvar():
             except Exception:
                 pass
 
-            # UPSERT por idx
             now_iso = _now_iso()
-            sum_mat_bom = 0
-            sum_cost = 0
-            sum_refugo = 0
-            sum_saco = 0
+            saved_any = False
 
             for item in bobinas_payload:
                 if not isinstance(item, dict):
                     continue
+
                 idx_raw = _int(item.get("idx"))
+                seq_raw = item.get("seq")
+                try:
+                    seq_norm = int(seq_raw) if seq_raw is not None and str(seq_raw).strip() != "" else None
+                except Exception:
+                    seq_norm = None
+
+                if seq_norm is None:
+                    if idx_raw >= 1:
+                        seq_norm = int(idx_raw) - 1
+                    else:
+                        seq_norm = int(idx_raw)
+
+                if seq_norm < 0 or seq_norm >= len(bobinas_m):
+                    continue
+
+                pos = int(seq_norm)
+                idx_db = int(pos) + 1
+
+                if status_op == "ATIVA" and active_seq is not None and int(seq_norm) != int(active_seq):
+                    continue
+
                 qtd_cost_elas = _int(item.get("costuras")) if item.get("costuras") is not None else _int(item.get("qtd_cost_elas"))
                 refugo = _int(item.get("refugo"))
                 qtd_saco_caixa = _int(item.get("retrabalho")) if item.get("retrabalho") is not None else _int(item.get("qtd_saco_caixa"))
 
                 if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
                     conn.rollback()
-                    return jsonify({
-                        "error": "Valores nao podem ser negativos",
-                        "idx": int(idx_raw),
-                    }), 400
+                    return jsonify({"error": "Valores nao podem ser negativos", "idx": int(idx_db)}), 400
 
-                # ordens_producao_bobinas usa idx 1-based; listas Python usam pos 0-based.
-                idx_db = int(idx_raw)
-                if 1 <= idx_db <= len(bobinas_m):
-                    pos = idx_db - 1
-                elif 0 <= idx_db < len(bobinas_m):
-                    pos = idx_db
-                    idx_db = pos + 1
+                comprimento_m = int(bobinas_m[pos] or 0)
+                ev = eventos_by_seq.get(pos) or {}
+                started_at_ev = _as_str(ev.get("started_at"))
+                ended_at_ev = _as_str(ev.get("ended_at"))
+                start_abs_ev = int(ev.get("start_abs_pcs") or 0)
+                end_abs_ev = int(ev.get("end_abs_pcs") or 0)
+
+                if status_op == "ATIVA" and pending_seq is not None and pos == int(pending_seq):
+                    if start_abs_ev <= 0:
+                        start_abs_ev = int(pending_closed_abs_pcs or 0)
+                    if not started_at_ev:
+                        started_at_ev = pending_armed_at
+                    ended_at_ev = ""
+                    end_abs_ev = 0
+
+                pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
+                metro_payload = _float(item.get("metro_consumido")) if item.get("metro_consumido") is not None else None
+
+                if started_at_ev and not ended_at_ev and status_op == "ATIVA" and pos == active_seq:
+                    # Bobina aberta: usa o maior valor entre o payload da tela e o calculo ao vivo.
+                    # Isso evita validar com 0 quando o snapshot do ESP vier atrasado na mesma rodada do save.
+                    pcs_total_live = max(0, int(esp_atual or 0) - int(start_abs_ev or 0))
+                    pcs_total_payload_safe = max(0, int(pcs_total_payload or 0)) if pcs_total_payload is not None else 0
+                    pcs_total = max(int(pcs_total_live or 0), int(pcs_total_payload_safe or 0))
+                    metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+                elif started_at_ev:
+                    end_abs_calc = int(end_abs_ev or 0)
+                    if end_abs_calc > 0 and end_abs_calc >= int(start_abs_ev or 0):
+                        pcs_total = max(0, end_abs_calc - int(start_abs_ev or 0))
+                        metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+                    else:
+                        pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
+                        metro_consumido = metro_payload if item.get("metro_consumido") is not None else (float(pcs_total) * conv if conv > 0 else 0.0)
                 else:
-                    continue
+                    pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
+                    metro_consumido = metro_payload if item.get("metro_consumido") is not None else (float(pcs_total) * conv if conv > 0 else 0.0)
 
-                comprimento_m = bobinas_m[pos]
-                pcs_total = alloc_pcs[pos] if pos < len(alloc_pcs) else 0
-                metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+                if pcs_total < 0:
+                    pcs_total = 0
+                if metro_consumido < 0:
+                    metro_consumido = 0.0
 
                 soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
                 if soma_defeitos > int(pcs_total or 0):
@@ -3852,6 +3903,7 @@ def op_salvar():
 
                 qtd_mat_bom = int(int(pcs_total or 0) - soma_defeitos)
 
+                stage = "upsert_bobina"
                 cur.execute(
                     """
                     INSERT INTO ordens_producao_bobinas
@@ -3871,7 +3923,7 @@ def op_salvar():
                     (
                         op_id,
                         idx_db,
-                        int(comprimento_m or 0),
+                        comprimento_m,
                         int(pcs_total or 0),
                         float(metro_consumido or 0.0),
                         int(qtd_cost_elas or 0),
@@ -3881,13 +3933,32 @@ def op_salvar():
                         now_iso,
                     ),
                 )
+                saved_any = True
 
-                sum_mat_bom += int(qtd_mat_bom or 0)
-                sum_cost += int(qtd_cost_elas or 0)
-                sum_refugo += int(refugo or 0)
-                sum_saco += int(qtd_saco_caixa or 0)
+            if status_op == "ATIVA" and not saved_any:
+                conn.rollback()
+                return jsonify({"error": "Nenhum fechamento valido da bobina atual foi recebido", "idx_atual": int(active_idx_db or 1)}), 409
 
-            # Atualizar resumo legacy na OP (somas)
+            stage = "sum_legacy"
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(qtd_mat_bom), 0),
+                    COALESCE(SUM(qtd_cost_elas), 0),
+                    COALESCE(SUM(refugo), 0),
+                    COALESCE(SUM(qtd_saco_caixa), 0)
+                FROM ordens_producao_bobinas
+                WHERE op_id = ?
+                """,
+                (op_id,),
+            )
+            row_sum = cur.fetchone() or (0, 0, 0, 0)
+            sum_mat_bom = int(row_sum[0] or 0)
+            sum_cost = int(row_sum[1] or 0)
+            sum_refugo = int(row_sum[2] or 0)
+            sum_saco = int(row_sum[3] or 0)
+
+            stage = "update_legacy"
             cur.execute(
                 """
                 UPDATE ordens_producao
@@ -3902,18 +3973,16 @@ def op_salvar():
             )
 
             conn.commit()
-        except Exception:
+        except Exception as e:
             if conn:
                 conn.rollback()
-            return jsonify({"error": "Falha ao salvar fechamento por bobina"}), 500
+            return jsonify({"error": "Falha ao salvar fechamento por bobina", "stage": stage, "detail": str(e)[:200]}), 500
         finally:
             if conn:
                 conn.close()
 
         return jsonify({"status": "ok", "op_id": op_id, "mode": "bobinas"})
 
-    # Formato antigo (compatibilidade): salvar direto na OP
-    # Aceita chaves novas (costuras/retrabalho) e antigas (qtd_cost_elas/qtd_saco_caixa)
     qtd_cost_elas = _int(data.get("costuras")) if data.get("costuras") is not None else _int(data.get("qtd_cost_elas"))
     refugo = _int(data.get("refugo"))
     qtd_saco_caixa = _int(data.get("retrabalho")) if data.get("retrabalho") is not None else _int(data.get("qtd_saco_caixa"))
@@ -3926,11 +3995,9 @@ def op_salvar():
         conn = _get_conn()
         cur = conn.cursor()
 
-        # Atualiza cadastro (inclui bobinas) antes do fechamento legacy
         if not _update_op_cadastro(conn):
             return jsonify({"error": "OP nao encontrada"}), 404
 
-        # migracao defensiva
         for col, ddl in [
             ("qtd_mat_bom", "INTEGER DEFAULT 0"),
             ("qtd_cost_elas", "INTEGER DEFAULT 0"),
@@ -3942,7 +4009,6 @@ def op_salvar():
             except Exception:
                 pass
 
-        # Fonte do TOTAL_PCS (legacy): usa op_pcs gravado na OP
         cur.execute("SELECT COALESCE(op_pcs, 0) FROM ordens_producao WHERE id = ?", (op_id,))
         rpcs = cur.fetchone()
         total_pcs = int(rpcs[0] or 0) if rpcs else 0
@@ -3991,5 +4057,5 @@ def op_salvar():
         if conn:
             conn.close()
 
-    return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"}) 
-    
+    return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"})
+
