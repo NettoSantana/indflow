@@ -1,7 +1,7 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-09 17:25:00 -03:00
-MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
+LAST_RECODE: 2026-03-09 00:00:00 -03:00
+MOTIVO: Travar edicao por bobina no historico, limitar salvamento a bobina atual e ajustar visibilidade dos botoes da OP no modal.
 -->
 
 
@@ -555,6 +555,18 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
     opacity:0.82;
   }
 
+  .bobina-card.bobina-card-aguardando-pulso{
+    background:#fef3c7;
+    border-color:#f59e0b;
+    animation:bobinaPulseWaiting 1.15s ease-in-out infinite;
+  }
+
+  @keyframes bobinaPulseWaiting{
+    0%{ box-shadow:0 0 0 0 rgba(245,158,11,0.00); }
+    50%{ box-shadow:0 0 0 4px rgba(245,158,11,0.22); }
+    100%{ box-shadow:0 0 0 0 rgba(245,158,11,0.00); }
+  }
+
   .bobina-card input[readonly],
   .bobina-card input:disabled{
     cursor:not-allowed;
@@ -875,6 +887,7 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
       <button type="button" id="op-modal-toggle" class="btn-secondary">Ativar OP</button>
       <button type="button" id="op-modal-swap" class="btn-secondary">Troca de Bobina</button>
       <button type="button" id="op-modal-pdf" class="btn-secondary">Gerar PDF</button>
+      <button type="button" id="op-modal-save" class="btn-primary">Salvar</button>
     </div>
   </div>
 </div>
@@ -1516,6 +1529,7 @@ function safeText(v){
   const modalClose = document.getElementById("op-modal-close");
   const modalToggle = document.getElementById("op-modal-toggle");
   const modalSwap = document.getElementById("op-modal-swap");
+  const modalSave = document.getElementById("op-modal-save");
   const modalPdf = document.getElementById("op-modal-pdf");
   const modalTitle = document.getElementById("op-modal-title");
 
@@ -1929,10 +1943,20 @@ function safeText(v){
     const bobinaState = getBobinaState(opCtx, idx);
     const opEndedState = isOpEncerrada(opCtx && opCtx.status);
     const canEditBobina = !!(opts.isEdit && !opEndedState && bobinaState.editable);
+    const opCtxId = Number(opCtx && (opCtx.op_id ?? opCtx.id ?? opCtx.opId ?? 0)) || 0;
+    const hasWaitingNextBobina =
+      swapLockActive &&
+      swapLockOpId === opCtxId &&
+      swapLockNextSeq != null &&
+      !opHasStartedSeq(opCtx, swapLockNextSeq);
 
-    if(bobinaState.atual && !opEndedState){
+    const waitingPulse = hasWaitingNextBobina && idx === Number(swapLockNextSeq);
+
+    if(waitingPulse){
+      card.classList.add("bobina-card-aguardando-pulso");
+    }else if(bobinaState.atual && !opEndedState && !hasWaitingNextBobina){
       card.classList.add("bobina-card-ativa");
-    }else if(bobinaState.passada || opEndedState){
+    }else if(bobinaState.passada || opEndedState || (hasWaitingNextBobina && bobinaState.atual)){
       card.classList.add("bobina-card-travada");
     }else if(bobinaState.futura){
       card.classList.add("bobina-card-futura");
@@ -1947,9 +1971,11 @@ function safeText(v){
     let bobinaStatusTxt = "Travada";
     if(opEndedState){
       bobinaStatusTxt = "Travada";
-    }else if(bobinaState.atual){
+    }else if(waitingPulse){
+      bobinaStatusTxt = "Aguardando pulso";
+    }else if(bobinaState.atual && !hasWaitingNextBobina){
       bobinaStatusTxt = "Atual";
-    }else if(bobinaState.passada){
+    }else if(bobinaState.passada || (hasWaitingNextBobina && bobinaState.atual)){
       bobinaStatusTxt = "Encerrada";
     }else if(bobinaState.futura){
       bobinaStatusTxt = "Futura";
@@ -2155,77 +2181,52 @@ function safeText(v){
     throw lastErr || new Error("Falha ao carregar OP.");
   }
 
+  async function postOpSwapBobina(opId){
+    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+    const urls = ["/producao/op/troca-bobina", "/op/troca-bobina"];
+    let lastErr = null;
 
-  function collectCurrentOpenBobinaManualPayload(){
-    const op = currentOp || null;
-    const idx = getEditableBobinaSeq(op);
-    if(!op || idx < 0) return null;
+    for(const u of urls){
+      try{
+        const r = await fetch(u, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-    const card = bobinasWrap ? bobinasWrap.querySelector('[data-bobina-idx="' + String(idx) + '"]') : null;
-    const manual = {
-      qtd_cost_elas: 0,
-      refugo: 0,
-      qtd_saco_caixa: 0
-    };
+        if(!r.ok){
+          lastErr = new Error("HTTP " + r.status);
+          continue;
+        }
 
-    if(card){
-      const fields = ["qtd_cost_elas", "refugo", "qtd_saco_caixa"];
-      fields.forEach((name) => {
-        try{
-          const inp = card.querySelector('[data-field="' + name + '"]');
-          if(inp){
-            manual[name] = Math.floor(num0(inp.value));
-          }
-        }catch(e){}
-      });
+        const data = await r.json().catch(() => ({}));
+
+        // Backend pode responder {status:"ok", ...} OU {ok:true, ...} OU {error:"..."}
+        if(data && (data.error || data.err)){
+          lastErr = new Error(data.error || data.err);
+          continue;
+        }
+
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
+          continue;
+        }
+
+        if(data && data.status && String(data.status).toLowerCase() !== "ok"){
+          lastErr = new Error(data.error || ("Falha: " + String(data.status)));
+          continue;
+        }
+
+        return data || {};
+      }catch(e){
+        lastErr = e;
+      }
     }
 
-    const bobinaPayload = buildBobinaSavePayload(op, idx, manual);
-    bobinaPayload.idx = Math.floor(num0(bobinaPayload.idx || (idx + 1)));
-    bobinaPayload.seq = Math.floor(num0(bobinaPayload.seq || idx));
-
-    return bobinaPayload;
+    throw lastErr || new Error("Falha ao executar troca de bobina.");
   }
 
-  async function postOpSwapBobina(opId, extraPayload){
-    const payload = Object.assign({ op_id: Number(opId || 0), machine_id: machineId || "" }, (extraPayload || {}));
-    const url = "/producao/op/troca-bobina";
-
-    try{
-      const r = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await r.json().catch(() => ({}));
-
-      if(!r.ok){
-        const msg = (data && (data.error || data.err || data.message))
-          ? (data.error || data.err || data.message)
-          : ("HTTP " + r.status);
-        throw new Error(msg);
-      }
-
-      if(data && (data.error || data.err)){
-        throw new Error(data.error || data.err);
-      }
-
-      if(data && (data.ok === false)){
-        throw new Error(data.error || "Falha.");
-      }
-
-      if(data && data.status && String(data.status).toLowerCase() !== "ok"){
-        throw new Error(data.error || ("Falha: " + String(data.status)));
-      }
-
-      return data || {};
-    }catch(e){
-      throw e || new Error("Falha ao executar troca de bobina.");
-    }
-  }
-
-async function openOpEdit(opId){
+  async function openOpEdit(opId){
     const id = Number(opId || 0);
     if(!id){
       alert("OP invalida.");
@@ -3157,41 +3158,34 @@ if(modalBackdrop){
     const criada = !ativa && !encerrada;
 
     if(modalToggle){
-      if(encerrada){
-        modalToggle.textContent = "Encerrar OP";
-        modalToggle.style.display = "none";
-        modalToggle.disabled = true;
-        modalToggle.title = "";
-      }else if(ativa){
-        modalToggle.textContent = "Encerrar OP";
-        modalToggle.style.display = "";
-        modalToggle.disabled = false;
-        modalToggle.title = "";
-      }else{
-        modalToggle.textContent = "Ativar OP";
-        modalToggle.style.display = "";
-        modalToggle.disabled = false;
-        modalToggle.title = "";
-      }
+      modalToggle.textContent = "Ativar OP";
+      modalToggle.style.display = criada ? "" : "none";
+      modalToggle.disabled = !criada;
+      modalToggle.title = criada ? "" : "";
     }
 
     if(modalSwap){
       const hasBobinas = getBobinasCount(currentOp) > 0;
       const hasNextBobina = hasNextBobinaAvailable(currentOp);
-      const waitingSwapUpdate = swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0));
+      const canShowSwap = ativa && hasBobinas && hasNextBobina;
 
-      modalSwap.style.display = (ativa && hasBobinas) ? "" : "none";
-      modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || waitingSwapUpdate;
+      modalSwap.style.display = canShowSwap ? "" : "none";
+      modalSwap.disabled = (!ativa) || (!hasBobinas) || (!hasNextBobina) || (swapLockActive && swapLockOpId === Number(currentOp && (currentOp.op_id ?? currentOp.id ?? 0)));
 
       if(!hasBobinas){
         modalSwap.title = "Sem bobina cadastrada.";
       }else if(!hasNextBobina){
         modalSwap.title = "Ultima bobina ja esta em uso.";
-      }else if(waitingSwapUpdate){
+      }else if(modalSwap.disabled && swapLockActive){
         modalSwap.title = "Aguardando primeiro machine/update apos a troca.";
       }else{
         modalSwap.title = "";
       }
+    }
+
+    if(modalSave){
+      modalSave.style.display = encerrada ? "none" : "";
+      modalSave.disabled = encerrada;
     }
 
     if(modalPdf){
@@ -3201,37 +3195,33 @@ if(modalBackdrop){
   }
 
   async function postOpAction(opId, action){
+    const qs = "";
     const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
 
     const urls = [];
     if(action === "ativar"){
-      urls.push("/producao/op/ativar", "/op/ativar");
+      urls.push("/producao/op/tivar", "/op/tivar", "/producao/op/ativar", "/op/ativar", "/producao/op/activate", "/op/activate");
     }else{
-      urls.push("/producao/op/encerrar-by-id", "/op/encerrar-by-id", "/producao/op/encerrar", "/op/encerrar");
+      urls.push("/producao/op/encerrar", "/op/encerrar", "/producao/op/fechar", "/op/fechar", "/producao/op/close", "/op/close");
     }
 
     let lastErr = null;
     for(const u of urls){
       try{
-        const r = await fetch(u, {
+        const r = await fetch(u + qs, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
-
-        const data = await r.json().catch(() => ({}));
-
         if(!r.ok){
-          const msg = (data && (data.error || data.err || data.message)) ? (data.error || data.err || data.message) : ("HTTP " + r.status);
-          lastErr = new Error(msg);
+          lastErr = new Error("HTTP " + r.status);
           continue;
         }
-
-        if(data && (data.ok === false || data.error || data.err)){
-          lastErr = new Error(data.error || data.err || "Falha.");
+        const data = await r.json().catch(() => ({}));
+        if(data && (data.ok === false)){
+          lastErr = new Error(data.error || "Falha.");
           continue;
         }
-
         return true;
       }catch(e){
         lastErr = e;
@@ -3296,31 +3286,25 @@ if(modalBackdrop){
         return;
       }
 
-      const ativa = isOpAtiva(currentOp && currentOp.status);
-      const encerrada = isOpEncerrada(currentOp && currentOp.status);
-      if(encerrada){
-        return;
-      }
-
-      const action = ativa ? "encerrar" : "ativar";
-      const actionLabel = ativa ? "encerrar" : "ativar";
+      const action = "ativar";
 
       try{
         modalToggle.disabled = true;
         await postOpAction(opId, action);
+        // Recarregar OP para refletir o novo status
         const op = await fetchOpGet(opId);
         if(op){
           openModal(op, "edit");
-        }else if(currentOp){
-          currentOp.status = ativa ? "ENCERRADA" : "ATIVA";
+        }else{
+          currentOp.status = "ATIVA";
           updateToggleButton();
         }
+        // Recarregar tabela do histórico para refletir status
         await fetchHistorico();
       }catch(err){
-        alert("Falha ao " + actionLabel + ": " + (err.message || err));
+        alert("Falha ao ativar: " + (err.message || err));
       }finally{
         modalToggle.disabled = false;
-        updateToggleButton();
       }
     });
   }
@@ -3350,23 +3334,7 @@ if(modalBackdrop){
 
       try{
         modalSwap.disabled = true;
-
-        const bobinaAtualPayload = collectCurrentOpenBobinaManualPayload();
-        const swapPayload = bobinaAtualPayload ? {
-          idx: bobinaAtualPayload.idx,
-          seq: bobinaAtualPayload.seq,
-          qtd_cost_elas: Math.floor(num0(bobinaAtualPayload.qtd_cost_elas)),
-          refugo: Math.floor(num0(bobinaAtualPayload.refugo)),
-          qtd_saco_caixa: Math.floor(num0(bobinaAtualPayload.qtd_saco_caixa)),
-          qtd_mat_bom: Math.floor(num0(bobinaAtualPayload.qtd_mat_bom)),
-          pcs_total: Math.floor(num0(bobinaAtualPayload.pcs_total)),
-          start_abs_pcs: Math.floor(num0(bobinaAtualPayload.start_abs_pcs)),
-          end_abs_pcs: Math.floor(num0(bobinaAtualPayload.end_abs_pcs)),
-          metro_consumido: round2(num0(bobinaAtualPayload.metro_consumido)),
-          bobina_atual: bobinaAtualPayload
-        } : {};
-
-        const resp = await postOpSwapBobina(opId, swapPayload);
+        const resp = await postOpSwapBobina(opId);
 
         // Travar nova troca ate chegar o primeiro machine/update e abrir a proxima bobina (seq next_seq)
         const nextSeq = (resp && (resp.next_seq ?? resp.nextSeq ?? resp.next)) ?? null;
@@ -3394,6 +3362,119 @@ if(modalBackdrop){
     });
   }
 
+if(modalSave){
+    modalSave.addEventListener("click", async function(){
+      const opId = Number((currentOp && (currentOp.op_id ?? currentOp.id ?? currentOp.opId)) || 0);
+      if(!opId){
+        alert("OP invalida.");
+        return;
+      }
+
+
+      // valida duplicidade de OS (no escopo cliente + maquina) usando cache local do historico
+      const osValue = (opv_os && opv_os.value) ? opv_os.value : "";
+      const dup = findDuplicateOsInCache(osValue, opId);
+      if(dup){
+        alert("Ja existe uma OP com esse numero (OS): " + safeText(osValue));
+        return;
+      }
+
+      const bobinasPayload = [];
+      if(bobinasWrap){
+        const editableIdx = getEditableBobinaSeq(currentOp);
+        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
+        cards.forEach((card) => {
+          const idx = Number(card.getAttribute("data-bobina-idx") || "0");
+          if(idx !== editableIdx) return;
+
+          const getField = (name) => {
+            const el = card.querySelector('[data-field="' + name + '"]');
+            if(!el) return 0;
+            return num0(el.value);
+          };
+
+          bobinasPayload.push(buildBobinaSavePayload(currentOp, idx, {
+            qtd_cost_elas: Math.floor(getField("qtd_cost_elas")),
+            refugo: Math.floor(getField("refugo")),
+            qtd_saco_caixa: Math.floor(getField("qtd_saco_caixa"))
+          }));
+        });
+      }
+
+      const payload = {
+        op_id: opId,
+        observacoes: (ope_obs && ope_obs.value) ? ope_obs.value : "",
+        bobinas: bobinasPayload,
+        
+      };
+
+      if(currentOpMode === "edit"){
+        payload.os = (opv_os && opv_os.value) ? opv_os.value : "";
+        payload.lote = (opv_lote && opv_lote.value) ? opv_lote.value : "";
+        payload.operador = (opv_operador && opv_operador.value) ? opv_operador.value : "";
+        payload.gr_fio = (opv_gr_fio && opv_gr_fio.value) ? opv_gr_fio.value : "";
+        payload.conv = (opv_conv && opv_conv.value) ? opv_conv.value : "";
+        payload.started_at = (opv_started && opv_started.value) ? opv_started.value : "";
+        payload.ended_at = (opv_ended && opv_ended.value) ? opv_ended.value : "";
+
+        // bobinas em metros (add/remove no modo edicao)
+        payload.bobinas_m = collectBobinasMFromUI();
+      }
+
+
+      // validacao basica: costuras + refugo + retrabalho nao pode ultrapassar total pcs (somente bobina atual)
+      if(bobinasWrap){
+        const editableIdx = getEditableBobinaSeq(currentOp);
+        const cards = bobinasWrap.querySelectorAll("[data-bobina-idx]");
+        for(const card of cards){
+          const idxBob = Number(card.getAttribute("data-bobina-idx") || 0);
+          if(idxBob !== editableIdx) continue;
+
+          const pcsTotalInp = card.querySelector("input[data-field='pcs_total']");
+          const pcsTotal = Number((pcsTotalInp && pcsTotalInp.value) || 0) || 0;
+
+          const cost = Number((card.querySelector("input[data-field='qtd_cost_elas']") || {}).value || 0) || 0;
+          const refugo = Number((card.querySelector("input[data-field='refugo']") || {}).value || 0) || 0;
+          const retrabalho = Number((card.querySelector("input[data-field='qtd_saco_caixa']") || {}).value || 0) || 0;
+
+          const soma = cost + refugo + retrabalho;
+
+          if(pcsTotal > 0 && soma > pcsTotal){
+            alert("Bobina " + (idxBob + 1) + ": costuras + refugo + retrabalho nao pode ser maior que Total pcs.");
+            return;
+          }
+        }
+      }
+
+      modalSave.disabled = true;
+
+      try{
+        const resp = await fetch("/producao/op/salvar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json().catch(() => null);
+
+        if(!resp.ok){
+          const msg = data && (data.error || data.message)
+            ? (data.error || data.message)
+            : ("Erro HTTP " + resp.status);
+          throw new Error(msg);
+        }
+
+        alert("OP salva com sucesso.");
+        closeModal();
+        await fetchHistorico();
+
+      }catch(err){
+        alert("Falha ao salvar OP: " + (err.message || err));
+      }finally{
+        modalSave.disabled = false;
+      }
+    });
+  }
 
   if(modalPdf){
     modalPdf.addEventListener("click", function(){
@@ -3828,4 +3909,3 @@ if(dayModalClose){
 {% endblock %}
 
 
- 
