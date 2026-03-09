@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-09 14:35:00 (America/Bahia)
-# MOTIVO: Corrigir /op/salvar no arquivo original para validar bobina aberta com base no maior valor entre pcs_total do payload e ESP atual.
+# LAST_RECODE: 2026-03-09 14:20:00 (America/Bahia)
+# MOTIVO: Corrigir op_get e op_salvar para recalcular bobina aberta ao vivo e validar pcs_total da bobina atual com fallback pelo ESP.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -2962,7 +2962,11 @@ def op_get():
                 }
             )
     elif bobinas_detail and bobinas_eventos:
-        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas
+        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas.
+        # Regra do bug atual:
+        # - bobina aberta: recalcular ao vivo com esp_atual - start_abs_pcs
+        # - bobina fechada: recalcular congelado com end_abs_pcs - start_abs_pcs
+        # - confiar no banco somente para os campos manuais
         map_ev = {}
         for ev in bobinas_eventos:
             try:
@@ -2977,12 +2981,47 @@ def op_get():
             ev = map_ev.get(idx)
             if not ev:
                 continue
+
             if not it.get("comprimento_m"):
                 it["comprimento_m"] = int(ev.get("comprimento_m") or 0)
-            it["started_at"] = _as_str(ev.get("started_at") or "")
-            it["ended_at"] = _as_str(ev.get("ended_at") or "")
-            it["start_abs_pcs"] = int(ev.get("start_abs_pcs") or 0)
-            it["end_abs_pcs"] = int(ev.get("end_abs_pcs") or 0)
+
+            started_at_ev = _as_str(ev.get("started_at") or "")
+            ended_at_ev = _as_str(ev.get("ended_at") or "")
+            start_abs_ev = int(ev.get("start_abs_pcs") or 0)
+            end_abs_ev = int(ev.get("end_abs_pcs") or 0)
+            bobina_aberta = (not ended_at_ev) or (end_abs_ev <= 0)
+
+            it["started_at"] = started_at_ev
+            it["ended_at"] = ended_at_ev
+            it["start_abs_pcs"] = int(start_abs_ev or 0)
+            it["end_abs_pcs"] = int(end_abs_ev or 0)
+
+            qtd_cost_elas = int(it.get("qtd_cost_elas") or 0)
+            refugo = int(it.get("refugo") or 0)
+            qtd_saco_caixa = int(it.get("qtd_saco_caixa") or 0)
+
+            if bobina_aberta:
+                try:
+                    pcs_total_live = max(0, int(esp_atual or 0) - int(start_abs_ev or 0))
+                except Exception:
+                    pcs_total_live = 0
+                it["pcs_total"] = int(pcs_total_live or 0)
+                try:
+                    it["metro_consumido"] = round(float(pcs_total_live) * float(op_conv or 0.0), 3)
+                except Exception:
+                    it["metro_consumido"] = 0.0
+            else:
+                pcs_total_fechado = max(0, int(end_abs_ev or 0) - int(start_abs_ev or 0))
+                it["pcs_total"] = int(pcs_total_fechado or 0)
+                try:
+                    it["metro_consumido"] = round(float(pcs_total_fechado) * float(op_conv or 0.0), 3)
+                except Exception:
+                    it["metro_consumido"] = 0.0
+
+            qtd_mat_bom = int(int(it.get("pcs_total") or 0) - (qtd_cost_elas + refugo + qtd_saco_caixa))
+            if qtd_mat_bom < 0:
+                qtd_mat_bom = 0
+            it["qtd_mat_bom"] = int(qtd_mat_bom or 0)
 
     # Garante que o modal receba TODAS as bobinas cadastradas, mesmo as que ainda nao iniciaram.
     # Regra: so a bobina ativa (evento aberto) acumula pcs/metros; as demais ficam zeradas ate a troca.
@@ -3865,12 +3904,14 @@ def op_salvar():
                 pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
                 metro_payload = _float(item.get("metro_consumido")) if item.get("metro_consumido") is not None else None
 
-                if started_at_ev and not ended_at_ev and status_op == "ATIVA" and pos == active_seq:
-                    # Bobina aberta: usa o maior valor entre o payload da tela e o calculo ao vivo.
-                    # Isso evita validar com 0 quando o snapshot do ESP vier atrasado na mesma rodada do save.
-                    pcs_total_live = max(0, int(esp_atual or 0) - int(start_abs_ev or 0))
-                    pcs_total_payload_safe = max(0, int(pcs_total_payload or 0)) if pcs_total_payload is not None else 0
-                    pcs_total = max(int(pcs_total_live or 0), int(pcs_total_payload_safe or 0))
+                bobina_aberta = bool(started_at_ev) and (((not ended_at_ev) or int(end_abs_ev or 0) <= 0))
+
+                if bobina_aberta and status_op == "ATIVA" and pos == active_seq:
+                    # Regra do bug atual:
+                    # - bobina aberta valida com o maior valor entre o payload e o calculado ao vivo
+                    pcs_total_calc = max(0, int(esp_atual or 0) - int(start_abs_ev or 0))
+                    pcs_total_payload_norm = max(0, int(pcs_total_payload or 0)) if pcs_total_payload is not None else 0
+                    pcs_total = max(int(pcs_total_payload_norm or 0), int(pcs_total_calc or 0))
                     metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
                 elif started_at_ev:
                     end_abs_calc = int(end_abs_ev or 0)
@@ -4059,4 +4100,3 @@ def op_salvar():
 
     return jsonify({"status": "ok", "op_id": op_id, "mode": "legacy"})
 
-  
