@@ -2923,149 +2923,116 @@ def op_get():
     except Exception:
         active_seq = None
 
-    # Merge correto para o modal:
-    # - eventos = verdade de producao/start/end por bobina
-    # - ordens_producao_bobinas = somente fechamento manual (costuras/refugo/retrabalho/mat bom)
-    # Assim o Salvar nao pode zerar bobinas anteriores nem congelar a bobina atual.
-    map_ev = {}
-    for ev in bobinas_eventos or []:
-        try:
-            map_ev[int(ev.get("seq") or 0) + 1] = ev
-        except Exception:
-            continue
-
-    map_det = {}
-    for it in bobinas_detail or []:
-        try:
-            map_det[int(it.get("idx") or 0)] = it
-        except Exception:
-            continue
-
-    try:
-        total_bobinas = len(bobinas_m or [])
-    except Exception:
-        total_bobinas = 0
-
-    if total_bobinas > 0:
-        new_list = []
-        for i in range(1, total_bobinas + 1):
-            ev = map_ev.get(i)
-            det = map_det.get(i)
-
-            comprimento = 0
-            try:
-                comprimento = int((bobinas_m or [])[i - 1] or 0)
-            except Exception:
-                comprimento = 0
-
-            item = {
-                "idx": int(i),
-                "comprimento_m": int(comprimento or 0),
-                "pcs_total": 0,
-                "metro_consumido": 0.0,
-                "started_at": "",
-                "ended_at": "",
-                "start_abs_pcs": 0,
-                "end_abs_pcs": 0,
-                "qtd_cost_elas": 0,
-                "refugo": 0,
-                "qtd_saco_caixa": 0,
-                "qtd_mat_bom": 0,
-            }
-
-            if ev:
-                seq = int(ev.get("seq") or 0)
-                start_abs = int(ev.get("start_abs_pcs") or 0)
-                end_abs_raw = int(ev.get("end_abs_pcs") or 0)
-                end_abs_calc = end_abs_raw
-
-                if end_abs_calc <= 0 and status == "ATIVA":
-                    if active_seq is not None and int(seq) == int(active_seq):
-                        try:
-                            end_abs_calc = int(esp_atual or 0)
-                        except Exception:
-                            end_abs_calc = 0
-                    else:
-                        end_abs_calc = int(start_abs or 0)
-
-                pcs_total_calc = max(0, int(end_abs_calc) - int(start_abs))
-                try:
-                    metro_consumido_calc = round(float(pcs_total_calc) * float(op_conv or 0.0), 3)
-                except Exception:
-                    metro_consumido_calc = 0.0
-
-                item.update(
-                    {
-                        "comprimento_m": int(ev.get("comprimento_m") or item["comprimento_m"] or 0),
-                        "pcs_total": int(pcs_total_calc or 0),
-                        "metro_consumido": float(metro_consumido_calc or 0.0),
-                        "started_at": _as_str(ev.get("started_at") or ""),
-                        "ended_at": _as_str(ev.get("ended_at") or ""),
-                        "start_abs_pcs": int(start_abs or 0),
-                        "end_abs_pcs": int(end_abs_raw or 0),
-                    }
-                )
-
-            if det:
-                item["qtd_cost_elas"] = int(det.get("qtd_cost_elas") or 0)
-                item["refugo"] = int(det.get("refugo") or 0)
-                item["qtd_saco_caixa"] = int(det.get("qtd_saco_caixa") or 0)
-                item["qtd_mat_bom"] = int(det.get("qtd_mat_bom") or 0)
-
-                if not ev:
-                    item["comprimento_m"] = int(det.get("comprimento_m") or item["comprimento_m"] or 0)
-                    item["pcs_total"] = int(det.get("pcs_total") or 0)
-                    try:
-                        item["metro_consumido"] = float(det.get("metro_consumido") or 0.0)
-                    except Exception:
-                        item["metro_consumido"] = 0.0
-                    item["started_at"] = _as_str(det.get("started_at") or "")
-                    item["ended_at"] = _as_str(det.get("ended_at") or "")
-                    item["start_abs_pcs"] = int(det.get("start_abs_pcs") or 0)
-                    item["end_abs_pcs"] = int(det.get("end_abs_pcs") or 0)
-
-            new_list.append(item)
-
-        bobinas_detail = new_list
-    elif bobinas_eventos:
-        bobinas_detail = []
+    if (not bobinas_detail) and bobinas_eventos:
         for ev in bobinas_eventos:
             seq = int(ev.get("seq") or 0)
             start_abs = int(ev.get("start_abs_pcs") or 0)
             end_abs_raw = int(ev.get("end_abs_pcs") or 0)
-            end_abs_calc = end_abs_raw
-
-            if end_abs_calc <= 0 and status == "ATIVA":
+            end_abs = end_abs_raw
+            # Somente a bobina ativa (evento aberto e de maior seq) pode usar o ESP atual como fim "ao vivo".
+            # Qualquer outro evento com end_abs_pcs vazio fica travado (pcs_total = 0) ate ser realmente fechado/iniciado corretamente.
+            if end_abs <= 0 and status == "ATIVA":
                 if active_seq is not None and int(seq) == int(active_seq):
                     try:
-                        end_abs_calc = int(esp_atual or 0)
+                        end_abs = int(esp_atual or 0)
                     except Exception:
-                        end_abs_calc = 0
+                        end_abs = 0
                 else:
-                    end_abs_calc = int(start_abs or 0)
-
-            pcs_total_calc = max(0, int(end_abs_calc) - int(start_abs))
+                    end_abs = int(start_abs or 0)
+            pcs_total = max(0, int(end_abs) - int(start_abs))
             try:
-                metro_consumido_calc = round(float(pcs_total_calc) * float(op_conv or 0.0), 3)
+                metro_consumido = round(float(pcs_total) * float(op_conv or 0.0), 3)
             except Exception:
-                metro_consumido_calc = 0.0
-
+                metro_consumido = 0.0
             bobinas_detail.append(
                 {
                     "idx": int(seq) + 1,
                     "comprimento_m": int(ev.get("comprimento_m") or 0),
-                    "pcs_total": int(pcs_total_calc or 0),
-                    "metro_consumido": float(metro_consumido_calc or 0.0),
+                    "pcs_total": int(pcs_total or 0),
+                    "metro_consumido": float(metro_consumido or 0.0),
                     "started_at": _as_str(ev.get("started_at") or ""),
                     "ended_at": _as_str(ev.get("ended_at") or ""),
                     "start_abs_pcs": int(start_abs or 0),
                     "end_abs_pcs": int(end_abs_raw or 0),
+                    # campos de fechamento manual (quando nao existem ainda)
                     "qtd_cost_elas": 0,
                     "refugo": 0,
                     "qtd_saco_caixa": 0,
                     "qtd_mat_bom": 0,
                 }
             )
+    elif bobinas_detail and bobinas_eventos:
+        # Enriquecimento: adiciona started_at/ended_at aos itens vindos da tabela ordens_producao_bobinas
+        map_ev = {}
+        for ev in bobinas_eventos:
+            try:
+                map_ev[int(ev.get("seq") or 0) + 1] = ev
+            except Exception:
+                continue
+        for it in bobinas_detail:
+            try:
+                idx = int(it.get("idx") or 0)
+            except Exception:
+                idx = 0
+            ev = map_ev.get(idx)
+            if not ev:
+                continue
+            if not it.get("comprimento_m"):
+                it["comprimento_m"] = int(ev.get("comprimento_m") or 0)
+            it["started_at"] = _as_str(ev.get("started_at") or "")
+            it["ended_at"] = _as_str(ev.get("ended_at") or "")
+            it["start_abs_pcs"] = int(ev.get("start_abs_pcs") or 0)
+            it["end_abs_pcs"] = int(ev.get("end_abs_pcs") or 0)
+
+    # Garante que o modal receba TODAS as bobinas cadastradas, mesmo as que ainda nao iniciaram.
+    # Regra: so a bobina ativa (evento aberto) acumula pcs/metros; as demais ficam zeradas ate a troca.
+    try:
+        total_bobinas = len(bobinas_m or [])
+    except Exception:
+        total_bobinas = 0
+
+    if total_bobinas > 0:
+        map_det = {}
+        for it in bobinas_detail or []:
+            try:
+                map_det[int(it.get("idx") or 0)] = it
+            except Exception:
+                continue
+
+        new_list = []
+        for i in range(1, total_bobinas + 1):
+            it = map_det.get(i)
+            if not it:
+                comprimento = 0
+                try:
+                    comprimento = int((bobinas_m or [])[i - 1] or 0)
+                except Exception:
+                    comprimento = 0
+                new_list.append(
+                    {
+                        "idx": int(i),
+                        "comprimento_m": int(comprimento or 0),
+                        "pcs_total": 0,
+                        "metro_consumido": 0.0,
+                        "started_at": "",
+                        "ended_at": "",
+                        "start_abs_pcs": 0,
+                        "end_abs_pcs": 0,
+                        "qtd_cost_elas": 0,
+                        "refugo": 0,
+                        "qtd_saco_caixa": 0,
+                        "qtd_mat_bom": 0,
+                    }
+                )
+            else:
+                if not it.get("comprimento_m"):
+                    try:
+                        it["comprimento_m"] = int((bobinas_m or [])[i - 1] or 0)
+                    except Exception:
+                        pass
+                new_list.append(it)
+
+        bobinas_detail = new_list
     return jsonify(
         {
             "op_id": int(r[0] or 0),
@@ -3790,15 +3757,36 @@ def op_salvar():
 
             # UPSERT por idx
             now_iso = _now_iso()
-            sum_mat_bom = 0
-            sum_cost = 0
-            sum_refugo = 0
-            sum_saco = 0
+            saved_any = False
 
             for item in bobinas_payload:
                 if not isinstance(item, dict):
                     continue
+
                 idx_raw = _int(item.get("idx"))
+                seq_raw = item.get("seq")
+                try:
+                    seq_norm = int(seq_raw) if seq_raw is not None and str(seq_raw).strip() != "" else None
+                except Exception:
+                    seq_norm = None
+
+                if seq_norm is None:
+                    if idx_raw >= 1:
+                        seq_norm = int(idx_raw) - 1
+                    else:
+                        seq_norm = int(idx_raw)
+
+                if seq_norm < 0 or seq_norm >= len(bobinas_m):
+                    continue
+
+                pos = int(seq_norm)
+                idx_db = int(pos) + 1
+
+                # Com OP ATIVA, so a bobina atual pode ser persistida.
+                # Se o front mandar anteriores/futuras junto, ignoramos sem quebrar o save.
+                if status_op == "ATIVA" and active_seq is not None and int(seq_norm) != int(active_seq):
+                    continue
+
                 qtd_cost_elas = _int(item.get("costuras")) if item.get("costuras") is not None else _int(item.get("qtd_cost_elas"))
                 refugo = _int(item.get("refugo"))
                 qtd_saco_caixa = _int(item.get("retrabalho")) if item.get("retrabalho") is not None else _int(item.get("qtd_saco_caixa"))
@@ -3807,22 +3795,17 @@ def op_salvar():
                     conn.rollback()
                     return jsonify({
                         "error": "Valores nao podem ser negativos",
-                        "idx": int(idx_raw),
+                        "idx": int(idx_db),
                     }), 400
 
-                # ordens_producao_bobinas usa idx 1-based; listas Python usam pos 0-based.
-                idx_db = int(idx_raw)
-                if 1 <= idx_db <= len(bobinas_m):
-                    pos = idx_db - 1
-                elif 0 <= idx_db < len(bobinas_m):
-                    pos = idx_db
-                    idx_db = pos + 1
-                else:
-                    continue
-
                 comprimento_m = bobinas_m[pos]
-                pcs_total = alloc_pcs[pos] if pos < len(alloc_pcs) else 0
-                metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
+                pcs_total_payload = _int(item.get("pcs_total")) if item.get("pcs_total") is not None else None
+                pcs_total = pcs_total_payload if pcs_total_payload is not None else (alloc_pcs[pos] if pos < len(alloc_pcs) else 0)
+                if pcs_total < 0:
+                    pcs_total = 0
+
+                metro_consumido_payload = _float(item.get("metro_consumido")) if item.get("metro_consumido") is not None else None
+                metro_consumido = metro_consumido_payload if metro_consumido_payload is not None else (float(pcs_total) * conv if conv > 0 else 0.0)
 
                 soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
                 if soma_defeitos > int(pcs_total or 0):
@@ -3867,11 +3850,32 @@ def op_salvar():
                         now_iso,
                     ),
                 )
+                saved_any = True
 
-                sum_mat_bom += int(qtd_mat_bom or 0)
-                sum_cost += int(qtd_cost_elas or 0)
-                sum_refugo += int(refugo or 0)
-                sum_saco += int(qtd_saco_caixa or 0)
+            if status_op == "ATIVA" and not saved_any:
+                conn.rollback()
+                return jsonify({
+                    "error": "Nenhum fechamento valido da bobina atual foi recebido",
+                    "idx_atual": int(active_idx_db or 1),
+                }), 409
+
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(qtd_mat_bom), 0),
+                    COALESCE(SUM(qtd_cost_elas), 0),
+                    COALESCE(SUM(refugo), 0),
+                    COALESCE(SUM(qtd_saco_caixa), 0)
+                FROM ordens_producao_bobinas
+                WHERE op_id = ?
+                """,
+                (op_id,),
+            )
+            row_sum = cur.fetchone() or (0, 0, 0, 0)
+            sum_mat_bom = int(row_sum[0] or 0)
+            sum_cost = int(row_sum[1] or 0)
+            sum_refugo = int(row_sum[2] or 0)
+            sum_saco = int(row_sum[3] or 0)
 
             # Atualizar resumo legacy na OP (somas)
             cur.execute(
