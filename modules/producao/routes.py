@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-11 12:05:00 (America/Fortaleza)
-# MOTIVO: Fazer o Historico diario usar a mesma fonte do detalhe do dia (SUM(delta) em producao_evento).
+# LAST_RECODE: 2026-03-12 07:50:00 (America/Bahia)
+# MOTIVO: Fazer o historico usar producao_evento como fonte do total diario e restaurar o anexo das OPs do dia.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -312,6 +312,29 @@ def _sum_ops_pcs(ops_list) -> int:
     except Exception:
         return 0
 
+
+def _normalize_machine_id(machine_id: str) -> str:
+    mid = (machine_id or "").strip()
+    if not mid:
+        return ""
+    if "::" in mid:
+        try:
+            return (mid.split("::", 1)[1] or "").strip()
+        except Exception:
+            return mid
+    return mid
+
+
+def _machine_id_candidates(machine_id: str) -> list[str]:
+    raw = (machine_id or "").strip()
+    norm = _normalize_machine_id(raw)
+    out = []
+    for item in (raw, norm):
+        item = (item or "").strip()
+        if item and item not in out:
+            out.append(item)
+    return out
+
 def _hoje_iso():
     return datetime.now().date().isoformat()
 
@@ -444,62 +467,50 @@ def _sum_producao_horaria_pcs(conn, machine_id: str, dia_iso: str) -> int:
     """
     Retorna a producao (pcs) do dia a partir da fonte unica de verdade: producao_evento.
 
-    Observacao:
-    - Mantemos o nome da funcao para reduzir o escopo do recode.
-    - O Historico passa a usar SUM(delta) em producao_evento na janela local do dia,
-      igual ao detalhe por hora.
-    - Se machine_id vier no formato scoped (cliente::maquina), tenta o scoped e,
-      se necessario, faz fallback para o sufixo da maquina.
+    Mantemos o nome da funcao por compatibilidade interna, mas a regra agora e:
+      - Historico diario usa SUM(delta) em producao_evento na mesma janela local do detalhe do dia.
+      - machine_id pode estar salvo como simples (maquina005) ou scoped (cliente::maquina005).
     """
     try:
-        mid = str(machine_id or "").strip()
-        dia = str(dia_iso or "").strip()
-        if not mid or not dia:
+        mid_raw = (machine_id or "").strip()
+        mid_norm = _normalize_machine_id(mid_raw)
+        if not mid_raw and not mid_norm:
             return 0
 
         cur = conn.cursor()
-        row = cur.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='producao_evento' LIMIT 1"
-        ).fetchone()
-        if not row:
+        cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='producao_evento' LIMIT 1")
+        if cur.fetchone() is None:
             return 0
 
-        d = datetime.fromisoformat(dia).date()
         tz = _get_tz()
-        start_local = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz)
-        end_local = start_local + timedelta(days=1)
-        start_ms = int(start_local.timestamp() * 1000)
-        end_ms = int(end_local.timestamp() * 1000)
+        dt0 = datetime.fromisoformat(str(dia_iso)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+        dt1 = dt0 + timedelta(days=1)
+        ts0_ms = int(dt0.timestamp() * 1000)
+        ts1_ms = int(dt1.timestamp() * 1000)
 
-        mids = [mid]
-        if "::" in mid:
-            eff_mid = (mid.split("::", 1)[1] or "").strip()
-            if eff_mid and eff_mid not in mids:
-                mids.append(eff_mid)
-
-        sql = """
+        cur.execute(
+            """
             SELECT COALESCE(SUM(COALESCE(delta, 0)), 0)
             FROM producao_evento
-            WHERE machine_id = ?
+            WHERE (
+                    machine_id = ?
+                 OR machine_id = ?
+                 OR (instr(machine_id, '::') > 0 AND substr(machine_id, instr(machine_id, '::') + 2) = ?)
+            )
               AND ts_ms >= ?
               AND ts_ms < ?
-        """
-
-        for mid_try in mids:
-            row = cur.execute(sql, (mid_try, start_ms, end_ms)).fetchone()
-            total = int(row[0] or 0) if row else 0
-            if total > 0:
-                return total
-
-        return 0
+            """,
+            (mid_raw, mid_norm, mid_norm, ts0_ms, ts1_ms),
+        )
+        row = cur.fetchone()
+        return int(row[0] or 0) if row else 0
     except Exception:
         return 0
 
 def _sync_producao_diaria_from_horaria_range(machine_id: str, days_desc: list[str]):
     """
-    Para cada dia em days_desc, faz UPSERT em producao_diaria usando a fonte unica
-    do detalhe do dia: SUM(delta) em producao_evento. Mantem a meta existente quando
-    ja cadastrada (>0).
+    Para cada dia em days_desc, faz UPSERT em producao_diaria usando a soma de producao_horaria.
+    Mantem a meta existente quando ja cadastrada (>0).
     """
     mid = (machine_id or "").strip()
     if not mid or not days_desc:
@@ -1851,6 +1862,10 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     Busca OPs que cruzam o intervalo [day_min, day_max].
     start_day <= day_max AND (end_day >= day_min OR end_day IS NULL).
 
+    Observacao importante:
+    - machine_id pode estar salvo na OP como simples (maquina005) ou scoped (cliente::maquina005).
+    - para nao perder a linha da OP no historico, aceitamos as duas formas no filtro.
+
     Retorna tambem:
       - bobinas: lista de comprimentos (metros) cadastrada na OP
       - bobinas_itens: lista por bobina com pcs_total/metro_consumido + campos de fechamento
@@ -1859,17 +1874,23 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     cur = conn.cursor()
 
     if machine_id:
+        mid_raw = (machine_id or "").strip()
+        mid_norm = _normalize_machine_id(mid_raw)
         cur.execute(
             """
             SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs,
                    qtd_mat_bom, qtd_cost_elas, refugo, qtd_saco_caixa
             FROM ordens_producao
-            WHERE machine_id = ?
+            WHERE (
+                    machine_id = ?
+                 OR machine_id = ?
+                 OR (instr(machine_id, '::') > 0 AND substr(machine_id, instr(machine_id, '::') + 2) = ?)
+            )
               AND substr(started_at, 1, 10) <= ?
               AND (ended_at IS NULL OR substr(ended_at, 1, 10) >= ?)
             ORDER BY started_at DESC
             """,
-            (machine_id, day_max, day_min),
+            (mid_raw, mid_norm, mid_norm, day_max, day_min),
         )
     else:
         cur.execute(
@@ -2141,8 +2162,8 @@ def api_historico():
             pass
 
 
-        # Sincronizar historico diario com a mesma fonte do detalhe do dia
-        # (SUM(delta) em producao_evento).
+        # Sincronizar historico diario com a contagem "ao vivo" (producao_horaria).
+        # Assim, a tabela do Historico nao fica zerada enquanto a maquina esta produzindo.
         try:
             _sync_producao_diaria_from_horaria_range(machine_id, days_desc)
         except Exception:
@@ -2164,7 +2185,7 @@ def api_historico():
             ops = _fetch_ops_for_range(machine_id=machine_id, day_min=day_min, day_max=day_max)
 
             for op in ops:
-                mid = str(op.get("machine_id") or "").strip()
+                mid = _normalize_machine_id(str(op.get("machine_id") or "").strip())
                 sd = _safe_date_only(op.get("started_at"))
                 if not mid or not sd:
                     continue
@@ -2180,7 +2201,7 @@ def api_historico():
     out = []
     for r in rows:
         produzido = int(r.get("produzido", 0) or 0)
-        mid = str(r.get("machine_id", "") or "").strip()
+        mid = _normalize_machine_id(str(r.get("machine_id", "") or "").strip())
         dia = str(r.get("data", "") or "").strip()
         ops_do_dia = ops_map.get((mid, dia), []) if (mid and dia) else []
 
