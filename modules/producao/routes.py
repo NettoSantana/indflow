@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-09 14:55:00 (America/Bahia)
-# MOTIVO: Remover dependencia do botao Salvar no fechamento da bobina, transferindo validacao e gravacao para a troca de bobina.
+# LAST_RECODE: 2026-03-12 10:20:00 (America/Bahia)
+# MOTIVO: Salvar a ultima bobina no encerramento da OP com pcs_total, end_abs_pcs e ended_at.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -312,6 +312,29 @@ def _sum_ops_pcs(ops_list) -> int:
     except Exception:
         return 0
 
+
+def _normalize_machine_id(machine_id: str) -> str:
+    mid = (machine_id or "").strip()
+    if not mid:
+        return ""
+    if "::" in mid:
+        try:
+            return (mid.split("::", 1)[1] or "").strip()
+        except Exception:
+            return mid
+    return mid
+
+
+def _machine_id_candidates(machine_id: str) -> list[str]:
+    raw = (machine_id or "").strip()
+    norm = _normalize_machine_id(raw)
+    out = []
+    for item in (raw, norm):
+        item = (item or "").strip()
+        if item and item not in out:
+            out.append(item)
+    return out
+
 def _hoje_iso():
     return datetime.now().date().isoformat()
 
@@ -442,19 +465,42 @@ def _fetch_producao_diaria_range(machine_id: str, days_desc: list[str]):
 
 def _sum_producao_horaria_pcs(conn, machine_id: str, dia_iso: str) -> int:
     """
-    Soma a producao (pcs) registrada na tabela producao_horaria para um dia.
-    Isso permite que o Historico reflita a contagem "ao vivo" (por hora),
-    sem depender do fechamento do dia.
+    Retorna a producao (pcs) do dia a partir da fonte unica de verdade: producao_evento.
+
+    Mantemos o nome da funcao por compatibilidade interna, mas a regra agora e:
+      - Historico diario usa SUM(delta) em producao_evento na mesma janela local do detalhe do dia.
+      - machine_id pode estar salvo como simples (maquina005) ou scoped (cliente::maquina005).
     """
     try:
+        mid_raw = (machine_id or "").strip()
+        mid_norm = _normalize_machine_id(mid_raw)
+        if not mid_raw and not mid_norm:
+            return 0
+
         cur = conn.cursor()
+        cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='producao_evento' LIMIT 1")
+        if cur.fetchone() is None:
+            return 0
+
+        tz = _get_tz()
+        dt0 = datetime.fromisoformat(str(dia_iso)).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=tz)
+        dt1 = dt0 + timedelta(days=1)
+        ts0_ms = int(dt0.timestamp() * 1000)
+        ts1_ms = int(dt1.timestamp() * 1000)
+
         cur.execute(
             """
-            SELECT COALESCE(SUM(COALESCE(produzido, 0)), 0)
-            FROM producao_horaria
-            WHERE machine_id = ? AND data_ref = ?
+            SELECT COALESCE(SUM(COALESCE(delta, 0)), 0)
+            FROM producao_evento
+            WHERE (
+                    machine_id = ?
+                 OR machine_id = ?
+                 OR (instr(machine_id, '::') > 0 AND substr(machine_id, instr(machine_id, '::') + 2) = ?)
+            )
+              AND ts_ms >= ?
+              AND ts_ms < ?
             """,
-            (machine_id, dia_iso),
+            (mid_raw, mid_norm, mid_norm, ts0_ms, ts1_ms),
         )
         row = cur.fetchone()
         return int(row[0] or 0) if row else 0
@@ -1696,6 +1742,84 @@ def _refresh_op_legacy_fechamento(conn: sqlite3.Connection, op_id: int, observac
         )
 
 
+
+
+def _apply_manual_fechamento_on_op_close(conn: sqlite3.Connection, op_id: int, machine_id: str, conv: float, data: dict, ended_at: str):
+    """Fecha a ultima bobina aberta da OP usando os lancamentos manuais enviados pelo frontend."""
+    open_info = _get_open_bobina_event_seq_and_start_abs(conn, op_id)
+    if not open_info:
+        return None
+
+    open_seq, open_start_abs, open_cm = open_info
+    active_idx_db = int(open_seq) + 1
+
+    manual = _extract_current_bobina_payload(data or {}, int(open_seq), int(active_idx_db))
+    qtd_cost_elas = int(manual.get("qtd_cost_elas") or 0)
+    refugo = int(manual.get("refugo") or 0)
+    qtd_saco_caixa = int(manual.get("qtd_saco_caixa") or 0)
+
+    if qtd_cost_elas < 0 or refugo < 0 or qtd_saco_caixa < 0:
+        raise ValueError("Valores nao podem ser negativos")
+
+    esp_atual = _resolve_esp_atual_for_op_close(conn, machine_id, op_id, int(open_start_abs or 0), data or {})
+    try:
+        end_abs = int(esp_atual or 0)
+    except Exception:
+        end_abs = int(open_start_abs or 0)
+
+    if end_abs < int(open_start_abs or 0):
+        end_abs = int(open_start_abs or 0)
+
+    pcs_total = max(0, int(end_abs or 0) - int(open_start_abs or 0))
+    soma_defeitos = int(qtd_cost_elas or 0) + int(refugo or 0) + int(qtd_saco_caixa or 0)
+    if soma_defeitos > int(pcs_total or 0):
+        raise RuntimeError(json.dumps({
+            "error": "Fechamento invalido: COSTURAS + REFUGO + RETRABALHO maior que TOTAL PCS da bobina",
+            "idx": int(active_idx_db),
+            "pcs_total": int(pcs_total or 0),
+            "qtd_cost_elas": int(qtd_cost_elas or 0),
+            "refugo": int(refugo or 0),
+            "qtd_saco_caixa": int(qtd_saco_caixa or 0),
+        }))
+
+    fechamento = _upsert_bobina_fechamento(
+        conn=conn,
+        op_id=int(op_id),
+        idx_db=int(active_idx_db),
+        comprimento_m=int(open_cm or 0),
+        pcs_total=int(pcs_total or 0),
+        conv=float(conv or 0.0),
+        qtd_cost_elas=int(qtd_cost_elas or 0),
+        refugo=int(refugo or 0),
+        qtd_saco_caixa=int(qtd_saco_caixa or 0),
+        updated_at=_as_str(ended_at),
+    )
+
+    observacoes = data.get("observacoes") if isinstance(data, dict) and "observacoes" in data else None
+    _refresh_op_legacy_fechamento(conn, int(op_id), observacoes)
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE ordens_producao_bobina_eventos
+        SET ended_at = ?,
+            end_abs_pcs = ?,
+            updated_at = ?
+        WHERE op_id = ? AND (ended_at IS NULL OR ended_at = '')
+        """,
+        (_as_str(ended_at), int(end_abs or 0), _as_str(ended_at), int(op_id)),
+    )
+
+    out = dict(fechamento or {})
+    out["idx"] = int(active_idx_db)
+    out["seq"] = int(open_seq)
+    out["start_abs_pcs"] = int(open_start_abs or 0)
+    out["end_abs_pcs"] = int(end_abs or 0)
+    out["ended_at"] = _as_str(ended_at)
+    out["comprimento_m"] = int(open_cm or 0)
+    return out
+
+
 def apply_bobina_swap_pending_on_update(machine_id: str, esp_abs: int, ts_iso: str) -> dict:
     """Helper para ser chamado no machine/update.
 
@@ -1816,6 +1940,10 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     Busca OPs que cruzam o intervalo [day_min, day_max].
     start_day <= day_max AND (end_day >= day_min OR end_day IS NULL).
 
+    Observacao importante:
+    - machine_id pode estar salvo na OP como simples (maquina005) ou scoped (cliente::maquina005).
+    - para nao perder a linha da OP no historico, aceitamos as duas formas no filtro.
+
     Retorna tambem:
       - bobinas: lista de comprimentos (metros) cadastrada na OP
       - bobinas_itens: lista por bobina com pcs_total/metro_consumido + campos de fechamento
@@ -1824,17 +1952,23 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
     cur = conn.cursor()
 
     if machine_id:
+        mid_raw = (machine_id or "").strip()
+        mid_norm = _normalize_machine_id(mid_raw)
         cur.execute(
             """
             SELECT id, machine_id, os, lote, operador, bobina, gr_fio, observacoes, started_at, ended_at, status, op_metros, op_pcs, op_conv_m_por_pcs,
                    qtd_mat_bom, qtd_cost_elas, refugo, qtd_saco_caixa
             FROM ordens_producao
-            WHERE machine_id = ?
+            WHERE (
+                    machine_id = ?
+                 OR machine_id = ?
+                 OR (instr(machine_id, '::') > 0 AND substr(machine_id, instr(machine_id, '::') + 2) = ?)
+            )
               AND substr(started_at, 1, 10) <= ?
               AND (ended_at IS NULL OR substr(ended_at, 1, 10) >= ?)
             ORDER BY started_at DESC
             """,
-            (machine_id, day_max, day_min),
+            (mid_raw, mid_norm, mid_norm, day_max, day_min),
         )
     else:
         cur.execute(
@@ -2129,7 +2263,7 @@ def api_historico():
             ops = _fetch_ops_for_range(machine_id=machine_id, day_min=day_min, day_max=day_max)
 
             for op in ops:
-                mid = str(op.get("machine_id") or "").strip()
+                mid = _normalize_machine_id(str(op.get("machine_id") or "").strip())
                 sd = _safe_date_only(op.get("started_at"))
                 if not mid or not sd:
                     continue
@@ -2145,7 +2279,7 @@ def api_historico():
     out = []
     for r in rows:
         produzido = int(r.get("produzido", 0) or 0)
-        mid = str(r.get("machine_id", "") or "").strip()
+        mid = _normalize_machine_id(str(r.get("machine_id", "") or "").strip())
         dia = str(r.get("data", "") or "").strip()
         ops_do_dia = ops_map.get((mid, dia), []) if (mid and dia) else []
 
@@ -3781,7 +3915,10 @@ def op_encerrar_by_id():
     if op_id <= 0:
         return jsonify({"error": "op_id invalido"}), 400
 
-    with _get_conn() as conn:
+    conn = None
+    try:
+        conn = _get_conn()
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
             "SELECT id, machine_id, status, baseline_pcs, bobina, op_conv_m_por_pcs FROM ordens_producao WHERE id = ?",
@@ -3792,12 +3929,12 @@ def op_encerrar_by_id():
         if not row:
             return jsonify({"error": "OP nao encontrada"}), 404
 
-        machine_id = _sanitize_mid(_as_str(row[1]))
-        status = _as_str(row[2])
-        baseline_pcs = int(row[3] or 0)
-        bobina_csv = _as_str(row[4])
+        machine_id = _sanitize_mid(_as_str(row["machine_id"] or ""))
+        status = _as_str(row["status"] or "")
+        baseline_pcs = int(row["baseline_pcs"] or 0)
+        bobina_csv = _as_str(row["bobina"] or "")
         try:
-            conv = float(row[5] or 0.0)
+            conv = float(row["op_conv_m_por_pcs"] or 0.0)
         except Exception:
             conv = 0.0
         if conv <= 0:
@@ -3807,22 +3944,32 @@ def op_encerrar_by_id():
             return jsonify({"error": "Somente OP ATIVA pode ser encerrada", "status": status}), 409
 
         esp_atual = _resolve_esp_atual_for_op_close(conn, machine_id, op_id, baseline_pcs, data)
-        op_pcs = max(0, int(esp_atual or 0) - int(baseline_pcs))
+        op_pcs = max(0, int(esp_atual or 0) - int(baseline_pcs or 0))
 
-        bobinas_m = _parse_bobinas_csv(bobina_csv)
-        # Metros consumidos = pcs * conv (nao soma de comprimentos cadastrados)
         try:
             op_metros = round(float(op_pcs) * float(conv or 0.0), 3)
         except Exception:
             op_metros = 0.0
 
         ended_at = _now_iso()
-
-        # Fecha o ultimo evento de bobina (congela PCS/metro/tempo)
-        try:
-            _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual or 0))
-        except Exception:
-            pass
+        fechamento_final = None
+        bobinas_m = _parse_bobinas_csv(bobina_csv)
+        if bobinas_m:
+            try:
+                fechamento_final = _apply_manual_fechamento_on_op_close(conn, op_id, machine_id, conv, data, ended_at)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            except RuntimeError as e:
+                try:
+                    payload = json.loads(str(e))
+                    return jsonify(payload), 409
+                except Exception:
+                    return jsonify({"error": str(e)}), 409
+        else:
+            try:
+                _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual or 0))
+            except Exception:
+                pass
 
         cur.execute(
             """
@@ -3835,15 +3982,35 @@ def op_encerrar_by_id():
             """,
             (ended_at, "ENCERRADA", float(op_metros or 0.0), int(op_pcs or 0), op_id),
         )
+        try:
+            cur.execute("DELETE FROM ordens_producao_bobina_pendencia WHERE op_id = ?", (int(op_id),))
+        except Exception:
+            pass
         conn.commit()
 
-    # Limpa cache, se for a op ativa
+    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
+        return jsonify({"error": "Falha ao encerrar OP no banco"}), 500
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+
     with _op_lock:
         cur_active = op_active.get(machine_id)
         if cur_active and int(cur_active.get("op_id") or 0) == op_id:
             op_active.pop(machine_id, None)
 
-    return jsonify({"ok": True, "op_id": op_id, "machine_id": machine_id, "ended_at": ended_at, "op_pcs": op_pcs, "op_metros": op_metros})
+    resp = {"ok": True, "op_id": op_id, "machine_id": machine_id, "ended_at": ended_at, "op_pcs": op_pcs, "op_metros": op_metros}
+    if fechamento_final:
+        resp["bobina_fechada"] = fechamento_final
+    return jsonify(resp)
 
 
 @producao_bp.route("/op/encerrar", methods=["POST"])
@@ -3863,28 +4030,7 @@ def op_encerrar():
 
     ended_at = _now_iso()
     op_id = int(op.get("op_id") or 0)
-
-    # Calculo da OP:
-    # - metros = soma das bobinas informadas (metros)
-    # - pcs = diferenca do contador absoluto do ESP (esp_atual - baseline_pcs)
-    bobinas = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
-    # Metros consumidos = pcs * conv (nao soma de comprimentos cadastrados)
-    op_metros = 0.0
-
     baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
-
-    with _get_conn() as conn:
-        esp_atual = _resolve_esp_atual_for_op_close(conn, machine_id, op_id, baseline_pcs, data)
-
-    op_pcs = max(0, int(esp_atual or 0) - int(baseline_pcs))
-    # Fecha o evento da ultima bobina no encerramento (fim = encerramento da OP)
-    # Isso garante que pcs_total/metro_consumido/tempo fiquem consistentes no historico.
-    try:
-        if op_id > 0:
-            _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual))
-    except Exception:
-        # Nao bloquear encerramento por falha no evento
-        pass
 
     try:
         conv = float(op.get("op_conv_m_por_pcs") or 0)
@@ -3893,18 +4039,70 @@ def op_encerrar():
     if conv <= 0:
         conv = _get_conv_m_por_pcs(machine_id)
 
+    conn = None
+    try:
+        conn = _get_conn()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
 
-    try:
-        op_metros = round(float(op_pcs) * float(conv or 0.0), 3)
+        esp_atual = _resolve_esp_atual_for_op_close(conn, machine_id, op_id, baseline_pcs, data)
+        op_pcs = max(0, int(esp_atual or 0) - int(baseline_pcs or 0))
+
+        try:
+            op_metros = round(float(op_pcs) * float(conv or 0.0), 3)
+        except Exception:
+            op_metros = 0.0
+
+        fechamento_final = None
+        bobinas = op.get("bobinas") or _parse_bobinas_from_str(op.get("bobina") or "") or []
+        if bobinas:
+            try:
+                fechamento_final = _apply_manual_fechamento_on_op_close(conn, op_id, machine_id, conv, data, ended_at)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            except RuntimeError as e:
+                try:
+                    payload = json.loads(str(e))
+                    return jsonify(payload), 409
+                except Exception:
+                    return jsonify({"error": str(e)}), 409
+        else:
+            try:
+                _close_last_bobina_event(op_id=op_id, ended_at=ended_at, end_abs_pcs=int(esp_atual or 0))
+            except Exception:
+                pass
+
+        cur.execute(
+            """
+            UPDATE ordens_producao
+            SET ended_at = ?,
+                status = ?,
+                op_metros = ?,
+                op_pcs = ?
+            WHERE id = ?
+            """,
+            (ended_at, "ENCERRADA", float(op_metros or 0.0), int(op_pcs or 0), int(op_id)),
+        )
+        try:
+            cur.execute("DELETE FROM ordens_producao_bobina_pendencia WHERE op_id = ?", (int(op_id),))
+        except Exception:
+            pass
+        conn.commit()
+
     except Exception:
-        op_metros = 0.0
-    try:
-        if op_id > 0:
-            _close_op_row_v2(op_id, ended_at, op_metros, op_pcs, conv)
-    except Exception:
+        try:
+            if conn:
+                conn.rollback()
+        except Exception:
+            pass
         return jsonify({"error": "Falha ao encerrar OP no banco"}), 500
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
 
-    # Atualiza historico diario: produzido += op_pcs no dia do encerramento
     try:
         dia_enc = _safe_date_only(ended_at) or _hoje_iso()
         _incrementar_producao_diaria_por_op(machine_id, dia_enc, op_pcs)
@@ -3914,17 +4112,18 @@ def op_encerrar():
     with _op_lock:
         op_active.pop(machine_id, None)
 
-    return jsonify(
-        {
-            "status": "ok",
-            "active": False,
-            "machine_id": machine_id,
-            "ended_at": ended_at,
-            "op_metros": op_metros,
-            "op_pcs": op_pcs,
-            "op_conv_m_por_pcs": conv,
-        }
-    )
+    resp = {
+        "status": "ok",
+        "active": False,
+        "machine_id": machine_id,
+        "ended_at": ended_at,
+        "op_metros": op_metros,
+        "op_pcs": op_pcs,
+        "op_conv_m_por_pcs": conv,
+    }
+    if fechamento_final:
+        resp["bobina_fechada"] = fechamento_final
+    return jsonify(resp)
 
 
 
@@ -3948,4 +4147,4 @@ def op_salvar():
         "error": "Endpoint desativado. O fechamento da bobina agora acontece na troca de bobina.",
         "use": "/producao/op/troca-bobina",
     }), 410
- 
+    

@@ -1,7 +1,7 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-09 17:25:00 -03:00
-MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
+LAST_RECODE: 2026-03-12 11:20:00 -03:00
+MOTIVO: Destacar a proxima bobina com amarelo piscando ate o primeiro pulso real; depois manter verde somente quando entrar em producao.
 -->
 
 
@@ -541,18 +541,39 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
 
   .bobina-card.bobina-card-ativa{
     background:#dcfce7;
-    border-color:#86efac;
+    border-color:#4C9F70;
   }
 
   .bobina-card.bobina-card-travada{
-    background:#f8fafc;
-    border-color:#cbd5e1;
+    background:#e5e7eb;
+    border-color:#BFC5CC;
   }
 
   .bobina-card.bobina-card-futura{
-    background:#f1f5f9;
-    border-color:#cbd5e1;
-    opacity:0.82;
+    background:#dbeafe;
+    border-color:#6A9FD4;
+    opacity:0.92;
+  }
+
+  .bobina-card.bobina-card-pendente{
+    background:#fef3c7;
+    border-color:#f59e0b;
+    animation:bobina-pendente-pulse 1.15s ease-in-out infinite;
+  }
+
+  @keyframes bobina-pendente-pulse{
+    0%{
+      box-shadow:0 0 0 0 rgba(245,158,11,0.15);
+      filter:brightness(1);
+    }
+    50%{
+      box-shadow:0 0 0 4px rgba(245,158,11,0.28);
+      filter:brightness(1.06);
+    }
+    100%{
+      box-shadow:0 0 0 0 rgba(245,158,11,0.15);
+      filter:brightness(1);
+    }
   }
 
   .bobina-card input[readonly],
@@ -561,8 +582,13 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
   }
 
   .bobina-card-futura .op-edit input{
-    background:#e5e7eb;
-    border-color:#cbd5e1;
+    background:#dbeafe;
+    border-color:#6A9FD4;
+  }
+
+  .bobina-card-pendente .op-edit input{
+    background:#fef3c7;
+    border-color:#f59e0b;
   }
 
   .bobina-title{
@@ -1631,24 +1657,112 @@ function safeText(v){
     return s.includes("ENCERR") || s.includes("FECH") || s.includes("FINAL");
   }
 
+  function hasBobinaPrimeiroPulso(op, idx){
+    if(!op || idx < 0) return false;
+
+    const item = (pickOpBobinasItens(op)[idx] || {});
+    const ev = pickOpBobinaEvento(op, idx) || {};
+
+    const startedAt = safeText(
+      item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at ??
+      ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at ?? ""
+    ).trim();
+
+    const startAbs = num0(
+      item.start_abs_pcs ?? item.start_abs ?? item.baseline_pcs ?? item.esp_inicio ??
+      ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? ev.esp_inicio ?? 0
+    );
+
+    const pcsTotal = num0(item.pcs_total ?? item.total_pcs ?? ev.pcs_total ?? ev.total_pcs ?? 0);
+    const metroConsumido = num0(item.metro_consumido ?? item.metro_linear_consumido ?? ev.metro_consumido ?? ev.metro_linear_consumido ?? 0);
+
+    return !!startedAt || startAbs > 0 || pcsTotal > 0 || metroConsumido > 0;
+  }
+
+  function isBobinaEncerradaByData(op, idx){
+    if(!op || idx < 0) return false;
+
+    const item = (pickOpBobinasItens(op)[idx] || {});
+    const ev = pickOpBobinaEvento(op, idx) || {};
+
+    const endedAt = safeText(
+      item.ended_at ?? item.fim ?? item.hs_final ?? item.hs_termino ?? item.end_at ??
+      ev.ended_at ?? ev.fim ?? ev.hs_final ?? ev.hs_termino ?? ev.end_at ?? ""
+    ).trim();
+
+    const endAbs = num0(
+      item.end_abs_pcs ?? item.end_abs ?? item.esp_final ?? item.esp_last ??
+      ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? ev.esp_final ?? 0
+    );
+
+    return !!endedAt || endAbs > 0;
+  }
+
+  function getActiveBobinaSeq(op){
+    const total = getBobinasCount(op);
+    if(total <= 0) return -1;
+
+    for(let i = total - 1; i >= 0; i--){
+      if(isBobinaEncerradaByData(op, i)) continue;
+      if(hasBobinaPrimeiroPulso(op, i)) return i;
+    }
+
+    return -1;
+  }
+
+  function getPendingBobinaSeq(op){
+    const total = getBobinasCount(op);
+    if(total <= 0) return -1;
+
+    const opId = Number(op && (op.op_id ?? op.id ?? 0)) || 0;
+    if(swapLockActive && swapLockOpId && opId && swapLockOpId === opId && swapLockNextSeq != null){
+      const seq = Number(swapLockNextSeq);
+      if(Number.isFinite(seq) && seq >= 0 && seq < total && !hasBobinaPrimeiroPulso(op, seq) && !isBobinaEncerradaByData(op, seq)){
+        return seq;
+      }
+    }
+
+    const activeSeq = getActiveBobinaSeq(op);
+    if(activeSeq >= 0) return -1;
+
+    for(let i = 0; i < total; i++){
+      if(isBobinaEncerradaByData(op, i)) continue;
+      if(!hasBobinaPrimeiroPulso(op, i)) return i;
+    }
+
+    return -1;
+  }
+
   function getEditableBobinaSeq(op){
     const total = getBobinasCount(op);
     if(total <= 0) return -1;
-    const aberta = getOpenBobinaSeq(op);
-    if(aberta >= 0) return aberta;
+
+    const activeSeq = getActiveBobinaSeq(op);
+    if(activeSeq >= 0) return activeSeq;
+
+    const pendingSeq = getPendingBobinaSeq(op);
+    if(pendingSeq >= 0) return pendingSeq;
+
     return 0;
   }
 
   function getBobinaState(op, idx){
-    const editableSeq = getEditableBobinaSeq(op);
-    if(editableSeq < 0){
-      return { editable: false, passada: false, futura: false, atual: false };
+    const total = getBobinasCount(op);
+    if(total <= 0){
+      return { editable: false, passada: false, futura: false, atual: false, pendente: false };
     }
+
+    const activeSeq = getActiveBobinaSeq(op);
+    const pendingSeq = getPendingBobinaSeq(op);
+    const editableSeq = getEditableBobinaSeq(op);
+    const encerrada = isBobinaEncerradaByData(op, idx);
+
     return {
       editable: idx === editableSeq,
-      passada: idx < editableSeq,
-      futura: idx > editableSeq,
-      atual: idx === editableSeq
+      passada: encerrada,
+      futura: !encerrada && idx !== activeSeq && idx !== pendingSeq,
+      atual: idx === activeSeq,
+      pendente: idx === pendingSeq
     };
   }
 
@@ -1930,10 +2044,12 @@ function safeText(v){
     const opEndedState = isOpEncerrada(opCtx && opCtx.status);
     const canEditBobina = !!(opts.isEdit && !opEndedState && bobinaState.editable);
 
-    if(bobinaState.atual && !opEndedState){
-      card.classList.add("bobina-card-ativa");
-    }else if(bobinaState.passada || opEndedState){
+    if(bobinaState.passada || opEndedState){
       card.classList.add("bobina-card-travada");
+    }else if(bobinaState.pendente){
+      card.classList.add("bobina-card-pendente");
+    }else if(bobinaState.atual){
+      card.classList.add("bobina-card-ativa");
     }else if(bobinaState.futura){
       card.classList.add("bobina-card-futura");
     }
@@ -1947,10 +2063,12 @@ function safeText(v){
     let bobinaStatusTxt = "Travada";
     if(opEndedState){
       bobinaStatusTxt = "Travada";
-    }else if(bobinaState.atual){
-      bobinaStatusTxt = "Atual";
     }else if(bobinaState.passada){
       bobinaStatusTxt = "Encerrada";
+    }else if(bobinaState.pendente){
+      bobinaStatusTxt = "Aguardando 1 pulso";
+    }else if(bobinaState.atual){
+      bobinaStatusTxt = "Ativa";
     }else if(bobinaState.futura){
       bobinaStatusTxt = "Futura";
     }
@@ -3200,8 +3318,11 @@ if(modalBackdrop){
     }
   }
 
-  async function postOpAction(opId, action){
-    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+  async function postOpAction(opId, action, extraPayload){
+    const payload = Object.assign(
+      { op_id: Number(opId || 0), machine_id: machineId || "" },
+      (extraPayload || {})
+    );
 
     const urls = [];
     if(action === "ativar"){
@@ -3307,7 +3428,26 @@ if(modalBackdrop){
 
       try{
         modalToggle.disabled = true;
-        await postOpAction(opId, action);
+
+        let extraPayload = {};
+        if(ativa){
+          const bobinaAtualPayload = collectCurrentOpenBobinaManualPayload();
+          extraPayload = bobinaAtualPayload ? {
+            idx: bobinaAtualPayload.idx,
+            seq: bobinaAtualPayload.seq,
+            qtd_cost_elas: Math.floor(num0(bobinaAtualPayload.qtd_cost_elas)),
+            refugo: Math.floor(num0(bobinaAtualPayload.refugo)),
+            qtd_saco_caixa: Math.floor(num0(bobinaAtualPayload.qtd_saco_caixa)),
+            qtd_mat_bom: Math.floor(num0(bobinaAtualPayload.qtd_mat_bom)),
+            pcs_total: Math.floor(num0(bobinaAtualPayload.pcs_total)),
+            start_abs_pcs: Math.floor(num0(bobinaAtualPayload.start_abs_pcs)),
+            end_abs_pcs: Math.floor(num0(bobinaAtualPayload.end_abs_pcs)),
+            metro_consumido: round2(num0(bobinaAtualPayload.metro_consumido)),
+            bobina_atual: bobinaAtualPayload
+          } : {};
+        }
+
+        await postOpAction(opId, action, extraPayload);
         const op = await fetchOpGet(opId);
         if(op){
           openModal(op, "edit");
