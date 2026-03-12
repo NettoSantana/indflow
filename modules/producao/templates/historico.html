@@ -1,6 +1,6 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-12 11:20:00 -03:00
+LAST_RECODE: 2026-03-12 14:20:00 -03:00
 MOTIVO: Destacar a proxima bobina com amarelo piscando ate o primeiro pulso real; depois manter verde somente quando entrar em producao.
 -->
 
@@ -1414,6 +1414,14 @@ MOTIVO: Destacar a proxima bobina com amarelo piscando ate o primeiro pulso real
     return String(m) + " min";
   }
 
+  function fmtDurationHHMM(v){
+    const x = Number(v);
+    const totalMin = Number.isFinite(x) ? Math.max(0, Math.floor(x)) : 0;
+    const hh = String(Math.floor(totalMin / 60)).padStart(2, "0");
+    const mm = String(totalMin % 60).padStart(2, "0");
+    return hh + ":" + mm;
+  }
+
   function pickFirstNumber(obj, keys){
     for(const k of keys){
       if(obj && Object.prototype.hasOwnProperty.call(obj, k)){
@@ -2042,7 +2050,8 @@ function safeText(v){
 
     const bobinaState = getBobinaState(opCtx, idx);
     const opEndedState = isOpEncerrada(opCtx && opCtx.status);
-    const canEditBobina = !!(opts.isEdit && !opEndedState && bobinaState.editable);
+    const isHiddenOperationalState = !!(bobinaState.futura || bobinaState.pendente);
+    const canEditBobina = !!(opts.isEdit && !opEndedState && bobinaState.editable && !isHiddenOperationalState);
 
     if(bobinaState.passada || opEndedState){
       card.classList.add("bobina-card-travada");
@@ -2164,6 +2173,19 @@ function safeText(v){
       }
     }
 
+    const isOperationalLive = !!(bobinaState.atual && !opEndedState && !isHiddenOperationalState);
+
+    if(isOperationalLive){
+      try{
+        const dsLive = new Date(String(startedRaw || ""));
+        if(!isNaN(dsLive.getTime())){
+          tempoMin = Math.max(0, Math.floor((Date.now() - dsLive.getTime()) / 60000));
+        }
+      }catch(e){
+        // ignore
+      }
+    }
+
     // Forcar inicio zerado/vazio no modal para OP ativa do dia (evita valores fantasmas antes do primeiro update)
     // Nao depender de ended_at da bobina, porque o backend pode popular ended_at prematuramente.
     if(forceZeroLive && bobinaAberta){
@@ -2184,10 +2206,20 @@ function safeText(v){
       endedStr = "";
     }
 
+    if(isHiddenOperationalState){
+      derivedPcs = 0;
+      derivedMetroConsumido = 0;
+      tempoMin = 0;
+    }
+
+    const displayStartedStr = isHiddenOperationalState ? "-" : startedStr;
+    const displayEndedStr = isHiddenOperationalState ? "-" : (endedStr || "-");
+    const displayTempo = isHiddenOperationalState ? "00:00" : fmtDurationHHMM(tempoMin);
+
     const fLen = fieldRO("Comprimento da bobina (m)", Math.floor(comprimentoM), "col-3");
     const fPcs = fieldRO("Total pcs (bobina)", derivedPcs, "col-3");
     const fMetro = fieldRO("Metro linear consumido (m)", fmtMeters2Floor(derivedMetroConsumido), "col-3");
-    const fTempo = fieldRO("Tempo de consumo (min)", tempoMin, "col-3");
+    const fTempo = fieldRO("Tempo de consumo (hh:mm)", displayTempo, "col-3");
 
     // marca campos para leitura/validacao
     try{
@@ -2200,8 +2232,8 @@ function safeText(v){
     grid.appendChild(fMetro);
     grid.appendChild(fTempo);
 
-    grid.appendChild(fieldRO("Hora inicial", startedStr, "col-6"));
-    grid.appendChild(fieldRO("Hora final", endedStr, "col-6"));
+    grid.appendChild(fieldRO("Hora inicial", displayStartedStr, "col-6"));
+    grid.appendChild(fieldRO("Hora final", displayEndedStr, "col-6"));
 
     // Editable (yellow)
     const fCost = fieldEdit("Qtd. cost. elas.", vCost, "col-3", "qtd_cost_elas");
@@ -2209,7 +2241,8 @@ function safeText(v){
     const fSaco = fieldEdit("Retrabalho", vSaco, "col-3", "qtd_saco_caixa");
 
     // Computed (read-only)
-    const fMat = fieldRO("Qtd. mat bom", calcMatBom(derivedPcs, vCost, vRef, vSaco), "col-3");
+    const initialMatBom = isHiddenOperationalState ? 0 : calcMatBom(derivedPcs, vCost, vRef, vSaco);
+    const fMat = fieldRO("Qtd. mat bom", initialMatBom, "col-3");
     const matInput = fMat.querySelector("input");
     if(matInput){
       matInput.setAttribute("data-field", "qtd_mat_bom");
@@ -2224,7 +2257,7 @@ function safeText(v){
       const cost = num0(fCost.input.value);
       const ref = num0(fRef.input.value);
       const saco = num0(fSaco.input.value);
-      const mat = calcMatBom(derivedPcs, cost, ref, saco);
+      const mat = isHiddenOperationalState ? 0 : calcMatBom(derivedPcs, cost, ref, saco);
       if(matInput) matInput.value = String(mat);
     }
 
