@@ -1,7 +1,7 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-12 10:35:00 -03:00
-MOTIVO: Enviar lancamentos manuais da bobina atual tambem no POST de encerramento da OP.
+LAST_RECODE: 2026-03-12 11:10:00 -03:00
+MOTIVO: Destacar a proxima bobina com amarelo piscando ate receber o primeiro pulso real.
 -->
 
 
@@ -544,15 +544,36 @@ MOTIVO: Enviar lancamentos manuais da bobina atual tambem no POST de encerrament
     border-color:#86efac;
   }
 
+  .bobina-card.bobina-card-pendente{
+    background:#fef3c7;
+    border-color:#f59e0b;
+    animation:bobina-pulse 1s ease-in-out infinite;
+  }
+
   .bobina-card.bobina-card-travada{
     background:#f8fafc;
     border-color:#cbd5e1;
   }
 
   .bobina-card.bobina-card-futura{
-    background:#f1f5f9;
-    border-color:#cbd5e1;
-    opacity:0.82;
+    background:#dbeafe;
+    border-color:#93c5fd;
+    opacity:0.92;
+  }
+
+  @keyframes bobina-pulse{
+    0%{
+      box-shadow:0 0 0 0 rgba(245,158,11,0.35);
+      filter:brightness(1);
+    }
+    50%{
+      box-shadow:0 0 0 6px rgba(245,158,11,0.08);
+      filter:brightness(1.06);
+    }
+    100%{
+      box-shadow:0 0 0 0 rgba(245,158,11,0.00);
+      filter:brightness(1);
+    }
   }
 
   .bobina-card input[readonly],
@@ -1652,6 +1673,53 @@ function safeText(v){
     };
   }
 
+  function hasBobinaRealStart(op, idx){
+    if(!op || idx < 0) return false;
+
+    const ev = pickOpBobinaEvento(op, idx);
+    const itens = pickOpBobinasItens(op);
+    const item = (Array.isArray(itens) && itens[idx] && typeof itens[idx] === "object") ? itens[idx] : null;
+
+    const startedAt = safeText(
+      (item && (item.started_at ?? item.inicio ?? item.hs_inicial ?? item.start_at)) ??
+      (ev && (ev.started_at ?? ev.inicio ?? ev.hs_inicial ?? ev.start_at)) ??
+      ""
+    ).trim();
+
+    const startAbs = Math.floor(num0(
+      (item && (item.start_abs_pcs ?? item.start_abs ?? item.baseline_pcs ?? item.esp_inicio)) ??
+      (ev && (ev.start_abs_pcs ?? ev.start_abs ?? ev.baseline_pcs ?? ev.baseline ?? ev.esp_inicio)) ??
+      0
+    ));
+
+    const pcsTotal = Math.floor(num0(
+      (item && (item.pcs_total ?? item.total_pcs)) ??
+      (ev && (ev.pcs_total ?? ev.total_pcs)) ??
+      0
+    ));
+
+    const endAbs = Math.floor(num0(
+      (item && (item.end_abs_pcs ?? item.end_abs ?? item.esp_final ?? item.esp_last)) ??
+      (ev && (ev.end_abs_pcs ?? ev.end_abs ?? ev.esp_end ?? ev.end_abs_count ?? ev.esp_final)) ??
+      0
+    ));
+
+    if(pcsTotal > 0) return true;
+    if(startAbs > 0) return true;
+    if(endAbs > startAbs && endAbs > 0) return true;
+    if(startedAt) return true;
+
+    return false;
+  }
+
+  function isBobinaWaitingFirstPulse(op, idx){
+    if(!op) return false;
+    const bobinaState = getBobinaState(op, idx);
+    if(!bobinaState.atual) return false;
+    if(isOpEncerrada(op && op.status)) return false;
+    return !hasBobinaRealStart(op, idx);
+  }
+
   function showBobinasM(show){
 
     if(!bobinasMWrap) return;
@@ -1930,7 +1998,11 @@ function safeText(v){
     const opEndedState = isOpEncerrada(opCtx && opCtx.status);
     const canEditBobina = !!(opts.isEdit && !opEndedState && bobinaState.editable);
 
-    if(bobinaState.atual && !opEndedState){
+    const aguardandoPrimeiroPulso = isBobinaWaitingFirstPulse(opCtx, idx);
+
+    if(aguardandoPrimeiroPulso){
+      card.classList.add("bobina-card-pendente");
+    }else if(bobinaState.atual && !opEndedState){
       card.classList.add("bobina-card-ativa");
     }else if(bobinaState.passada || opEndedState){
       card.classList.add("bobina-card-travada");
@@ -1947,6 +2019,8 @@ function safeText(v){
     let bobinaStatusTxt = "Travada";
     if(opEndedState){
       bobinaStatusTxt = "Travada";
+    }else if(aguardandoPrimeiroPulso){
+      bobinaStatusTxt = "Aguardando primeiro pulso";
     }else if(bobinaState.atual){
       bobinaStatusTxt = "Atual";
     }else if(bobinaState.passada){
