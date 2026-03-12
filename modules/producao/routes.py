@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-12 15:25:00 (America/Bahia)
-# MOTIVO: Fazer o tempo de consumo da bobina contar somente a janela planejada da maquina, ignorando NP.
+# LAST_RECODE: 2026-03-12 16:40:00 (America/Bahia)
+# MOTIVO: Fazer o tempo de consumo da bobina ignorar horas fora do planejamento (meta=0 / NP).
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1299,131 +1299,96 @@ def _minutes_between_iso(start_iso: str, end_iso: str) -> int:
         return 0
 
 
-def _load_machine_config_json_for_tempo(machine_id: str) -> dict:
-    """Carrega o config_json da maquina para reaproveitar a mesma regra de planejamento do detalhe do dia.
+def _get_table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    try:
+        cur = conn.execute(f"PRAGMA table_info({table_name})")
+        return {str(r[1]) for r in (cur.fetchall() or []) if len(r) > 1}
+    except Exception:
+        return set()
 
-    Comentario importante desta mudanca:
-    - Antes o tempo da bobina era apenas fim - inicio.
-    - Agora o backend passa a contar somente a janela planejada da maquina.
-    - Horas NP (fora do planejamento) ficam fora do tempo de consumo.
+
+def _resolve_producao_horaria_meta_cols(conn: sqlite3.Connection) -> tuple[str | None, str | None]:
+    """Resolve nomes de colunas do schema real de producao_horaria.
+
+    Precisamos disso para reaproveitar a regra oficial do detalhe do dia:
+    - hora com meta > 0 conta no tempo da bobina
+    - hora com meta = 0 (NP / fora do planejamento) nao conta
     """
-    mid_raw = _as_str(machine_id)
-    mid_norm = _normalize_machine_id(mid_raw)
-    candidates = []
-    for mid in (mid_raw, mid_norm):
-        mid = _as_str(mid)
-        if mid and mid not in candidates:
-            candidates.append(mid)
+    cols = _get_table_columns(conn, "producao_horaria")
+    if not cols:
+        return None, None
 
-    if not candidates:
-        return {}
-
-    conn = None
-    try:
-        conn = _get_conn()
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        for mid in candidates:
-            try:
-                row = cur.execute(
-                    "SELECT config_json FROM machine_config WHERE machine_id = ? ORDER BY id DESC LIMIT 1",
-                    (mid,),
-                ).fetchone()
-            except Exception:
-                row = None
-            if not row:
-                continue
-            raw = row[0] if not isinstance(row, sqlite3.Row) else row["config_json"]
-            if not raw:
-                continue
-            try:
-                cfg = json.loads(raw)
-            except Exception:
-                cfg = {}
-            if isinstance(cfg, dict) and cfg:
-                return cfg
-    except Exception:
-        return {}
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
-    return {}
-
-
-def _parse_hhmm_to_min_local(hhmm: str) -> int | None:
-    s = _as_str(hhmm)
-    if not s or ":" not in s:
-        return None
-    try:
-        hh = int(s.split(":")[0])
-        mm = int(s.split(":")[1])
-    except Exception:
-        return None
-    if hh < 0 or hh > 23 or mm < 0 or mm > 59:
-        return None
-    return (hh * 60) + mm
-
-
-def _shift_segments_for_anchor_day(anchor_day, shift: dict) -> list[tuple[datetime, datetime]]:
-    """Retorna segmentos planejados (ja descontando breaks) para um shift ancorado em anchor_day."""
-    if not isinstance(shift, dict):
-        return []
-
-    s_min = _parse_hhmm_to_min_local(shift.get("start") or "")
-    e_min = _parse_hhmm_to_min_local(shift.get("end") or "")
-    if s_min is None or e_min is None or s_min == e_min:
-        return []
-
-    tz = _get_tz()
-    start_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=s_min)
-    end_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=e_min)
-    if e_min <= s_min:
-        end_dt += timedelta(days=1)
-
-    intervals = [(start_dt, end_dt)]
-
-    for br in (shift.get("breaks") or []):
-        if not isinstance(br, dict):
-            continue
-        bs_min = _parse_hhmm_to_min_local(br.get("start") or "")
-        be_min = _parse_hhmm_to_min_local(br.get("end") or "")
-        if bs_min is None or be_min is None or bs_min == be_min:
-            continue
-
-        bs_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=bs_min)
-        be_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=be_min)
-        if be_min <= bs_min:
-            be_dt += timedelta(days=1)
-        if bs_dt < start_dt and end_dt > start_dt:
-            bs_dt += timedelta(days=1)
-            be_dt += timedelta(days=1)
-
-        new_intervals = []
-        for cur_s, cur_e in intervals:
-            if be_dt <= cur_s or bs_dt >= cur_e:
-                new_intervals.append((cur_s, cur_e))
-                continue
-            if bs_dt > cur_s:
-                new_intervals.append((cur_s, bs_dt))
-            if be_dt < cur_e:
-                new_intervals.append((be_dt, cur_e))
-        intervals = new_intervals
-        if not intervals:
+    hour_col = None
+    for cand in ("hora_idx", "hour", "hora", "slot_idx"):
+        if cand in cols:
+            hour_col = cand
             break
 
-    return [(a, b) for a, b in intervals if b > a]
+    meta_col = None
+    for cand in ("meta", "meta_hora", "meta_pcs", "meta_planejada"):
+        if cand in cols:
+            meta_col = cand
+            break
+
+    return hour_col, meta_col
 
 
-def _minutes_between_iso_planned(machine_id: str, start_iso: str, end_iso: str) -> int:
-    """Conta somente minutos dentro da janela planejada da maquina.
+def _get_meta_map_for_day(conn: sqlite3.Connection, machine_id: str, dia_iso: str) -> dict[int, int]:
+    """Retorna mapa {hora: meta} do dia para a maquina.
 
-    Regra desta mudanca:
-    - usa a configuracao da maquina (active_days + shifts + breaks)
-    - ignora completamente janelas NP / fora do planejamento
-    - se nao houver configuracao valida, cai no comportamento antigo (fim - inicio)
+    Regra de negocio:
+    - se meta da hora for 0, tratamos como NP / fora do planejamento
+    - se meta for > 0, a janela daquela hora conta no tempo da bobina
+    """
+    out: dict[int, int] = {}
+    mid_raw = (machine_id or "").strip()
+    mid_norm = _normalize_machine_id(mid_raw)
+    if not mid_raw and not mid_norm:
+        return out
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='producao_horaria' LIMIT 1")
+        if cur.fetchone() is None:
+            return out
+
+        hour_col, meta_col = _resolve_producao_horaria_meta_cols(conn)
+        if not hour_col or not meta_col:
+            return out
+
+        sql = f"""
+            SELECT {hour_col} AS hora_idx, MAX(COALESCE({meta_col}, 0)) AS meta_val
+            FROM producao_horaria
+            WHERE (
+                    machine_id = ?
+                 OR machine_id = ?
+                 OR (instr(machine_id, '::') > 0 AND substr(machine_id, instr(machine_id, '::') + 2) = ?)
+            )
+              AND data_ref = ?
+            GROUP BY {hour_col}
+        """
+        rows = cur.execute(sql, (mid_raw, mid_norm, mid_norm, dia_iso)).fetchall() or []
+        for r in rows:
+            try:
+                hh = int(r[0] or 0)
+                mv = int(r[1] or 0)
+            except Exception:
+                continue
+            if 0 <= hh <= 23:
+                out[hh] = mv
+    except Exception:
+        return {}
+
+    return out
+
+
+def _minutes_between_iso_planned_only(conn: sqlite3.Connection, machine_id: str, start_iso: str, end_iso: str) -> int:
+    """Conta somente minutos dentro de horas planejadas (meta > 0).
+
+    Esta e a mudanca necessaria:
+    - antes: tempo da bobina = fim - inicio corrido
+    - agora: tempo da bobina = soma somente das intersecoes com horas cuja meta > 0
+    - efeito pratico: horas NP / fora do planejamento (meta=0) nao contam
     """
     a = _safe_parse_iso(start_iso)
     b = _safe_parse_iso(end_iso)
@@ -1446,45 +1411,28 @@ def _minutes_between_iso_planned(machine_id: str, start_iso: str, end_iso: str) 
     if b <= a:
         return 0
 
-    cfg = _load_machine_config_json_for_tempo(machine_id)
-    cv2 = cfg.get("config_v2") if isinstance(cfg.get("config_v2"), dict) else None
-    if cv2 is None and isinstance(cfg.get("shifts"), list):
-        cv2 = cfg
+    total_sec = 0
+    meta_cache: dict[str, dict[int, int]] = {}
 
-    shifts = cv2.get("shifts") if isinstance(cv2, dict) else None
-    if not isinstance(shifts, list) or not shifts:
-        return _minutes_between_iso(start_iso, end_iso)
+    cur = a
+    while cur < b:
+        day_iso = cur.date().isoformat()
+        if day_iso not in meta_cache:
+            meta_cache[day_iso] = _get_meta_map_for_day(conn, machine_id, day_iso)
 
-    active_days_raw = cv2.get("active_days") if isinstance(cv2, dict) else None
-    active_days = set()
-    if isinstance(active_days_raw, list):
-        for x in active_days_raw:
+        next_hour = cur.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        seg_end = next_hour if next_hour < b else b
+        hh = int(cur.hour)
+
+        if int(meta_cache[day_iso].get(hh, 0) or 0) > 0:
             try:
-                active_days.add(int(x))
+                total_sec += max(0, int((seg_end - cur).total_seconds()))
             except Exception:
-                continue
+                pass
 
-    total_seconds = 0
-    day_cursor = (a - timedelta(days=1)).date()
-    day_last = b.date()
+        cur = seg_end
 
-    while day_cursor <= day_last:
-        if active_days and int(day_cursor.isoweekday()) not in active_days:
-            day_cursor += timedelta(days=1)
-            continue
-
-        for shift in shifts:
-            for seg_start, seg_end in _shift_segments_for_anchor_day(day_cursor, shift):
-                ov_start = max(a, seg_start)
-                ov_end = min(b, seg_end)
-                if ov_end > ov_start:
-                    total_seconds += int((ov_end - ov_start).total_seconds())
-
-        day_cursor += timedelta(days=1)
-
-    if total_seconds <= 0:
-        return 0
-    return int(total_seconds // 60)
+    return max(0, int(total_sec // 60))
 
 
 def _iso_to_dt_safe(s: str):
@@ -2197,7 +2145,7 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
         if eventos:
             # Preferir eventos (troca de bobina por timestamp/baseline)
             # pcs_total = end_abs_pcs - start_abs_pcs
-            # tempo_consumo_min = somente janela planejada da maquina (NP nao entra)
+            # tempo_consumo_min = diff(started_at, ended_at)
             if status := (r[10] or ""):
                 pass
             # Se OP esta ativa, usamos esp atual como "fim" do ultimo evento em aberto.
@@ -2212,6 +2160,12 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                 except Exception:
                     esp_snapshot_abs = None
                     esp_snapshot_ts = None
+
+            conn_calc = None
+            try:
+                conn_calc = _get_conn()
+            except Exception:
+                conn_calc = None
 
             for ev in eventos:
                 seq = int(ev.get("seq", 0) or 0)
@@ -2239,10 +2193,7 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                     pcs_total = 0
 
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
-                                # Mudanca necessaria: nao contar tempo corrido bruto.
-                # Reaproveitamos a mesma regra de planejamento usada pelo detalhe do dia:
-                # tudo que for NP / fora do horario planejado fica fora do tempo da bobina.
-                tempo_consumo_min = _minutes_between_iso_planned(r[1] or "", ev_start, ev_end) if (ev_start and ev_end) else 0
+                tempo_consumo_min = _minutes_between_iso_planned_only(conn_calc, r[1] or "", ev_start, ev_end) if (ev_start and ev_end) else 0
 
                 row_f = fechamento_map.get(seq, {})
                 qtd_cost_elas = int(row_f.get("qtd_cost_elas", 0) or 0)
@@ -2268,6 +2219,12 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                         "qtd_mat_bom": int(qtd_mat_bom or 0),
                     }
                 )
+
+            try:
+                if conn_calc:
+                    conn_calc.close()
+            except Exception:
+                pass
 
         elif bobinas_m:
             # Fallback (antigo): alocacao por capacidade (deterministica)
@@ -3413,6 +3370,16 @@ def op_get():
         except Exception:
             op_metros_live = 0.0
 
+    # Helper de calculo do tempo da bobina no modal.
+    # Mudanca necessaria:
+    # - ignorar horas fora do planejamento (meta=0 / NP)
+    # - usar a mesma regra do detalhe do dia
+    conn_tempo_bobina = None
+    try:
+        conn_tempo_bobina = _get_conn()
+    except Exception:
+        conn_tempo_bobina = None
+
     # Se nao houver fechamento em ordens_producao_bobinas, monta bobinas_detail via eventos (com started_at/ended_at)
     # Regra de seguranca: somente UMA bobina pode estar "aberta" (ended_at vazio) ao mesmo tempo.
     # Se por qualquer motivo existir mais de uma aberta, consideramos como ativa apenas a de maior seq.
@@ -3453,11 +3420,18 @@ def op_get():
                 metro_consumido = round(float(pcs_total) * float(op_conv or 0.0), 3)
             except Exception:
                 metro_consumido = 0.0
-            tempo_consumo_min = _minutes_between_iso_planned(
-                machine_id,
-                _as_str(ev.get("started_at") or ""),
-                _as_str(ev.get("ended_at") or (_now_iso() if (status == "ATIVA" and active_seq is not None and int(seq) == int(active_seq)) else "")),
-            )
+            tempo_consumo_min = 0
+            try:
+                if conn_tempo_bobina:
+                    tempo_consumo_min = _minutes_between_iso_planned_only(
+                        conn_tempo_bobina,
+                        machine_id,
+                        _as_str(ev.get("started_at") or ""),
+                        _as_str(ev.get("ended_at") or "") if _as_str(ev.get("ended_at") or "") else _now_iso(),
+                    )
+            except Exception:
+                tempo_consumo_min = 0
+
             bobinas_detail.append(
                 {
                     "idx": int(seq) + 1,
@@ -3525,7 +3499,6 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_live) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
-                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, _now_iso()) or 0)
             else:
                 pcs_total_fechado = max(0, int(end_abs_ev or 0) - int(start_abs_ev or 0))
                 it["pcs_total"] = int(pcs_total_fechado or 0)
@@ -3533,7 +3506,15 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_fechado) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
-                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, ended_at_ev) or 0)
+
+            tempo_end_iso = ended_at_ev if ended_at_ev else (_now_iso() if bobina_aberta else started_at_ev)
+            try:
+                if conn_tempo_bobina:
+                    it["tempo_consumo_min"] = int(_minutes_between_iso_planned_only(conn_tempo_bobina, machine_id, started_at_ev, tempo_end_iso) or 0)
+                else:
+                    it["tempo_consumo_min"] = 0
+            except Exception:
+                it["tempo_consumo_min"] = 0
 
             qtd_mat_bom = int(int(it.get("pcs_total") or 0) - (qtd_cost_elas + refugo + qtd_saco_caixa))
             if qtd_mat_bom < 0:
@@ -3639,8 +3620,6 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_live) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
-                fim_tempo = _now_iso() if status == "ATIVA" else ended_at_ev
-                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, fim_tempo) or 0)
             else:
                 pcs_total_fechado = max(0, int(end_abs_ev or 0) - int(start_abs_ev or 0))
                 it["pcs_total"] = int(pcs_total_fechado or 0)
@@ -3648,12 +3627,26 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_fechado) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
-                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, ended_at_ev) or 0)
+
+            tempo_end_iso = ended_at_ev if ended_at_ev else (_now_iso() if bobina_aberta else started_at_ev)
+            try:
+                if conn_tempo_bobina:
+                    it["tempo_consumo_min"] = int(_minutes_between_iso_planned_only(conn_tempo_bobina, machine_id, started_at_ev, tempo_end_iso) or 0)
+                else:
+                    it["tempo_consumo_min"] = 0
+            except Exception:
+                it["tempo_consumo_min"] = 0
 
             qtd_mat_bom = int(int(it.get("pcs_total") or 0) - (qtd_cost_elas + refugo + qtd_saco_caixa))
             if qtd_mat_bom < 0:
                 qtd_mat_bom = 0
             it["qtd_mat_bom"] = int(qtd_mat_bom or 0)
+    try:
+        if conn_tempo_bobina:
+            conn_tempo_bobina.close()
+    except Exception:
+        pass
+
     return jsonify(
         {
             "op_id": int(r[0] or 0),
