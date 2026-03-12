@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-12 10:20:00 (America/Bahia)
-# MOTIVO: Salvar a ultima bobina no encerramento da OP com pcs_total, end_abs_pcs e ended_at.
+# LAST_RECODE: 2026-03-12 15:25:00 (America/Bahia)
+# MOTIVO: Fazer o tempo de consumo da bobina contar somente a janela planejada da maquina, ignorando NP.
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -1299,6 +1299,194 @@ def _minutes_between_iso(start_iso: str, end_iso: str) -> int:
         return 0
 
 
+def _load_machine_config_json_for_tempo(machine_id: str) -> dict:
+    """Carrega o config_json da maquina para reaproveitar a mesma regra de planejamento do detalhe do dia.
+
+    Comentario importante desta mudanca:
+    - Antes o tempo da bobina era apenas fim - inicio.
+    - Agora o backend passa a contar somente a janela planejada da maquina.
+    - Horas NP (fora do planejamento) ficam fora do tempo de consumo.
+    """
+    mid_raw = _as_str(machine_id)
+    mid_norm = _normalize_machine_id(mid_raw)
+    candidates = []
+    for mid in (mid_raw, mid_norm):
+        mid = _as_str(mid)
+        if mid and mid not in candidates:
+            candidates.append(mid)
+
+    if not candidates:
+        return {}
+
+    conn = None
+    try:
+        conn = _get_conn()
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        for mid in candidates:
+            try:
+                row = cur.execute(
+                    "SELECT config_json FROM machine_config WHERE machine_id = ? ORDER BY id DESC LIMIT 1",
+                    (mid,),
+                ).fetchone()
+            except Exception:
+                row = None
+            if not row:
+                continue
+            raw = row[0] if not isinstance(row, sqlite3.Row) else row["config_json"]
+            if not raw:
+                continue
+            try:
+                cfg = json.loads(raw)
+            except Exception:
+                cfg = {}
+            if isinstance(cfg, dict) and cfg:
+                return cfg
+    except Exception:
+        return {}
+    finally:
+        try:
+            if conn:
+                conn.close()
+        except Exception:
+            pass
+    return {}
+
+
+def _parse_hhmm_to_min_local(hhmm: str) -> int | None:
+    s = _as_str(hhmm)
+    if not s or ":" not in s:
+        return None
+    try:
+        hh = int(s.split(":")[0])
+        mm = int(s.split(":")[1])
+    except Exception:
+        return None
+    if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+        return None
+    return (hh * 60) + mm
+
+
+def _shift_segments_for_anchor_day(anchor_day, shift: dict) -> list[tuple[datetime, datetime]]:
+    """Retorna segmentos planejados (ja descontando breaks) para um shift ancorado em anchor_day."""
+    if not isinstance(shift, dict):
+        return []
+
+    s_min = _parse_hhmm_to_min_local(shift.get("start") or "")
+    e_min = _parse_hhmm_to_min_local(shift.get("end") or "")
+    if s_min is None or e_min is None or s_min == e_min:
+        return []
+
+    tz = _get_tz()
+    start_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=s_min)
+    end_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=e_min)
+    if e_min <= s_min:
+        end_dt += timedelta(days=1)
+
+    intervals = [(start_dt, end_dt)]
+
+    for br in (shift.get("breaks") or []):
+        if not isinstance(br, dict):
+            continue
+        bs_min = _parse_hhmm_to_min_local(br.get("start") or "")
+        be_min = _parse_hhmm_to_min_local(br.get("end") or "")
+        if bs_min is None or be_min is None or bs_min == be_min:
+            continue
+
+        bs_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=bs_min)
+        be_dt = datetime.combine(anchor_day, datetime.min.time(), tzinfo=tz) + timedelta(minutes=be_min)
+        if be_min <= bs_min:
+            be_dt += timedelta(days=1)
+        if bs_dt < start_dt and end_dt > start_dt:
+            bs_dt += timedelta(days=1)
+            be_dt += timedelta(days=1)
+
+        new_intervals = []
+        for cur_s, cur_e in intervals:
+            if be_dt <= cur_s or bs_dt >= cur_e:
+                new_intervals.append((cur_s, cur_e))
+                continue
+            if bs_dt > cur_s:
+                new_intervals.append((cur_s, bs_dt))
+            if be_dt < cur_e:
+                new_intervals.append((be_dt, cur_e))
+        intervals = new_intervals
+        if not intervals:
+            break
+
+    return [(a, b) for a, b in intervals if b > a]
+
+
+def _minutes_between_iso_planned(machine_id: str, start_iso: str, end_iso: str) -> int:
+    """Conta somente minutos dentro da janela planejada da maquina.
+
+    Regra desta mudanca:
+    - usa a configuracao da maquina (active_days + shifts + breaks)
+    - ignora completamente janelas NP / fora do planejamento
+    - se nao houver configuracao valida, cai no comportamento antigo (fim - inicio)
+    """
+    a = _safe_parse_iso(start_iso)
+    b = _safe_parse_iso(end_iso)
+    if not a or not b:
+        return 0
+
+    try:
+        tz = _get_tz()
+        if a.tzinfo is None:
+            a = a.replace(tzinfo=tz)
+        else:
+            a = a.astimezone(tz)
+        if b.tzinfo is None:
+            b = b.replace(tzinfo=tz)
+        else:
+            b = b.astimezone(tz)
+    except Exception:
+        pass
+
+    if b <= a:
+        return 0
+
+    cfg = _load_machine_config_json_for_tempo(machine_id)
+    cv2 = cfg.get("config_v2") if isinstance(cfg.get("config_v2"), dict) else None
+    if cv2 is None and isinstance(cfg.get("shifts"), list):
+        cv2 = cfg
+
+    shifts = cv2.get("shifts") if isinstance(cv2, dict) else None
+    if not isinstance(shifts, list) or not shifts:
+        return _minutes_between_iso(start_iso, end_iso)
+
+    active_days_raw = cv2.get("active_days") if isinstance(cv2, dict) else None
+    active_days = set()
+    if isinstance(active_days_raw, list):
+        for x in active_days_raw:
+            try:
+                active_days.add(int(x))
+            except Exception:
+                continue
+
+    total_seconds = 0
+    day_cursor = (a - timedelta(days=1)).date()
+    day_last = b.date()
+
+    while day_cursor <= day_last:
+        if active_days and int(day_cursor.isoweekday()) not in active_days:
+            day_cursor += timedelta(days=1)
+            continue
+
+        for shift in shifts:
+            for seg_start, seg_end in _shift_segments_for_anchor_day(day_cursor, shift):
+                ov_start = max(a, seg_start)
+                ov_end = min(b, seg_end)
+                if ov_end > ov_start:
+                    total_seconds += int((ov_end - ov_start).total_seconds())
+
+        day_cursor += timedelta(days=1)
+
+    if total_seconds <= 0:
+        return 0
+    return int(total_seconds // 60)
+
+
 def _iso_to_dt_safe(s: str):
     try:
         if not s:
@@ -2009,7 +2197,7 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
         if eventos:
             # Preferir eventos (troca de bobina por timestamp/baseline)
             # pcs_total = end_abs_pcs - start_abs_pcs
-            # tempo_consumo_min = diff(started_at, ended_at)
+            # tempo_consumo_min = somente janela planejada da maquina (NP nao entra)
             if status := (r[10] or ""):
                 pass
             # Se OP esta ativa, usamos esp atual como "fim" do ultimo evento em aberto.
@@ -2051,7 +2239,10 @@ def _fetch_ops_for_range(machine_id: str | None, day_min: str, day_max: str):
                     pcs_total = 0
 
                 metro_consumido = float(pcs_total) * conv if conv > 0 else 0.0
-                tempo_consumo_min = _minutes_between_iso(ev_start, ev_end) if (ev_start and ev_end) else 0
+                                # Mudanca necessaria: nao contar tempo corrido bruto.
+                # Reaproveitamos a mesma regra de planejamento usada pelo detalhe do dia:
+                # tudo que for NP / fora do horario planejado fica fora do tempo da bobina.
+                tempo_consumo_min = _minutes_between_iso_planned(r[1] or "", ev_start, ev_end) if (ev_start and ev_end) else 0
 
                 row_f = fechamento_map.get(seq, {})
                 qtd_cost_elas = int(row_f.get("qtd_cost_elas", 0) or 0)
@@ -3262,12 +3453,18 @@ def op_get():
                 metro_consumido = round(float(pcs_total) * float(op_conv or 0.0), 3)
             except Exception:
                 metro_consumido = 0.0
+            tempo_consumo_min = _minutes_between_iso_planned(
+                machine_id,
+                _as_str(ev.get("started_at") or ""),
+                _as_str(ev.get("ended_at") or (_now_iso() if (status == "ATIVA" and active_seq is not None and int(seq) == int(active_seq)) else "")),
+            )
             bobinas_detail.append(
                 {
                     "idx": int(seq) + 1,
                     "comprimento_m": int(ev.get("comprimento_m") or 0),
                     "pcs_total": int(pcs_total or 0),
                     "metro_consumido": float(metro_consumido or 0.0),
+                    "tempo_consumo_min": int(tempo_consumo_min or 0),
                     "started_at": _as_str(ev.get("started_at") or ""),
                     "ended_at": _as_str(ev.get("ended_at") or ""),
                     "start_abs_pcs": int(start_abs or 0),
@@ -3328,6 +3525,7 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_live) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
+                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, _now_iso()) or 0)
             else:
                 pcs_total_fechado = max(0, int(end_abs_ev or 0) - int(start_abs_ev or 0))
                 it["pcs_total"] = int(pcs_total_fechado or 0)
@@ -3335,6 +3533,7 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_fechado) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
+                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, ended_at_ev) or 0)
 
             qtd_mat_bom = int(int(it.get("pcs_total") or 0) - (qtd_cost_elas + refugo + qtd_saco_caixa))
             if qtd_mat_bom < 0:
@@ -3371,6 +3570,7 @@ def op_get():
                         "comprimento_m": int(comprimento or 0),
                         "pcs_total": 0,
                         "metro_consumido": 0.0,
+                        "tempo_consumo_min": 0,
                         "started_at": "",
                         "ended_at": "",
                         "start_abs_pcs": 0,
@@ -3439,6 +3639,8 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_live) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
+                fim_tempo = _now_iso() if status == "ATIVA" else ended_at_ev
+                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, fim_tempo) or 0)
             else:
                 pcs_total_fechado = max(0, int(end_abs_ev or 0) - int(start_abs_ev or 0))
                 it["pcs_total"] = int(pcs_total_fechado or 0)
@@ -3446,6 +3648,7 @@ def op_get():
                     it["metro_consumido"] = round(float(pcs_total_fechado) * float(op_conv or 0.0), 3)
                 except Exception:
                     it["metro_consumido"] = 0.0
+                it["tempo_consumo_min"] = int(_minutes_between_iso_planned(machine_id, started_at_ev, ended_at_ev) or 0)
 
             qtd_mat_bom = int(int(it.get("pcs_total") or 0) - (qtd_cost_elas + refugo + qtd_saco_caixa))
             if qtd_mat_bom < 0:
