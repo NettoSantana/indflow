@@ -1,6 +1,6 @@
 # PATH: C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\routes.py
-# LAST_RECODE: 2026-03-09 14:55:00 (America/Bahia)
-# MOTIVO: Remover dependencia do botao Salvar no fechamento da bobina, transferindo validacao e gravacao para a troca de bobina.
+# LAST_RECODE: 2026-03-11 12:05:00 (America/Fortaleza)
+# MOTIVO: Fazer o Historico diario usar a mesma fonte do detalhe do dia (SUM(delta) em producao_evento).
 from flask import Blueprint, render_template, redirect, request, jsonify
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -442,29 +442,64 @@ def _fetch_producao_diaria_range(machine_id: str, days_desc: list[str]):
 
 def _sum_producao_horaria_pcs(conn, machine_id: str, dia_iso: str) -> int:
     """
-    Soma a producao (pcs) registrada na tabela producao_horaria para um dia.
-    Isso permite que o Historico reflita a contagem "ao vivo" (por hora),
-    sem depender do fechamento do dia.
+    Retorna a producao (pcs) do dia a partir da fonte unica de verdade: producao_evento.
+
+    Observacao:
+    - Mantemos o nome da funcao para reduzir o escopo do recode.
+    - O Historico passa a usar SUM(delta) em producao_evento na janela local do dia,
+      igual ao detalhe por hora.
+    - Se machine_id vier no formato scoped (cliente::maquina), tenta o scoped e,
+      se necessario, faz fallback para o sufixo da maquina.
     """
     try:
+        mid = str(machine_id or "").strip()
+        dia = str(dia_iso or "").strip()
+        if not mid or not dia:
+            return 0
+
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT COALESCE(SUM(COALESCE(produzido, 0)), 0)
-            FROM producao_horaria
-            WHERE machine_id = ? AND data_ref = ?
-            """,
-            (machine_id, dia_iso),
-        )
-        row = cur.fetchone()
-        return int(row[0] or 0) if row else 0
+        row = cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='producao_evento' LIMIT 1"
+        ).fetchone()
+        if not row:
+            return 0
+
+        d = datetime.fromisoformat(dia).date()
+        tz = _get_tz()
+        start_local = datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=tz)
+        end_local = start_local + timedelta(days=1)
+        start_ms = int(start_local.timestamp() * 1000)
+        end_ms = int(end_local.timestamp() * 1000)
+
+        mids = [mid]
+        if "::" in mid:
+            eff_mid = (mid.split("::", 1)[1] or "").strip()
+            if eff_mid and eff_mid not in mids:
+                mids.append(eff_mid)
+
+        sql = """
+            SELECT COALESCE(SUM(COALESCE(delta, 0)), 0)
+            FROM producao_evento
+            WHERE machine_id = ?
+              AND ts_ms >= ?
+              AND ts_ms < ?
+        """
+
+        for mid_try in mids:
+            row = cur.execute(sql, (mid_try, start_ms, end_ms)).fetchone()
+            total = int(row[0] or 0) if row else 0
+            if total > 0:
+                return total
+
+        return 0
     except Exception:
         return 0
 
 def _sync_producao_diaria_from_horaria_range(machine_id: str, days_desc: list[str]):
     """
-    Para cada dia em days_desc, faz UPSERT em producao_diaria usando a soma de producao_horaria.
-    Mantem a meta existente quando ja cadastrada (>0).
+    Para cada dia em days_desc, faz UPSERT em producao_diaria usando a fonte unica
+    do detalhe do dia: SUM(delta) em producao_evento. Mantem a meta existente quando
+    ja cadastrada (>0).
     """
     mid = (machine_id or "").strip()
     if not mid or not days_desc:
@@ -2106,8 +2141,8 @@ def api_historico():
             pass
 
 
-        # Sincronizar historico diario com a contagem "ao vivo" (producao_horaria).
-        # Assim, a tabela do Historico nao fica zerada enquanto a maquina esta produzindo.
+        # Sincronizar historico diario com a mesma fonte do detalhe do dia
+        # (SUM(delta) em producao_evento).
         try:
             _sync_producao_diaria_from_horaria_range(machine_id, days_desc)
         except Exception:
