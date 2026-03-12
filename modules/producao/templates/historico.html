@@ -1066,9 +1066,18 @@ MOTIVO: Destacar a proxima bobina com amarelo piscando ate o primeiro pulso real
     return Number.isFinite(v) ? v : null;
   }
 
-  function enrichOpWithLive(op){
+    function enrichOpWithLive(op){
     try{
       if(!op) return op;
+
+      // BLOQUEIO: nao aplicar live em OPs de dias anteriores
+      try{
+        const today = new Date().toISOString().slice(0,10);
+        const opDate = String(op.data || op.data_ref || "").slice(0,10);
+        if(opDate && opDate !== today){
+          return op;
+        }
+      }catch(_e){}
 
       const statusTxt = safeText(op.status).toUpperCase();
       const ativa = statusTxt.includes("ATIV");
@@ -1099,7 +1108,7 @@ MOTIVO: Destacar a proxima bobina com amarelo piscando ate o primeiro pulso real
         const now = nowInTzDate(IND_TZ);
         const nowMs = now.getTime();
 
-        // Atualiza apenas a primeira bobina "aberta" (a regra do backend hoje é 1 bobina ativa por OP)
+        // Atualiza apenas a primeira bobina "aberta" (a regra do backend hoje e 1 bobina ativa por OP)
         const it0 = Object.assign({}, itens[0]);
         it0.pcs_total = delta;
         it0.metro_consumido = round2(delta * conv);
@@ -1126,7 +1135,6 @@ MOTIVO: Destacar a proxima bobina com amarelo piscando ate o primeiro pulso real
       return op;
     }
   }
-
   function isoToBr(value){
     if(!value || typeof value !== "string") return "-";
     const s = value.trim();
