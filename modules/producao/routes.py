@@ -4004,4 +4004,4 @@ def op_salvar():
         "error": "Endpoint desativado. O fechamento da bobina agora acontece na troca de bobina.",
         "use": "/producao/op/troca-bobina",
     }), 410
- 
+  
