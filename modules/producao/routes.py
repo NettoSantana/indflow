@@ -177,7 +177,7 @@ def _get_safe_esp_abs_for_bobina_event(conn: sqlite3.Connection, machine_id: str
       (end_abs_pcs/start_abs_pcs do ultimo evento) ou o baseline_pcs da OP.
     """
     try:
-        esp_atual = _resolve_esp_atual_for_op_close(conn, machine_id, op_id, baseline_pcs, data)
+        esp_atual, _esp_ts = _get_current_esp_snapshot(conn, machine_id)
     except Exception:
         esp_atual = 0
 
@@ -2846,12 +2846,12 @@ def op_status():
         return jsonify({"active": False})
 
 
+    baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
+
     # Producao atual da OP = (esp_atual - baseline_pcs)
     with _get_conn() as conn:
-        esp_atual = _resolve_esp_atual_for_op_close(conn, machine_id, op_id, baseline_pcs, data)
+        esp_atual = _get_current_esp_abs(conn, machine_id)
 
-
-    baseline_pcs = int(((op.get("baseline") or {}).get("pcs")) or 0)
     op_pcs_live = max(0, int(esp_atual) - int(baseline_pcs))
     return jsonify(
         {
