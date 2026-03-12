@@ -1,7 +1,7 @@
 <!--
 C:\Users\vlula\OneDrive\Área de Trabalho\Projetos Backup\indflow\modules\producao\templates\historico.html
-LAST_RECODE: 2026-03-09 17:25:00 -03:00
-MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
+LAST_RECODE: 2026-03-12 10:35:00 -03:00
+MOTIVO: Enviar lancamentos manuais da bobina atual tambem no POST de encerramento da OP.
 -->
 
 
@@ -149,7 +149,7 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
     background:#ffffff;
   }
 
-  .op-row.op-row-ativa td{ background:#d9f0d9c4; }
+  .op-row.op-row-ativa td{ background:#d9f0e1; }
 
   .op-row.op-row-encerrada td{ background:#eeeeee; }
 
@@ -541,7 +541,7 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
 
   .bobina-card.bobina-card-ativa{
     background:#dcfce7;
-    border-color:#86ef8b;
+    border-color:#86efac;
   }
 
   .bobina-card.bobina-card-travada{
@@ -551,14 +551,14 @@ MOTIVO: Enviar lancamentos manuais da bobina atual no POST de troca de bobina.
 
   .bobina-card.bobina-card-futura{
     background:#f1f5f9;
-    border-color:#cbcbe1;
+    border-color:#cbd5e1;
     opacity:0.82;
   }
 
   .bobina-card input[readonly],
   .bobina-card input:disabled{
     cursor:not-allowed;
-  } 
+  }
 
   .bobina-card-futura .op-edit input{
     background:#e5e7eb;
@@ -3200,8 +3200,11 @@ if(modalBackdrop){
     }
   }
 
-  async function postOpAction(opId, action){
-    const payload = { op_id: Number(opId || 0), machine_id: machineId || "" };
+  async function postOpAction(opId, action, extraPayload){
+    const payload = Object.assign(
+      { op_id: Number(opId || 0), machine_id: machineId || "" },
+      (extraPayload || {})
+    );
 
     const urls = [];
     if(action === "ativar"){
@@ -3307,7 +3310,26 @@ if(modalBackdrop){
 
       try{
         modalToggle.disabled = true;
-        await postOpAction(opId, action);
+
+        let extraPayload = {};
+        if(ativa){
+          const bobinaAtualPayload = collectCurrentOpenBobinaManualPayload();
+          extraPayload = bobinaAtualPayload ? {
+            idx: bobinaAtualPayload.idx,
+            seq: bobinaAtualPayload.seq,
+            qtd_cost_elas: Math.floor(num0(bobinaAtualPayload.qtd_cost_elas)),
+            refugo: Math.floor(num0(bobinaAtualPayload.refugo)),
+            qtd_saco_caixa: Math.floor(num0(bobinaAtualPayload.qtd_saco_caixa)),
+            qtd_mat_bom: Math.floor(num0(bobinaAtualPayload.qtd_mat_bom)),
+            pcs_total: Math.floor(num0(bobinaAtualPayload.pcs_total)),
+            start_abs_pcs: Math.floor(num0(bobinaAtualPayload.start_abs_pcs)),
+            end_abs_pcs: Math.floor(num0(bobinaAtualPayload.end_abs_pcs)),
+            metro_consumido: round2(num0(bobinaAtualPayload.metro_consumido)),
+            bobina_atual: bobinaAtualPayload
+          } : {};
+        }
+
+        await postOpAction(opId, action, extraPayload);
         const op = await fetchOpGet(opId);
         if(op){
           openModal(op, "edit");
